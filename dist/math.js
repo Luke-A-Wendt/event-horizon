@@ -1,0 +1,309 @@
+/* Native MathML and inline SVG. No network, typesetting library, or compute service. */
+const v = (s) => `<mi>${s}</mi>`;
+const vec = (s) => `<mi mathvariant="bold">${s}</mi>`;
+const n = (s) => `<mn>${s}</mn>`;
+const o = (s) => `<mo>${s}</mo>`;
+const t = (s) => `<mtext>${s}</mtext>`;
+const r = (...s) => `<mrow>${s.join('')}</mrow>`;
+const sub = (a,b) => `<msub>${a}${b}</msub>`;
+const pow = (a,b) => `<msup>${a}${b}</msup>`;
+const frac = (a,b) => `<mfrac>${a}${b}</mfrac>`;
+const sqrt = (a) => `<msqrt><mrow>${a}</mrow></msqrt>`;
+const root = (a,index) => `<mroot><mrow>${a}</mrow>${n(index)}</mroot>`;
+const par = (a) => r('<mo stretchy="true">(</mo>',r(a),'<mo stretchy="true">)</mo>');
+const bracket = (a) => r('<mo stretchy="true">[</mo>',r(a),'<mo stretchy="true">]</mo>');
+const norm = (a) => r('<mo stretchy="true">∥</mo>',r(a),'<mo stretchy="true">∥</mo>');
+const fn = (name,arg) => r(`<mi mathvariant="normal">${name}</mi>`,o('&#x2061;'),par(arg));
+const trig2 = (name,arg) => r(pow(`<mi mathvariant="normal">${name}</mi>`,n(2)),o('&#x2061;'),par(arg));
+const rows = (...lines) => `<mtable columnalign="left" rowspacing="0.8em">${lines.map(line=>`<mtr><mtd>${line}</mtd></mtr>`).join('')}</mtable>`;
+const gap = '<mspace width="1.2em"/>';
+const eq = (s,label='') => `<div class="equation"${label ? ` aria-label="${label}"` : ''}><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">${s}</math></div>`;
+const M=v('M'), a=v('a'), R=v('r'), c=v('c'), G=v('G'), chi=v('χ'), theta=v('θ'), phi=v('φ'), Sigma=v('Σ'), Delta=v('Δ');
+const two=n(2), square=(x)=>pow(x,two), d=(x)=>r(v('d'),x), rg=sub(R,v('g')), rs=sub(R,v('s'));
+const link=(url,label)=>`<a href="${url}" target="_blank" rel="noopener noreferrer">${label} ↗</a>`;
+const section=(number,title,body,open=false)=>`<details class="math-section" id="${number === '03' ? 'math-spin' : number === '05' ? 'model-notes' : `math-section-${number}`}" data-section="${number === '03' ? 'math-spin' : number === '05' ? 'model-notes' : `math-section-${number}`}"${open?' open':''}><summary><span class="math-index">${number}</span><span>${title}</span><span class="math-chevron" aria-hidden="true">＋</span></summary><div class="math-section-body">${body}</div></details>`;
+
+// Each leader begins at the same analytic coordinate map used by its surface.
+// A dark under-stroke separates crossings of nested surfaces from the leader.
+function diagramLeader(point, control1, control2, end, color, key) {
+  const xy=([x,y])=>`${x.toFixed(3)} ${y.toFixed(3)}`;
+  const path=`M${xy(point)} C${xy(control1)}, ${xy(control2)}, ${xy(end)}`;
+  return `<g data-leader="${key}" fill="none" stroke-linecap="round"><path d="${path}" stroke="#020407" stroke-width="4"/><path d="${path}" stroke="${color}" stroke-width="1.15"/><circle cx="${point[0].toFixed(3)}" cy="${point[1].toFixed(3)}" r="2.6" fill="${color}" stroke="#020407" stroke-width="1"/></g>`;
+}
+function kerrDiagram(spin=.8) {
+  if(Number(spin)===0)return schwarzschildDiagram().replaceAll('schwarz-diagram','kerr-zero-diagram');
+  const ap=Math.max(0,Math.min(.998,Math.abs(spin))), rp=1+Math.sqrt(1-ap*ap), rm=1-Math.sqrt(1-ap*ap);
+  const sx=61,cx=164,cy=157;
+  const point=(radius,theta)=>[cx+sx*Math.sqrt(radius*radius+ap*ap)*Math.sin(theta),cy-sx*radius*Math.cos(theta)];
+  const ergoTheta=.85,ergoRadius=1+Math.sqrt(1-ap*ap*Math.cos(ergoTheta)**2);
+  const ergoPoint=point(ergoRadius,ergoTheta),outerPoint=point(rp,1.25),innerPoint=point(rm,Math.PI/2),ringPoint=[cx+ap*sx,cy];
+  const curve=(rad)=>Array.from({length:181},(_,i)=>{ const th=i*2*Math.PI/180; const rr=typeof rad==='function'?rad(th):rad; return `${i?'L':'M'}${(cx+sx*Math.sqrt(rr*rr+ap*ap)*Math.sin(th)).toFixed(2)},${(cy-sx*rr*Math.cos(th)).toFixed(2)}`; }).join(' ')+' Z';
+  return `<svg class="diagram" viewBox="0 0 640 330" role="img" aria-labelledby="kerr-diagram-title kerr-diagram-desc">
+  <title id="kerr-diagram-title">Kerr black hole horizons and ring singularity</title><desc id="kerr-diagram-desc">Meridional cross section in oblate spheroidal coordinates, for dimensionless spin ${ap.toFixed(2)}. The outer ergosurface meets the outer event horizon at the poles. The inner Cauchy horizon encloses the two intersections with the singular ring. A separate perspective inset shows the full ring.</desc>
+  <path d="M20 157H309 M164 15V302" stroke="#263441" stroke-dasharray="3 6" fill="none"/>
+  <text x="170" y="24" fill="#7a8d9e" font-size="12">spin axis z</text>
+  <path d="${curve(th=>1+Math.sqrt(1-ap*ap*Math.cos(th)**2))}" fill="#56bce71b" stroke="#64cdf5" stroke-width="1.7"/>
+  <path d="${curve(rp)}" fill="#03060be6" stroke="#eef6ff" stroke-width="1.7"/>
+  <path d="${curve(rm)}" fill="#6c94d518" stroke="#8899bb" stroke-width="1.6" stroke-dasharray="4 4"/>
+  <circle cx="${cx-ap*sx}" cy="${cy}" r="3.5" fill="#e4ba81"/><circle cx="${cx+ap*sx}" cy="${cy}" r="3.5" fill="#e4ba81"/>
+  <text x="164" y="306" fill="#8395a8" font-size="12" text-anchor="middle">Meridional slice · χ = ${ap.toFixed(2)}</text>
+  ${diagramLeader(ergoPoint,[ergoPoint[0]+30,ergoPoint[1]-8],[305,51],[341,51],'#64cdf5','ergosurface')}
+  <text x="350" y="49" fill="#8cddfa" font-size="13">Outer ergosurface</text><text x="350" y="67" fill="#8b9bac" font-size="11">Static observers cannot remain inside</text>
+  ${diagramLeader(outerPoint,[outerPoint[0]+28,outerPoint[1]],[308,102],[341,102],'#dce9f7','event-horizon')}
+  <text x="350" y="101" fill="#edf5ff" font-size="13">Event horizon · r₊ = ${rp.toFixed(2)} M</text><text x="350" y="119" fill="#8b9bac" font-size="11">No future escape to distant observers</text>
+  ${diagramLeader(innerPoint,[innerPoint[0]+40,innerPoint[1]],[305,153],[341,153],'#8899bb','cauchy-horizon')}
+  <text x="350" y="152" fill="#acbad3" font-size="13">Cauchy horizon · r₋ = ${rm.toFixed(2)} M</text><text x="350" y="170" fill="#8b9bac" font-size="11">An unstable boundary in ideal Kerr</text>
+  ${diagramLeader(ringPoint,[ringPoint[0],cy+48],[293,222],[341,222],'#e4ba81','ring-singularity')}
+  <text x="350" y="220" fill="#e8c697" font-size="13">Ring singularity · Σ = 0</text><text x="350" y="238" fill="#8b9bac" font-size="11">Two gold points cut the same ring</text>
+  <ellipse cx="386" cy="286" rx="31" ry="10" fill="none" stroke="#e4ba81" stroke-width="1.5"/><path d="M386 263V309" stroke="#405366" stroke-dasharray="3 4"/><text x="433" y="284" fill="#8b9bac" font-size="11">Full ring, in perspective</text><text x="433" y="301" fill="#8b9bac" font-size="11">Coordinate radius |a|</text></svg>`;
+}
+function schwarzschildDiagram() {
+  const point=(radius,theta)=>[165+radius*Math.cos(theta),157+radius*Math.sin(theta)];
+  const iscoPoint=point(138,-.65),photonPoint=point(69,-.45),horizonPoint=point(46,0);
+  return `<svg class="diagram" viewBox="0 0 640 315" role="img" aria-labelledby="schwarz-diagram-title schwarz-diagram-desc"><title id="schwarz-diagram-title">Schwarzschild limit: the ring shrinks to a point</title><desc id="schwarz-diagram-desc">A radial cross-section shows the point singularity, horizon at two gravitational radii, photon sphere at three gravitational radii, and the innermost stable circular orbit at six gravitational radii. Radii are drawn to scale.</desc>
+  <path d="M15 157H315 M165 8V304" stroke="#233341" stroke-dasharray="3 6"/>
+  <circle cx="165" cy="157" r="138" fill="none" stroke="#4a7b8f" stroke-dasharray="4 5"/>
+  <circle cx="165" cy="157" r="69" fill="#64cdf509" stroke="#64cdf5" stroke-dasharray="2 4"/>
+  <circle cx="165" cy="157" r="46" fill="#030609" stroke="#e5f0ff" stroke-width="1.5"/>
+  <circle cx="165" cy="157" r="3.5" fill="#e4ba81"/>
+  ${diagramLeader(iscoPoint,[iscoPoint[0]+20,iscoPoint[1]-6],[313,73],[334,73],'#4a7b8f','isco')}<text x="348" y="72" fill="#c1d7e7" font-size="13">ISCO · r = 6 r<tspan baseline-shift="sub" font-size="9">g</tspan></text><text x="348" y="91" fill="#8295a8" font-size="11">Innermost stable circular massive orbit</text>
+  ${diagramLeader(photonPoint,[photonPoint[0]+31,photonPoint[1]],[307,121],[334,121],'#64cdf5','photon-sphere')}<text x="348" y="120" fill="#8cddfa" font-size="13">Photon sphere · r = 3 r<tspan baseline-shift="sub" font-size="9">g</tspan></text><text x="348" y="139" fill="#8295a8" font-size="11">Unstable circular light orbits</text>
+  ${diagramLeader(horizonPoint,[244,157],[298,169],[334,169],'#e5f0ff','event-horizon')}<text x="348" y="168" fill="#edf5ff" font-size="13">Event horizon · r = 2 r<tspan baseline-shift="sub" font-size="9">g</tspan></text><text x="348" y="187" fill="#8295a8" font-size="11">Ergosurface coincides with this horizon</text>
+  ${diagramLeader([165,157],[165,209],[286,222],[334,222],'#e4ba81','point-singularity')}<text x="348" y="220" fill="#e8c697" font-size="13">Point singularity · r = 0</text><text x="348" y="239" fill="#8295a8" font-size="11">a → 0: the ring has zero radius</text>
+  <text x="165" y="311" fill="#8295a8" font-size="11" text-anchor="middle">Coordinate radii to scale · χ = 0</text></svg>`;
+}
+
+function causalBridgeDiagram() {
+  return `<svg class="diagram" viewBox="0 0 700 325" role="img" aria-labelledby="causal-bridge-title causal-bridge-desc"><title id="causal-bridge-title">Black-hole and white-hole regions of extended Schwarzschild spacetime</title><desc id="causal-bridge-desc">A finite Kruskal coordinate diagram, with future upward. Null horizons cross at the center. The upper triangle is the black-hole region; the lower is the white-hole region. The left and right exterior regions have no future-directed route between them. The horizontal line joining them is a spatial slice, not a travel path.</desc>
+  <path d="M35 35H285L160 160Z" fill="#28374b88"/><path d="M35 285H285L160 160Z" fill="#aecce51f"/>
+  <path d="M35 35L285 285 M35 285L285 35" stroke="#8fcef3" stroke-width="1.4"/>
+  <path d="M35 35H285 M35 285H285" stroke="#efc99c" stroke-width="3"/>
+  <path d="M35 160H285" stroke="#798fa8" stroke-dasharray="4 5"/>
+  <text x="160" y="70" text-anchor="middle" fill="#edf6ff" font-size="13">BLACK HOLE</text><text x="160" y="88" text-anchor="middle" fill="#9eafc1" font-size="11">future trapped region</text>
+  <text x="160" y="238" text-anchor="middle" fill="#edf6ff" font-size="13">WHITE HOLE</text><text x="160" y="255" text-anchor="middle" fill="#9eafc1" font-size="11">past trapped region</text>
+  <text x="51" y="146" fill="#a9c3d9" font-size="11">Exterior III</text><text x="185" y="184" fill="#a9c3d9" font-size="11">Exterior I</text>
+  <path d="M259 190 C251 159 220 124 209 40" fill="none" stroke="#f5d08f" stroke-width="2.5"/><path d="M203 50L209 40L216 50" fill="none" stroke="#f5d08f" stroke-width="2"/>
+  <path d="M307 260V56 M302 64L307 56L312 64" fill="none" stroke="#c1d9ef" stroke-width="1.6"/><text x="307" y="39" text-anchor="middle" fill="#c1d9ef" font-size="11">future</text>
+  <text x="350" y="66" fill="#efc99c" font-size="13">Singularities</text><text x="350" y="85" fill="#91a6bb" font-size="11">Future above; past below</text>
+  <text x="350" y="124" fill="#8fcef3" font-size="13">Null horizons · light at 45°</text><text x="350" y="143" fill="#91a6bb" font-size="11">Causal motion stays within the light cone</text>
+  <text x="350" y="182" fill="#f5d08f" font-size="13">A possible infalling traveler</text><text x="350" y="201" fill="#91a6bb" font-size="11">Cannot emerge into the other exterior</text>
+  <text x="350" y="240" fill="#a7bfd8" font-size="13">Dashed line: a spatial bridge</text><text x="350" y="259" fill="#91a6bb" font-size="11">A connected slice is not a traversable route</text>
+  <text x="160" y="312" text-anchor="middle" fill="#8295a8" font-size="11">Kruskal causal diagram · finite schematic</text></svg>`;
+}
+function ellisBridgeDiagram() {
+  const center=176,cy=155,scale=41,max=1.9;
+  const side=sign=>Array.from({length:81},(_,i)=>{const z=-max+2*max*i/80;return `${i?'L':'M'}${(center+sign*scale*Math.cosh(z)).toFixed(2)} ${(cy-z*scale*1.6).toFixed(2)}`;}).join(' ');
+  const rings=[-1.9,-1.4,-.9,-.45,0,.45,.9,1.4,1.9].map(z=>`<ellipse cx="${center}" cy="${(cy-z*scale*1.6).toFixed(2)}" rx="${(scale*Math.cosh(z)).toFixed(2)}" ry="${(8+Math.abs(z)*2).toFixed(2)}" fill="none" stroke="${z===0?'#eef7ff':'#5ea5d0'}" stroke-opacity="${z===0?1:.65}" stroke-width="${z===0?2:1}"/>`).join('');
+  return `<svg class="diagram" viewBox="0 0 700 325" role="img" aria-labelledby="ellis-bridge-title ellis-bridge-desc"><title id="ellis-bridge-title">Ellis wormhole equatorial embedding</title><desc id="ellis-bridge-desc">A catenoid connects two asymptotic regions through a minimum circumference at the throat. The two sides have positive and negative proper radial distance ell. The vertical embedding coordinate is an auxiliary drawing dimension, not a physical direction of travel.</desc>
+  ${rings}<path d="${side(-1)} ${side(1)}" stroke="#a4d8f5" stroke-width="1.5" fill="none"/>
+  <path d="M217 155C252 155 291 158 331 158" fill="none" stroke="#eef7ff" stroke-width="1.2"/><circle cx="217" cy="155" r="2.5" fill="#eef7ff"/>
+  <text x="350" y="52" fill="#a4d8f5" font-size="13">One asymptotic region · ℓ &gt; 0</text><text x="350" y="71" fill="#91a6bb" font-size="11">Locally flat far from the throat</text>
+  <text x="350" y="155" fill="#eef7ff" font-size="13">Throat · ℓ = 0 · R = b</text><text x="350" y="174" fill="#91a6bb" font-size="11">Minimum circumference 2πb; no horizon</text>
+  <text x="350" y="259" fill="#a4d8f5" font-size="13">Other asymptotic region · ℓ &lt; 0</text><text x="350" y="278" fill="#91a6bb" font-size="11">A different sky marks the other side</text>
+  <text x="176" y="312" text-anchor="middle" fill="#8295a8" font-size="11">Equatorial embedding · z = b asinh(ℓ/b)</text></svg>`;
+}
+
+export function renderMathGuide(container) {
+  const lambda=v('λ'), beta=v('β'), gamma=v('γ'), psi=v('ψ');
+  const Z1=sub(v('Z'),n(1)),Z2=sub(v('Z'),n(2)),p=vec('p'),vel=vec('v'),acc=vec('A'),q=vec('q');
+  const f=r(n(1),o('−'),frac(rs,R));
+  const half=frac(n(1),two),third=frac(n(1),n(3));
+  const idx=(x,i)=>sub(x,r(i));
+  const deriv=(x,by)=>frac(d(x),d(by));
+  const deriv2=(x,by)=>frac(r(square(v('d')),x),r(v('d'),square(by)));
+  const axis='<mover><mi>s</mi><mo>^</mo></mover>';
+  const metricKerr=rows(
+    r(square(d(v('s'))),o('='),o('−'),par(r(n(1),o('−'),frac(r(two,M,R),Sigma))),square(d(v('t'))),o('−'),frac(r(n(4),M,a,R,trig2('sin',theta)),Sigma),d(v('t')),d(phi)),
+    r(o('+'),frac(Sigma,Delta),square(d(R)),o('+'),Sigma,square(d(theta))),
+    r(o('+'),par(r(square(R),o('+'),square(a),o('+'),frac(r(two,M,square(a),R,trig2('sin',theta)),Sigma))),trig2('sin',theta),square(d(phi)))
+  );
+  container.innerHTML=`<article class="math-guide">
+  <style>
+  .math-guide{color:#a7b5c4;font-size:13px;line-height:1.75}.math-guide *{box-sizing:border-box}.math-guide h3{font-size:16px;color:#edf6ff;font-weight:500;margin:25px 0 10px}.math-guide p{margin:12px 0}.math-guide strong{color:#e7f1fb;font-weight:500}.math-guide a{color:#a9d2ff;text-decoration:none}.math-guide a:hover{text-decoration:underline}.math-guide .math-intro{padding:0 0 23px;border-bottom:1px solid #243244}.math-guide .math-kicker{font-size:9px;letter-spacing:2px;color:#9dc5f2;text-transform:uppercase}.math-guide .math-section{border:1px solid #273342;border-radius:7px;margin:13px 0;background:#080b10}.math-guide .math-section>summary{display:flex;gap:13px;align-items:center;padding:19px!important;cursor:pointer;color:#edf5ff;list-style:none;font-size:14px;font-weight:500}.math-guide summary::-webkit-details-marker{display:none}.math-guide .math-section>summary:after{display:none}.math-guide .math-section>summary>span:nth-child(2){font-size:inherit;color:inherit;margin:0}.math-guide .math-index{font-size:10px;color:#7f9abb;letter-spacing:1px}.math-guide .math-chevron{margin-left:auto;color:#a9d2ff}.math-guide details[open] .math-chevron{transform:rotate(45deg)}.math-guide .math-section-body{padding:0 18px 20px;margin:0!important}.math-guide .equation{color:#fff;background:#000;border:1px solid #202c39;border-radius:6px;padding:20px 15px;margin:17px 0;overflow-x:auto;overflow-y:hidden}.math-guide .equation math{font-size:18px;min-width:max-content;color:#fff;font-family:"STIX Two Math","Cambria Math",math;line-height:1.8}.math-guide .math-note{background:#111d2b;border-left:2px solid #8db5df;padding:13px 15px;font-size:12px;margin:18px 0;color:#afc4db}.math-guide .diagram{display:block;width:100%;height:auto;min-width:460px;background:#020407;border:1px solid #233142;border-radius:7px;font-family:system-ui,sans-serif}.math-guide .diagram-scroll{overflow-x:auto;margin:18px 0 9px}.math-guide figcaption{font-size:11px;color:#8da0b7;line-height:1.65}.math-guide figure{margin:18px 0}.math-guide .math-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:15px 0}.math-guide .math-cell{padding:14px;background:#101923;border:1px solid #243345;border-radius:6px}.math-guide .math-cell b{display:block;color:#e2edf7;font-weight:500;margin-bottom:4px}.math-guide .math-cell span{font-size:11px}.math-guide .source-list{padding-left:19px;display:grid;gap:7px;font-size:12px}.math-guide .math-small{font-size:11px;color:#8da2bb}.math-guide .diagram-control{display:flex;gap:12px;align-items:center;font-size:12px}.math-guide .diagram-control input{flex:1;accent-color:#a9d2ff;min-width:60px}.math-guide .diagram-control output{color:#eaf6ff;font-variant-numeric:tabular-nums;min-width:38px}.math-guide table{width:100%;border-collapse:collapse;font-size:11px}.math-guide th,.math-guide td{text-align:left;padding:10px 8px;border:1px solid #293747}.math-guide th{color:#d7e7f5;font-weight:500}.math-guide summary:focus-visible{outline:2px solid #a9d2ff;outline-offset:4px}@media(max-width:600px){.math-guide .math-section-body{padding:0 12px 16px}.math-guide .math-grid{grid-template-columns:1fr}.math-guide .equation math{font-size:16px}.math-guide .math-section>summary{font-size:13px;padding:16px 12px!important;gap:9px}.math-guide .equation{padding:18px 11px}.math-guide .math-note{font-size:11px}.math-guide .diagram-control{font-size:11px}}
+  </style>
+  <div class="math-intro"><span class="math-kicker">A field guide to curved spacetime</span><p>The equations below describe the ideal black holes of general relativity. Each section also explains which parts the live explorer approximates. Explore the diagrams and compare the exact geometry with the live scene.</p></div>
+  ${section('01','Mass, spin, and what the controls change',`
+  <p>An isolated, stationary black hole with negligible charge is described by its <strong>mass M</strong> and <strong>angular momentum J</strong>. The spin slider controls dimensionless angular momentum χ, also written a*. It is not an angular speed in radians per second.</p>
+  ${eq(r(rg,o('='),frac(r(G,M),square(c)),o(','),gap,chi,o('='),sub(a,o('*')),o('='),frac(r(c,v('J')),r(G,square(M)))),'Gravitational radius and dimensionless spin')}
+  ${eq(r(a,o('='),frac(v('J'),r(M,c)),o('='),chi,rg,o(','),gap,sub(v('t'),v('g')),o('='),frac(r(G,M),pow(c,n(3)))),'Kerr spin length and gravitational time unit')}
+  <div class="math-grid"><div class="math-cell"><b>Mass changes size</b><span>The camera keeps its physical distance when M changes. The gravitational radius grows in proportion to M, so the hole occupies more of the view. Distance in current r<sub>g</sub> changes accordingly.</span></div><div class="math-cell"><b>Spin changes geometry</b><span>At fixed M, greater |χ| reduces the Boyer–Lindquist horizon radius, shifts stable orbits, and adds frame dragging. It does not simply turn a visible solid sphere.</span></div></div>
+  <p>One solar mass corresponds to r<sub>g</sub> ≈ 1.477 km and t<sub>g</sub> ≈ 4.926 μs. The renderer uses a fixed reference length based on 4.3 million solar masses. The mass slider changes the primary hole’s mass relative to that fixed world scale.</p>
+  <p>Astrophysical black holes generally rotate because formation, accretion, and mergers bring angular momentum. Low spin is possible; exactly zero is a useful idealization. The explorer uses nonnegative spin magnitudes and separate axis orientation controls.</p>
+  <p class="math-small">Conventions: metric signature (−,+,+,+). Except where c or G is written explicitly, equations use G = c = 1, so M is the gravitational length and a = χM.</p>`,true)}
+  ${section('02','Schwarzschild · horizon, shadow, and clocks',`
+  ${eq(r(square(d(v('s'))),o('='),o('−'),par(f),square(c),square(d(v('t'))),o('+'),frac(square(d(R)),f),o('+'),square(R),par(r(square(d(theta)),o('+'),trig2('sin',theta),square(d(phi))))),'Schwarzschild metric with explicit light speed')}
+  ${eq(r(rs,o('='),two,rg,o(','),gap,sub(R,t('photon')),o('='),n(3),rg,o(','),gap,sub(R,t('ISCO')),o('='),n(6),rg))}
+  <p>The horizon is a causal boundary, not a material surface. The dark region in an image is the <strong>shadow</strong>: directions whose light is captured. For a distant Schwarzschild observer, its critical impact radius is larger than the horizon radius:</p>
+  ${eq(r(sub(v('b'),v('c')),o('='),n(3),sqrt(n(3)),rg,o('≈'),n('5.196'),rg),'Schwarzschild shadow critical impact radius')}
+  <figure><div class="diagram-scroll">${schwarzschildDiagram()}</div><figcaption>Coordinate radii are drawn to scale. A photon sphere is a location in the spacetime; a shadow is an apparent image. The optional horizon guide in the live view is schematic geometry, not light emitted by the horizon.</figcaption></figure>
+  <h3>A stationary clock outside the horizon</h3>
+  ${eq(r(frac(d(v('τ')),d(v('t'))),o('='),sqrt(f)),'Stationary Schwarzschild time dilation')}
+  ${eq(r(sub(v('ν'),v('∞')),o('='),sub(v('ν'),t('emit')),sqrt(r(n(1),o('−'),frac(rs,sub(R,t('emit')))))),'Gravitational redshift to infinity')}
+  <p>These formulas compare a stationary emitter or clock outside a Schwarzschild horizon with an observer at infinity. They do not describe a freely falling clock or a general Kerr observer. The horizon’s coordinate singularity can be removed; the curvature singularity at r = 0 cannot.</p>`)}
+  ${section('03','Kerr · horizons, frame dragging, and the ring',`
+  <p>In Boyer–Lindquist coordinates (t, r, θ, φ), the Kerr line element is:</p>
+  ${eq(metricKerr,'Kerr metric with signature minus plus plus plus')}
+  ${eq(rows(r(Sigma,o('='),square(R),o('+'),square(a),trig2('cos',theta)),r(Delta,o('='),square(R),o('−'),two,M,R,o('+'),square(a))))}
+  <p>The mixed dt dφ term couples time and azimuth. The two roots of Δ identify the ideal outer event horizon and inner Cauchy horizon:</p>
+  ${eq(r(sub(R,o('±')),o('='),M,o('±'),sqrt(r(square(M),o('−'),square(a)))),'Kerr horizon radii')}
+  ${eq(r(frac(sub(R,o('+')),rg),o('='),n(1),o('+'),sqrt(r(n(1),o('−'),square(chi)))),'Dimensionless outer horizon radius')}
+  <p>Thus r<sub>+</sub>/r<sub>g</sub> decreases from 2 at χ = 0 toward 1 at |χ| = 1. The <strong>shadow’s apparent size need not change by the same factor</strong>. The changing gap beside the bright disc is mainly its inner edge moving with the ISCO, not a direct photograph of the horizon.</p>
+  ${eq(r(sub(R,t('ergo')),par(theta),o('='),M,o('+'),sqrt(r(square(M),o('−'),square(a),trig2('cos',theta)))),'Outer ergosurface')}
+  ${eq(rows(r(sub(v('Ω'),v('H')),o('='),frac(a,r(two,M,sub(R,o('+'))))),r(v('ω'),o('='),frac(r(two,M,a,R),r(square(par(r(square(R),o('+'),square(a)))),o('−'),square(a),Delta,trig2('sin',theta))))),'Horizon angular velocity and frame dragging angular velocity')}
+  <p>Ω<sub>H</sub> is the horizon’s angular velocity. ω is the coordinate angular velocity of locally nonrotating observers. Static observers cannot remain inside the outer ergosurface. Neither quantity makes spacetime a physical rotating fluid.</p>
+  <label class="diagram-control">Diagram spin χ <input id="math-diagram-spin" type="range" min="0" max="0.998" step="0.001" value="0.8" aria-label="Kerr diagram spin"><output id="math-diagram-spin-value">0.80</output></label>
+  <figure><div id="math-kerr-diagram" class="diagram-scroll">${kerrDiagram()}</div><figcaption>This is an oblate-coordinate map of surfaces, not their proper distances. At exactly zero spin the diagram switches to the Schwarzschild limit, with one point singularity and no separate regular inner horizon.</figcaption></figure>
+  ${eq(r(v('x'),o('='),sqrt(r(square(R),o('+'),square(a))),fn('sin',theta),o(','),gap,v('z'),o('='),R,fn('cos',theta)),'Coordinate map used by the Kerr diagram')}
+  <p>The Kerr ring is where Σ = 0: r = 0 and θ = π/2. As a → 0 it shrinks to a point, r<sub>+</sub> → 2M, and the ergosurface coincides with the horizon. The ideal inner Cauchy horizon is unstable to perturbations; the diagram is not a prediction of a traversable interior.</p>`)}
+  ${section('04','Discs, planets, and binary orbits',`
+  <p>The innermost stable circular orbit (ISCO) bounds stable equatorial circular test-particle motion. Let χ be the nonnegative spin magnitude and s = +1 for a prograde orbit or −1 for a retrograde orbit:</p>
+  ${eq(rows(
+    r(frac(sub(R,t('ISCO')),M),o('='),n(3),o('+'),Z2,o('−'),v('s'),sqrt(r(par(r(n(3),o('−'),Z1)),par(r(n(3),o('+'),Z1,o('+'),two,Z2))))),
+    r(Z1,o('='),n(1),o('+'),root(r(n(1),o('−'),square(chi)),3),bracket(r(root(r(n(1),o('+'),chi),3),o('+'),root(r(n(1),o('−'),chi),3)))),
+    r(Z2,o('='),sqrt(r(n(3),square(chi),o('+'),square(Z1))))
+  ),'Kerr ISCO with fully grouped square and cube roots')}
+  <p>Both branches give 6M at zero spin. At extreme spin the prograde limit is M and the retrograde limit is 9M. The live disc uses the prograde inner edge around each hole; tilting a hole also tilts its disc and jets.</p>
+  ${eq(rows(r(sub(v('Ω'),o('±')),o('='),frac(r(o('±'),sqrt(M)),r(pow(R,frac(n(3),two)),o('±'),a,sqrt(M)))),r(sub(v('Ω'),t('Newton')),o('='),sqrt(frac(r(G,M),pow(R,n(3)))))),'Kerr circular orbital frequency and the Newtonian limit')}
+  <h3>Why planet mass hardly changes its orbit</h3>
+  ${eq(r(sub(v('m'),v('p')),vec('a'),o('='),o('−'),frac(r(G,M,sub(v('m'),v('p'))),pow(R,n(3))),vec('r'),o('⇒'),vec('a'),o('='),o('−'),frac(r(G,M),pow(R,n(3))),vec('r')),'Test planet mass cancels from its orbital acceleration')}
+  <p>The planet is negligible beside a supermassive black hole, so its mass has almost no effect on the black hole or its test orbit. The mass and physical radius controls instead determine meaningful density and surface-gravity readouts. Every body uses physical dimensions; small spacecraft remain selectable through coordinate markers. Tracking moves the camera closer without enlarging the object.</p>
+  ${eq(r(sub(v('ρ'),v('p')),o('='),frac(r(n(3),sub(v('M'),v('p'))),r(n(4),v('π'),pow(sub(v('R'),v('p')),n(3)))),o(','),gap,sub(v('g'),t('surface')),o('='),frac(r(G,sub(v('M'),v('p'))),square(sub(v('R'),v('p'))))),'Planet density and surface gravity')}
+  <h3>Two holes: one barycenter, two spin axes</h3>
+  ${eq(rows(r(v('d'),o('='),sub(R,n(1)),o('+'),sub(R,n(2)),o(','),gap,sub(v('M'),n(1)),sub(R,n(1)),o('='),sub(v('M'),n(2)),sub(R,n(2))),r(sub(R,n(1)),o('='),frac(r(v('d'),sub(v('M'),n(2))),r(sub(v('M'),n(1)),o('+'),sub(v('M'),n(2)))),o(','),gap,sub(R,n(2)),o('='),frac(r(v('d'),sub(v('M'),n(1))),r(sub(v('M'),n(1)),o('+'),sub(v('M'),n(2))))),r(square(v('Ω')),o('='),frac(r(G,par(r(sub(v('M'),n(1)),o('+'),sub(v('M'),n(2))))),pow(v('d'),n(3))))),'Barycenter and circular binary angular frequency')}
+  <p>The binary uses these Newtonian circular-orbit relations with accelerated visual time. Each disc and jet pair follows its own hole’s spin axis. No inspiral, spin precession, gravitational waves, or merger is solved.</p>
+  ${eq(r(frac(sub(v('R'),v('L')),v('d')),o('≈'),frac(r(n('.49'),pow(v('Q'),frac(two,n(3)))),r(n('.6'),pow(v('Q'),frac(two,n(3))),o('+'),fn('ln',r(n(1),o('+'),root(v('Q'),3)))))),'Eggleton equivalent-volume Roche radius')}
+  <p>For each hole, Q is its mass divided by its companion’s. The visible minidisc is capped at 0.65 R<sub>L</sub> to reduce overlap. If that cap leaves no room outside the ISCO, its disc disappears. This uses an approximate Newtonian Roche radius as a visual truncation rule; it is not a relativistic disc calculation.</p>`)}
+  ${section('05','Light, the grid, and looking in any direction',`
+  <p>Light follows null geodesics. Γ represents the connection coefficients of the metric; λ is an affine parameter, and repeated Greek indices are summed.</p>
+  ${eq(r(deriv2(pow(v('x'),v('μ')),lambda),o('+'),`<msubsup><mi>Γ</mi>${r(v('α'),v('β'))}${v('μ')}</msubsup>`,deriv(pow(v('x'),v('α')),lambda),deriv(pow(v('x'),v('β')),lambda),o('='),n(0)),'Geodesic equation')}
+  ${eq(r(sub(v('g'),r(v('μ'),v('ν'))),deriv(pow(v('x'),v('μ')),lambda),deriv(pow(v('x'),v('ν')),lambda),o('='),n(0)),'Null condition for a light ray')}
+  <p>In a Schwarzschild orbital plane, with u = 1/r, the exact orbit equation is:</p>
+  ${eq(r(deriv2(v('u'),phi),o('+'),v('u'),o('='),n(3),M,square(v('u')),o(','),gap,sub(v('α'),t('weak')),o('≈'),frac(r(n(4),G,M),r(v('b'),square(c)))),'Schwarzschild light orbit and weak deflection')}
+  <p>The weak deflection formula applies only when impact parameter b is much larger than r<sub>g</sub>. Near a hole, light from the far side of a disc can bend into view above and below its shadow.</p>
+  <h3>Brightness and color shifts</h3>
+  ${eq(r(v('D'),o('='),frac(n(1),r(gamma,par(r(n(1),o('−'),beta,fn('cos',psi))))),o(','),gap,gamma,o('='),frac(n(1),sqrt(r(n(1),o('−'),square(beta))))),'Relativistic Doppler factor')}
+  ${eq(r(sub(v('I'),r(v('ν'),o(','),t('obs'))),par(sub(v('ν'),t('obs'))),o('='),pow(v('g'),n(3)),sub(v('I'),r(v('ν'),o(','),t('emit'))),par(frac(sub(v('ν'),t('obs')),v('g')))),'Specific intensity transformation')}
+  ${eq(r(v('g'),o('='),frac(sub(v('ν'),t('obs')),sub(v('ν'),t('emit')))))}
+  <p>Here β = v/c, ψ is the local angle between the emitter’s velocity and photon direction, and g includes gravitational and Doppler shifts. The live palette and beaming are stylized; the invariant I<sub>ν</sub>/ν³ describes the exact radiative relation.</p>
+  <div id="renderer-math-detail"><h3>The implemented ray model</h3><p>The GPU traces each pixel with position <b>p</b>, tangent <b>v</b>, displacement <b>q</b> from a hole, dimensionless hole mass m, and its spin-axis unit vector ŝ. The reference length is the gravitational radius of 4.3 million solar masses.</p>
+  ${eq(r(deriv(p,lambda),o('='),vel,o(','),gap,deriv(vel,lambda),o('='),acc,par(r(p,o(','),vel))))}
+  ${eq(r(acc,o('='),o('−'),frac(r(n(3),v('m'),square(norm(r(q,o('×'),vel))),q),pow(R,n(5))),o('+'),frac(r(n('.23'),chi,square(v('m')),par(r(axis,o('×'),vel))),pow(R,n(3)))),'Approximate curved-ray acceleration for one hole')}
+  <p>Small numerical floors keep the denominator finite. The first term is Schwarzschild-inspired; the spin term is phenomenological. Binary fields are combined approximately. Kerr horizon and ISCO radii do not make this a full Kerr geodesic solver.</p>
+  ${eq(rows(r(idx(p,r(v('n'),o('+'),half)),o('='),idx(p,v('n')),o('+'),half,v('h'),idx(vel,v('n'))),r(idx(vel,r(v('n'),o('+'),half)),o('='),idx(vel,v('n')),o('+'),half,v('h'),idx(acc,v('n'))),r(idx(p,r(v('n'),o('+'),n(1))),o('='),idx(p,v('n')),o('+'),v('h'),idx(vel,r(v('n'),o('+'),half))),r(idx(vel,r(v('n'),o('+'),n(1))),o('='),idx(vel,v('n')),o('+'),v('h'),acc,par(r(idx(p,r(v('n'),o('+'),half)),o(','),idx(vel,r(v('n'),o('+'),half)))))), 'Explicit midpoint ray integrator')}
+  <p>Step h shrinks near a horizon and at higher quality. Rays are absorbed at the modeled capture surface. The horizon-guide overlay is direct coordinate geometry; the lensed shadow and guide deliberately represent different things.</p></div>
+  <h3>What a lensed grid means</h3>
+  <p>A coordinate grid is a choice of labels, not a glowing material. The live guide treats those labels as a <strong>virtual luminous reference sheet</strong>. Each pixel intersects the sheet along its already-bent ray path, so its lines can be deflected, magnified, occulted, or seen as multiple images just like a visible reference object. This uses the explorer’s approximate ray model, not exact general-relativistic ray tracing.</p>
+  <div id="grid-math-detail">
+  <h3>A flat spatial slice can still have curved spacetime</h3>
+  <p>For Schwarzschild spacetime, ingoing Painlevé–Gullstrand coordinates provide a useful infall picture. With T in seconds and r in metres, the exact metric and its constant-T spatial slice are:</p>
+  ${eq(rows(r(square(d(v('s'))),o('='),o('−'),square(c),square(d(v('T'))),o('+'),square(bracket(r(d(R),o('+'),sqrt(frac(r(two,G,M),R)),d(v('T'))))),o('+'),square(R),square(d(v('Ω')))),r(square(d(v('ℓ'))),o('='),square(d(R)),o('+'),square(R),square(d(v('Ω')))),r(frac(d(R),d(v('T'))),o('='),o('−'),sqrt(frac(r(two,G,M),R)),t('  (radial free fall from rest at infinity)'))),'Painlevé–Gullstrand Schwarzschild metric, flat spatial slice, and radial infall')}
+  <p>Here dΩ² = dθ² + sin²θ dφ². The flat spatial metric does not remove spacetime curvature: the radial shift still varies with position. The familiar Flamm funnel belongs to a different, constant-Schwarzschild-time slice; it is an embedding diagram, not the surface an observer would literally see.</p>
+  <h3>The implemented coordinate guide</h3>
+  <p>The single-hole sheet passes through the hole’s center in its equatorial plane. A binary uses one orbital reference plane containing both modeled centers. No arbitrary embedding height separates a grid center from its hole. Animated marks illustrate infall; their speed and the optical distortion decrease with distance. A shared Grid switch also controls the warp guide. During a close warp-ship inspection, the common black-hole guide remains enabled while a bounded local bubble chart resolves the much smaller field; the warp notebook explains that chart and its fade.</p>
+  ${eq(rows(r(v('ρ'),o('='),frac(norm(r(vec('x'),o('−'),vec('h'))),v('m')),o(','),gap,v('s'),o('='),n(2)),r(v('L'),o('='),pow(par(r(pow(v('ρ'),frac(n(3),two)),o('+'),frac(n(3),two),sqrt(two),v('s'),v('t'))),frac(two,n(3)))),r(sub(v('θ'),t('map')),o('='),frac(r(o('−'),two,chi,v('t')),r(n(1),o('+'),pow(v('ρ'),n(3))))),r(frac(d(v('ρ')),d(v('t'))),o('='),o('−'),v('s'),sqrt(frac(two,v('ρ'))),o('→'),n(0),t('  for a fixed radial marker'))),'Implemented dimensionless radial label, spin cue, and single-hole marker infall speed')}
+  <p>In the live map, h is a hole’s position and m its mass in fixed reference-world units; ρ is distance in that hole’s gravitational radii. L is the outward label evaluated at the current point: holding a label fixed makes a mark travel inward. The factor s = 2 sets an accelerated display speed, not seconds on an astrophysical clock.</p>
+  ${eq(rows(r(sub(vec('q'),v('k')),o('='),frac(r(vec('x'),o('−'),sub(vec('h'),v('k'))),sub(v('m'),v('k')))),r(sub(vec('F'),v('k')),o('='),frac(sub(v('L'),v('k')),sub(v('ρ'),v('k'))),fn('Rot',r(sub(axis,v('k')),o(','),sub(v('θ'),v('k')))),sub(vec('q'),v('k'))),r(vec('u'),o('='),vec('x'),o('+'),'<munder><mo>∑</mo><mi>k</mi></munder>',sub(v('m'),v('k')),par(r(sub(vec('F'),v('k')),o('−'),sub(vec('q'),v('k')))))),'Continuous world-coordinate map combining each hole’s marker displacement')}
+  <p>Rot rotates a vector about the stated unit spin axis; θ<sub>k</sub> is the map angle above. The sheet’s two in-plane components of u, divided by the primary mass in reference units, determine the grid marks. Numerical floors protect the capture region, and line spacing blends between powers of two as the view widens. The sum combines two display maps; it is not a superposition rule for exact spacetime metrics.</p>
+  <p class="math-small">Animation uses accelerated display time. Zero spin removes the angular marker motion exactly; the radial flow remains. Spin swirl and the combined binary guide are schematic cues. They are not an exact Kerr river velocity, a Kerr spatial embedding, or a solution of the two-body spacetime. The optional horizon outlines remain direct coordinate annotations and are distinct from this lensed guide.</p>
+  </div>
+  <h3>Observer position and viewing direction</h3>
+  <p>Orbit and zoom choose where the observer sits. Look 360° rotates the viewing direction while holding that position. Middle-drag activates this on desktop; touch users select Look mode. In <strong>Free roam</strong>, dragging chooses a heading and the wheel or pinch moves forward or backward along it. Orbit-mode zoom recenters the gaze. Reset scene view returns to the scene’s initial viewpoint without resetting its settings or clock.</p>
+  <p>The near-horizon view remains just outside the modeled capture boundary. Looking outward shows escaping sky directions; looking inward can fill the image with shadow. At thousands of gravitational radii, the curvature becomes small and the scene approaches its flat-space appearance. This is a camera exploration, not a calculation of a freely falling observer’s tetrad, acceleration, or experience inside a horizon.</p>
+  <h3>The astronaut’s demonstration path</h3>
+  ${eq(r(R,par(v('t')),o('='),sub(R,t('stop')),o('+'),par(r(sub(R,n(0)),o('−'),sub(R,t('stop')))),fn('exp',r(o('−'),frac(r(v('t'),o('−'),sub(v('t'),n(0))),v('τ'))))),'Prescribed exterior approach, not a freely falling geodesic')}
+  <p>Into blue fire uses an exponential approach with τ = 75 units of accelerated display time. The stopping radius is 1.035 times the primary horizon radius plus two physical object bounding radii. It keeps the body and camera outside the capture boundary. Looking back from the edge starts at that exterior position, facing outward. Neither path solves the traveler’s acceleration, tidal injury, aberration, or relativistic clock rate. A static observer cannot hover on the event horizon itself.</p>`)}
+  ${section('06','A disrupted star, debris, and jets',`
+  <p>The near side of a star is pulled more strongly than its far side. A Newtonian differential-acceleration estimate and a characteristic tidal radius are:</p>
+  ${eq(r(Delta,a,o('≈'),frac(r(two,G,M,sub(v('R'),o('★'))),pow(R,n(3))),o(','),gap,sub(R,v('t')),o('≈'),sub(v('R'),o('★')),root(frac(M,sub(M,o('★'))),3)),'Tidal acceleration and disruption radius')}
+  <p>Stellar structure, orbit, rotation, and relativistic effects shift this order-unity threshold. A sufficiently massive black hole can swallow a star before a visible disruption. The live star uses its selected physical reference size. Its size, color, and disruption strength control a repeating visual encounter and connected debris stream.</p>
+  <p>Some debris escapes. Bound material can return, shock, and build an accretion flow. A simple full-disruption model with approximately flat debris-energy distribution gives the late fallback relation:</p>
+  ${eq(r(sub('<mover><mi>M</mi><mo>˙</mo></mover>',t('fallback')),o('∝'),pow(v('t'),r(o('−'),frac(n(5),n(3))))),'Late-time fallback power law')}
+  <p>This is not a universal luminosity law, and the animation does not numerically solve it. Its stream, stellar shrinkage, and color are visual controls, not stellar hydrodynamics.</p>
+  <p><strong>Jets arise from magnetized plasma outside the horizon.</strong> They do not carry material out of the interior. This explorer aligns each jet pair with its hole’s spin axis and lets you change color, opening angle, brightness, and length. Jet emission is accumulated along the same bent light rays as the disc, so foreground gravity can bend or occult it. The plasma itself is not a screen-space overlay. This does not solve the magnetic launching mechanism, gas pressure, disc warps, or jet precession.</p>`)}
+  ${section('07','Spectral views, composition, and GPU quality',`
+  <p><strong>Visible, infrared, X-ray, radio / millimeter, and gamma-ray are illustrative emission views.</strong> Each changes which components contribute most, as well as the display palette. Infrared emphasizes cooler material and dusty nebulae; X-ray emphasizes hot plasma. Radio highlights magnetized outflows and the surrounding emitting gas; gamma-ray highlights energetic jets and the inner flow. Human eyes see only the visible band, so the other views use false color.</p>
+  ${eq(r(v('E'),o('='),v('h'),v('ν'),o(','),gap,c,o('='),v('λ'),v('ν')),'Photon energy and wavelength: higher frequency means greater energy and shorter wavelength')}
+  <p>Microwaves occupy the high-frequency part of the radio spectrum. One broad Radio / millimeter view covers that family here; the Event Horizon Telescope observes at about a millimeter. A black hole itself does not emit this light: the observable radiation comes from matter around it. These controls are qualitative visual studies, not narrow-band instruments or calibrated telescope images.</p>
+  <p>Thermal, hydrogen, helium, dusty, nebulous, radiant, and ribbon disc options are procedural emissivity and appearance presets. Radiant emphasizes brilliant blue-white plasma; Ribbons separates the flow into luminous blue strands. Both accumulate emission along the same bent light paths as the other discs. They do not solve chemical abundances, ionization, absorption lines, magnetohydrodynamics, or a calibrated spectrum. Custom colors are intentional artistic controls. Scenes are editable combinations of these independent components.</p>
+  <h3>A probe’s logarithmic brightness</h3>
+  ${eq(r(frac(v('L'),sub(v('L'),n(0))),o('='),pow(n(10),v('b')),o(','),gap,n(0),o('≤'),v('b'),o('≤'),n(8)),'Relative probe luminosity grows tenfold per slider decade')}
+  <p>Each unit of the probe luminosity slider multiplies its emission by ten, up to one hundred million times the reference brightness. Its physical size stays fixed. The surrounding glow is an illustrative optical rendering effect; the control is not a calibrated wattage or a simulation of radiation heating nearby objects.</p>
+  <table><thead><tr><th>Component</th><th>Infrared</th><th>X-ray</th></tr></thead><tbody><tr><td>Disc & jets</td><td>Cooler outer material and warm dust; outflows use a separate band response.</td><td>Hot inner plasma and energetic jets dominate.</td></tr><tr><td>Nebula & starfield</td><td>Dust structure and cool stars become more prominent.</td><td>Diffuse hot gas and a sparse population of active sources; most ordinary stars fade.</td></tr><tr><td>Planets & spacecraft</td><td>Warm surfaces receive a thermal false-color appearance.</td><td>Cool surfaces become very faint; they remain opaque silhouettes and selectable in Elements.</td></tr></tbody></table>
+  <table><thead><tr><th>Component</th><th>Radio / millimeter</th><th>Gamma-ray</th></tr></thead><tbody><tr><td>Disc & jets</td><td>Magnetized plasma and extended synchrotron-emitting outflows stand out.</td><td>Energetic jets and the hot inner region dominate; cool outer material fades.</td></tr><tr><td>Nebula & starfield</td><td>Diffuse emitting gas gains prominence; ordinary stars are subdued.</td><td>Most ordinary stars and cool nebulae become very faint.</td></tr><tr><td>Planets & spacecraft</td><td>Passive surfaces are faint and opaque; no radio transmitter is assumed.</td><td>Cool bodies are dark silhouettes rather than glowing gamma-ray sources.</td></tr></tbody></table>
+  <p>These are qualitative component responses, not temperatures inferred from NASA paint or a medical-style view through spacecraft. The luminous probe is an artificial broad-spectrum beacon. Diagnostic grids and horizon outlines are annotations and retain their readable colors in every band. Elements remain selectable even when their physical emission is faint.</p>
+  <h3>Why thermal emission shifts with temperature</h3>
+  ${eq(r(sub(v('B'),v('ν')),par(v('T')),o('='),frac(r(two,v('h'),pow(v('ν'),n(3))),square(c)),frac(n(1),r(fn('exp',frac(r(v('h'),v('ν')),r(sub(v('k'),v('B')),v('T')))),o('−'),n(1)))),'Planck spectral radiance as physical background, not the live spectral solver')}
+  <p>This is Planck’s law, a physical reference for thermal radiation. The live bands use qualitative weighting; they do not integrate this law through a relativistic plasma or an instrument response.</p>
+  <h3>Computation stays on this device</h3>
+  <table><thead><tr><th>Quality</th><th>Rendering budget</th></tr></thead><tbody><tr><td>Adaptive</td><td>Selects the exact Low, Medium, or High preset around a 30 FPS cutoff. Its active preset is shown in the controls. No hidden lower levels and no automatic Ultra.</td></tr><tr><td>Low / Medium / High</td><td>96 / 160 / 256 ray-step ceilings and 0.6 / 1.4 / 2.8 million pixel budgets. Manual selection keeps that preset.</td></tr><tr><td>Ultra</td><td>768 ray steps, supersampling, richer disc structure and nebula detail, bounded by a 16-megapixel target and device limits. Manually selectable even when the resulting frame rate is low.</td></tr></tbody></table>
+  ${eq(r(t('GPU work'),o('≈'),t('rendered pixels'),o('×'),t('ray steps'),o('×'),t('work per step')))}
+  <p>Doubling each image dimension roughly quadruples fragment work. Adaptive evaluates completed-frame cadence, moving down when rendering stays below 30 FPS and testing higher presets when performance permits. A High view at 50 FPS is already above the target. Failed upward trials introduce a cooldown before another attempt; Low is the minimum quality. Ultra stays a manual choice for the most detailed live view or a saved image.</p><p>The renderer keeps at most one fenced GPU frame outstanding in WebGL2 and checks its completion without blocking. A fence’s age includes browser scheduling and is not a precise GPU execution time. Hidden pages and modal guides suspend rendering. Empty-space skipping and scene-specific shaders reduce unused work. Parallel shader-compilation readiness is polled when supported; some drivers can still pause during compilation. Save image waits for a fresh frame at the selected quality. On supported browsers, a local render worker performs the graphics work while the main thread handles controls; CPU mode can also send worker-generated drawing commands to a bounded main-thread presenter without OffscreenCanvas. If Workers are unavailable, CPU tasks yield cooperatively. GPU fallback and WebXR use the main-window renderer. Browser and driver scheduling still prevent an absolute no-stall guarantee. These safeguards cannot promise a particular frame rate on every device. No server computes the scene.</p>
+  <h3>Picture studio: more detail in one moment</h3>
+  <p>Picture mode freezes the camera and simulation, then renders 64 × 64 tiles with a separate procedural-detail shader. HD uses 4 subpixel samples and up to 1,024 integration steps; 4K uses 8 and 1,536; 4K maximum uses 16 and 3,072. Additional advected plasma turbulence and multiscale nebula filaments give the still image structure beyond a larger live frame. Higher presets add finer noise frequencies, filtered against the output pixel footprint. Live Ultra retains its own 768-step ceiling.</p>
+  <p>Subpixel samples use floating-point accumulation in linear light, after each shader sample’s tone mapping and 8-bit readback; the PNG is not a raw HDR image. Extra samples improve coverage, and extra integration and procedural frequencies resolve more structure, but neither elapsed time nor a larger budget guarantees a visible improvement in every scene. The physics approximations remain the same. Progress counts completed rendering work; remaining time is an estimate. Cancel restores the live view.</p>
+  <p>If WebGL cannot start, the site offers an explicit opt-in CPU preview. It projects simple shapes, glows, and coordinate marks into Canvas 2D, capped at 640 × 420 pixels, with a measured-cost drawing budget targeting 15–30 Hz. Its schematic geometry density adapts separately from the GPU quality presets. It is not the ray-based optical model described above. A slow GPU never triggers this switch, and unavailable WebGL does not prove that the device physically lacks a GPU.</p>
+  <h3>VR and 360° are different cameras</h3>
+  <p>Onboard 360° works on the ordinary screen. Immersive VR requires a supported WebXR browser and headset, a secure context, and the user’s session permission. It uses tracked head poses and separate eye projections. These are visual cameras in the modeled geometry, not relativistic observer tetrads. All scene rendering stays on this device; the browser’s XR runtime controls headset presentation.</p>`)}
+  ${section('08','White holes · reverse the causal flow',`
+  <p>A <strong>white hole</strong> is the time-reversed counterpart of a black hole in the ideal extended solution. Its interior is past trapped: future-directed signals can emerge, but outside travelers cannot enter through its past horizon. It is a hypothetical spacetime region, not a verified class of astronomical objects.</p>
+  <h3>Outgoing Painlevé–Gullstrand coordinates</h3>
+  <p>For the nonrotating solution, reversing the radial shift of the ingoing coordinates gives:</p>
+  ${eq(rows(r(square(d(v('s'))),o('='),o('−'),square(c),square(d(v('T'))),o('+'),square(bracket(r(d(R),o('−'),sqrt(frac(r(two,G,M),R)),d(v('T'))))),o('+'),square(R),square(d(v('Ω')))),r(frac(d(R),d(v('T'))),o('='),sqrt(frac(r(two,G,M),R)),o('±'),c,t('  (radial light rays)'))),'Outgoing Painlevé–Gullstrand metric and its radial null directions')}
+  <p>Inside r = 2GM/c², both future radial light directions have increasing r in this chart. The constant-T spatial slice is still flat. Thus outward-flowing reference marks are a useful coordinate picture; they are not a physical fabric being pumped out.</p>
+  <p>The live white-hole preset reverses the radial grid flow and starts with zero spin. The exterior retains <strong>positive-mass light bending</strong>; a white hole is not a negative-mass repeller. Its pale emission is an illustrative source boundary. “White” describes the time-reversed causal role, not a required color, surface, or thermal spectrum. Spin and added plasma remain schematic visual controls.</p>
+  <figure><div class="diagram-scroll">${causalBridgeDiagram()}</div><figcaption>The maximally extended Schwarzschild solution includes a future black-hole region, a past white-hole region, and two exterior regions. Future points upward; radial light follows 45° lines. A star collapsing in our universe does not generate this entire eternal extension.</figcaption></figure>`)}
+  ${section('09','Einstein–Rosen bridge & the traversable study',`
+  <p>The <strong>Einstein–Rosen bridge is not traversable</strong> from one exterior to the other. A connected spatial slice does not supply a future-directed path through spacetime. The causal diagram above shows why an entering traveler cannot exit into the other exterior.</p>
+  <p>To let a traveler cross a throat, the live <strong>traversal study uses an Ellis wormhole</strong> instead. Choose the Enterprise, NASA Shuttle, or astronaut in the bridge controls. This is a different ideal metric with no event horizon. Its required exotic stress-energy is not known to be available for engineering a macroscopic passage. The animation demonstrates that geometry; it does not turn the Schwarzschild bridge into a transport route.</p>
+  <h3>Proper radial distance and the throat</h3>
+  ${eq(rows(r(square(d(v('s'))),o('='),o('−'),square(c),square(d(v('t'))),o('+'),square(d(v('ℓ'))),o('+'),par(r(square(v('ℓ')),o('+'),square(v('b')))),square(d(v('Ω')))),r(v('R'),par(v('ℓ')),o('='),sqrt(r(square(v('ℓ')),o('+'),square(v('b')))),o(','),gap,o('−'),v('∞'),o('<'),v('ℓ'),o('<'),v('∞'))),'Ellis ultrastatic wormhole metric and areal radius')}
+  <p>Here b &gt; 0 is the throat’s areal radius. The two signs of ℓ identify the two ends. R has its minimum b at ℓ = 0; the throat circumference is 2πb. The time coefficient is constant, so this ideal geometry has no gravitational redshift between stationary clocks even though it bends light.</p>
+  <figure><div class="diagram-scroll">${ellisBridgeDiagram()}</div><figcaption>This catenoid embeds an equatorial constant-time slice in an extra drawing dimension. Its vertical coordinate z is not an extra physical direction. A real traveler passes through a spherical throat in three-dimensional space.</figcaption></figure>
+  <h3>The chart used by the renderer</h3>
+  <p>For stable local ray integration, the live scene uses an isotropic Cartesian chart x with radius ρ = ∥x∥. Transforming the proper radial coordinate gives:</p>
+  ${eq(rows(r(v('ρ'),o('='),frac(r(v('ℓ'),o('+'),sqrt(r(square(v('ℓ')),o('+'),square(v('b'))))),two)),r(v('ℓ'),o('='),v('ρ'),o('−'),frac(square(v('b')),r(n(4),v('ρ'))),o(','),gap,v('R'),o('='),v('ρ'),o('+'),frac(square(v('b')),r(n(4),v('ρ')))),r(v('F'),par(v('ρ')),o('='),n(1),o('+'),frac(square(v('b')),r(n(4),square(v('ρ')))),o(','),gap,square(d(v('s'))),o('='),o('−'),square(c),square(d(v('t'))),o('+'),square(v('F')),d(vec('x')),o('·'),d(vec('x')))),'Isotropic-coordinate form derived from the Ellis metric')}
+  <p>The throat lies at ρ = b/2. The limits ρ → ∞ and ρ → 0 approach different asymptotically flat ends. Each end has its own nebula color, shape, scale, and orientation, so the lensed opening reveals a visibly different region of space. These backgrounds are illustrative emission choices. A local proper length is F times its coordinate length. The traveler uses F at its center: a local rigid-body approximation, not a calculation of internal relativistic stresses. The tracking readout is a local chart offset, not a finite geodesic distance.</p>
+  <h3>Light follows the optical metric</h3>
+  <p>In this ultrastatic chart the effective refractive index is n = F. With Euclidean ray arclength s and unit direction u, Fermat’s equation becomes:</p>
+  ${eq(rows(r(frac(d(vec('x')),d(v('s'))),o('='),vec('u')),r(frac(d(vec('u')),d(v('s'))),o('='),vec('∇'),fn('ln',v('F')),o('−'),vec('u'),par(r(vec('u'),o('·'),vec('∇'),fn('ln',v('F'))))),r(vec('∇'),fn('ln',v('F')),o('='),o('−'),frac(r(two,square(v('b')),vec('x')),r(square(v('ρ')),par(r(n(4),square(v('ρ')),o('+'),square(v('b')))))))),'Optical-ray equation for the Ellis conformal spatial metric')}
+  <p>These equations follow from the chosen metric, while the numerical image uses finite steps and finite distant boundaries. Near-critical light can wind around the throat; higher-quality integration resolves more of this structure. The connected grid is a lensed coordinate annotation, not material forming the tunnel.</p>
+  <p>The selected traveler follows a prescribed visual route, ℓ(t) = 6b cos(0.12t), through both sides and back. The throat slider measures b in traveler model-radius units, so replacing or resizing the traveler changes the physical throat size. This route is not a solved spacecraft geodesic or a claim about propulsion. Its reference physical dimensions are retained. Tracking and onboard cameras let you inspect the changing sky during the crossing.</p>`)}
+  ${section('10','Sources & inspiration',`
+  <p class="math-small">Physics references</p><ul class="source-list">
+  <li>${link('https://arxiv.org/abs/gr-qc/0205127','R. Meinel · A physical route to the Kerr metric')} — metric, horizons, orbital frequencies, and ISCO.</li>
+  <li>${link('https://pages.astro.umd.edu/~miller/teaching/Brazil/lecture02.pdf','M. Coleman Miller · Black holes, University of Maryland')} — Schwarzschild and Kerr foundations.</li>
+  <li>${link('https://arxiv.org/abs/2105.07101','Perlick & Tsupko · Calculating black hole shadows')} — shadows, photon orbits, and observer dependence.</li>
+  <li>${link('https://arxiv.org/abs/gr-qc/0411060','Hamilton & Lisle · The river model of black holes')} — Schwarzschild infall coordinates; Kerr requires more than a swirling velocity field.</li>
+  <li>${link('https://arxiv.org/abs/2210.11057','Visser & Liberati · Painlevé–Gullstrand coordinates versus Kerr spacetime geometry')} — why a flat-slice Schwarzschild picture cannot simply be assumed for Kerr.</li>
+  <li>${link('https://jila.colorado.edu/~ajsh/bh/schww.html','Andrew Hamilton · White holes and wormholes, JILA')} — causal regions of the extended Schwarzschild solution and the impossibility of crossing its bridge.</li>
+  <li>${link('https://doi.org/10.1103/PhysRev.48.73','Einstein & Rosen · The particle problem in the general theory of relativity (1935)')} — the original bridge construction.</li>
+  <li>${link('https://doi.org/10.1063/1.1666161','H. G. Ellis · Ether flow through a drainhole (1973)')} — the original drainhole solution; its massless case is used for the traversal study.</li>
+  <li>${link('https://arxiv.org/abs/1607.07022','N. Tsukamoto · Strong deflection limit analysis and gravitational lensing of an Ellis wormhole')} — the ultrastatic metric, throat light sphere, and lensing.</li>
+  <li>${link('https://science.nasa.gov/universe/black-holes/anatomy/','NASA · Anatomy of a black hole')} — photon sphere, accretion, and beaming.</li>
+  <li>${link('https://www.nasa.gov/image-article/accretion-disk-of-black-hole-glows-new-simulation/','NASA · Hot inner accretion flow')} — X-ray emission near a black hole.</li>
+  <li>${link('https://science.nasa.gov/photojournal/echo-mapping-in-a-black-hole-accretion-disk-and-torus-animation/','NASA · Accretion disc and dusty torus')} — cooler dust and infrared emission.</li>
+  <li>${link('https://science.nasa.gov/asset/hubble/the-cigar-galaxy-m82-visible-infrared-and-x-ray-views/','NASA · A galaxy across visible, infrared, and X-ray bands')} — different components dominate different wavelengths.</li>
+  <li>${link('https://www.nasa.gov/universe/what-are-black-holes/','NASA · What are black holes?')} — radio, X-ray, and gamma-ray emission from surrounding matter and jets.</li>
+  <li>${link('https://eventhorizontelescope.org/faq','Event Horizon Telescope · Frequently asked questions')} — millimeter radio observations of gas around black holes.</li>
+  <li>${link('https://science.nasa.gov/ems/06_microwaves/','NASA · Microwaves')} — the relationship between microwave and radio bands.</li>
+  <li>${link('https://imagine.gsfc.nasa.gov/features/yba/CygX1_mass/binary/equation_derive.html','NASA · Kepler’s formula for a binary')} — separation, barycenter, and circular motion.</li>
+  <li>${link('https://articles.adsabs.harvard.edu/pdf/1983ApJ...268..368E','P. Eggleton · Approximations to the radii of Roche lobes')} — equivalent-volume Roche-radius approximation.</li>
+  <li>${link('https://link.springer.com/article/10.1007/s11214-021-00818-7','Rossi et al. · The process of stellar tidal disruption')} — tidal radius and debris fallback.</li>
+  <li>${link('https://arxiv.org/abs/2104.14580','S. Gezari · Tidal disruption events')} — observations and model limits.</li>
+  <li>${link('https://svs.gsfc.nasa.gov/13805/','NASA Goddard · A star-destroying black hole')} — streams and possible jets.</li></ul>
+  <p class="math-small">Rendering API references</p><ul class="source-list">
+  <li>${link('https://registry.khronos.org/webgl/extensions/KHR_parallel_shader_compile/','Khronos · Parallel shader compilation extension')} — nonblocking program-readiness queries.</li>
+  <li>${link('https://registry.khronos.org/webgl/specs/2.0/','Khronos · WebGL 2 specification')} — GPU fences and zero-timeout completion polling.</li>
+  <li>${link('https://www.w3.org/TR/webxr/','W3C · WebXR Device API')} — immersive session support, user consent, secure contexts, tracked poses, and per-eye projection matrices.</li></ul>
+  <p class="math-small">Project and visual references supplied for this explorer</p><ul class="source-list">
+  <li>${link('https://github.com/kavan010/black_hole','kavan010 / black_hole')} — GPU ray-tracing inspiration. This site uses an independent browser implementation.</li>
+  <li>${link('https://github.com/Luke-A-Wendt/orbital-atlas','Luke-A-Wendt / orbital-atlas')} — dark observatory palette and interface inspiration.</li>
+  <li>Video references: ${link('https://www.youtube.com/watch?v=N6EiguPY3WQ','01')} · ${link('https://www.youtube.com/watch?v=8-B6ryuBkCM','02')} · ${link('https://www.youtube.com/watch?v=17tEg_uTF_A','03')} · ${link('https://www.youtube.com/watch?v=WESb6MDXqkQ','04')}</li></ul>`)}
+  </article>`;
+  const input=container.querySelector('#math-diagram-spin');
+  input.addEventListener('input',()=>{
+    const value=Number(input.value);
+    container.querySelector('#math-diagram-spin-value').textContent=value.toFixed(2);
+    container.querySelector('#math-kerr-diagram').innerHTML=kerrDiagram(value);
+  });
+}

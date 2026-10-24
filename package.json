@@ -1,0 +1,12 @@
+{
+  "name": "event-horizon-observatory",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline black hole observatory with local GPU rendering",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build-offline.mjs",
+    "test": "node tests/config.mjs && node tests/renderer-state.mjs && node tests/objects.mjs && node tests/camera-objects.mjs && node tests/v4-integration.mjs && node tests/v5-acceptance.mjs && node tests/v6-performance.mjs && node tests/v7-adaptive.mjs && node tests/v6-grid.mjs && node tests/warp-math.mjs && node tests/v8-camera.mjs && node tests/v8-physics.mjs && node tests/cpu-renderer.mjs && node tests/photo-renderer.mjs && node tests/v8-ui.mjs && node tests/v9-objects.mjs && node tests/v9-craft.mjs && node tests/v9-fidelity.mjs && node tests/v9-ui.mjs && node tests/v9-ui-runtime.mjs && node tests/v9-integration.mjs && node tests/v9-worker.mjs && node tests/v10-scenes.mjs && node tests/v10-craft.mjs && node tests/v10-shaders.mjs && node tests/v10-loader.mjs && node tests/v10-ui.mjs && node tests/v10-performance.mjs && node tests/v11-runtime.mjs && node tests/v11-ui.mjs && node tests/v11-cpu.mjs && node tests/v11-spectra.mjs && node tests/v11-renderer.mjs && node tests/v11-publication.mjs && node tests/offline-bundle.mjs"
+  }
+}
