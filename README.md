@@ -5,6 +5,7 @@ An interactive spacetime observatory that runs entirely on your own device. Fly 
 [Event Horizon](https://luke-a-wendt.github.io/event-horizon/)
 
 <img width="1233" height="766" alt="image" src="https://github.com/user-attachments/assets/bad77f02-788f-4253-a7a8-0889ccaf60bc" />
+<img width="3840" height="2158" alt="image" src="https://github.com/user-attachments/assets/2a2e9208-f0bb-4257-8e0f-0df1fb2f8c6b" />
 <img width="1920" height="1079" alt="image" src="https://github.com/user-attachments/assets/2ce9ad45-2b71-455c-bf9f-292cea929ecf" />
 
 
