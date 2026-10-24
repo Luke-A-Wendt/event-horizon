@@ -2,6 +2,8 @@
 
 An interactive spacetime observatory that runs entirely on your own device. Fly around black holes, change their mass and spin, assemble scenes, place orbiting objects, inspect a white-hole model, traverse an illustrative wormhole, and explore the mathematics.
 
+[Event Horizon](https://luke-a-wendt.github.io/event-horizon/)
+
 <img width="1233" height="766" alt="image" src="https://github.com/user-attachments/assets/bad77f02-788f-4253-a7a8-0889ccaf60bc" />
 
 ## Explore
