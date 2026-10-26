@@ -13,7 +13,7 @@ export const DEFAULTS = Object.freeze({
  nebula:false,nebulaShape:'cloud',nebulaColor:'#657ed4',nebulaScale:1,nebulaIntensity:1,nebulaRotation:0,
  planet:false,planetMass:1,planetRadius:1,planetDistance:10,planetColor:'#438dcc',
  tidalStar:false,starRadius:1,starColor:'#ffba64',disruptionStrength:1,starDistance:10,
- binary:false,secondaryWhiteHole:false,binaryMotion:'orbit',mergerDuration:45,gravitationalWaves:false,waveAmplitude:.3,waveFrequency:1,binaryRatio:1,binarySeparation:18,secondarySpin:.65,primaryTilt:0,primaryAzimuth:0,secondaryTilt:35,secondaryAzimuth:60,
+ binary:false,secondaryWhiteHole:false,binaryMotion:'orbit',mergerOutcome:'coalescence',mergerDuration:45,gravitationalWaves:false,waveAmplitude:.3,waveFrequency:1,binaryRatio:1,binarySeparation:18,secondarySpin:.65,primaryTilt:0,primaryAzimuth:0,secondaryTilt:35,secondaryAzimuth:60,
  jets:false,jetStructure:'steady',jetColor:'#79bfff',jetSpread:1,jetLength:1,jetIntensity:1,
  secondaryDisk:true,secondaryJets:false,secondaryDiskStyle:'thermal',secondaryDiskPalette:'physical',secondaryJetStructure:'steady',secondaryDiskColor:'#ffd69a',secondaryDiskOuter:13,secondaryDiskThickness:1,secondaryDiskDensity:1,
  secondaryJetColor:'#79bfff',secondaryJetSpread:1,secondaryJetLength:1,secondaryJetIntensity:1
@@ -49,6 +49,13 @@ export const SCENE_PRESETS = [
  {id:'gamma-engine',number:'29',title:'Gamma-ray engine',subtitle:'A jet aimed almost toward us',heading:'An energetic line of sight',description:'Look nearly along a spinning black hole’s jet in a false-color gamma-ray study. Jet plasma dominates the illustrative response, while ordinary stars, dust, and solid surfaces become faint.',category:'Black holes',tags:['Gamma rays','Near-axis jet','High spin'],explore:'Rotate away from the jet, then compare Radio / mm and X-ray. The emission is illustrative; it is not a calibrated gamma-ray image or a model of particle acceleration.',className:'mini-tidal',patch:{spectrum:'gamma',spin:.995,diskOuter:8,diskThickness:.65,diskDensity:.65,diskColor:'#ffb36b',jets:true,jetColor:'#ffd49c',jetSpread:.4,jetLength:1.5,jetIntensity:2.6,primaryTilt:67,primaryAzimuth:68,nebula:false,starDensity:.6,exposure:1.15},camera:{yaw:.3,pitch:.3,distanceRg:38}}
 ];
 SCENE_PRESETS.push(...ADDITIONAL_SCENES);
+SCENE_PRESETS.push({id:'dyson-garden',title:'Dyson sphere',subtitle:'Dyson sphere · an inhabited inner world',heading:'Dyson sphere',category:'Solar systems',tags:['Dyson sphere','Habitable-zone shell','Procedural interior'],description:'A fictional one-AU habitat encloses a Sun-like star. Its complete metal exterior encloses green gardens, lakes, rivers, solar arrays and city districts illuminated by the central star. The rigid shell assumes active support and artificial surface gravity; it is an architectural illustration, not an engineering solution.',explore:'Select Dyson sphere in Objects to change its radius, opacity and cutaway. Zoom through the shell toward the central star, or Ride inside to explore the inner surface. Helios retains its mass, spin and radius controls: move its radius below the marked compactness threshold to compare a dark central horizon. Exterior planets remain outside the shell.',className:'mini-planet',patch:{blackHole:false,binary:false,disk:false,jets:false,planet:false,tidalStar:false,stars:true,starDensity:.8,nebula:true,nebulaColor:'#273f58',nebulaShape:'cloud',nebulaIntensity:.18,exposure:1.05},objects:[
+ {type:'star',key:'helios',name:'Helios',parentId:'space',massSolar:1,radiusMeters:696340000,starStyle:'main',angularVelocity:2.9e-6,color:'#ffe2af',spots:.22,corona:.16},
+ {type:'dyson',key:'habitat',parentKey:'helios',name:'Dyson sphere',radiusMeters:149597870700,dysonCutaway:0,opacity:1,massSolar:0,color:'#a5bdce',rotation:0},
+ {type:'planet',key:'ochre',parentKey:'helios',name:'Ochre',orbitMeters:3.2e11,radiusMeters:7200000,massSolar:3.6e-6,planetStyle:'rocky',color:'#ca8a5d',phase:1.1},
+ {type:'planet',key:'zephyr',parentKey:'helios',name:'Zephyr',orbitMeters:7.5e11,radiusMeters:49000000,massSolar:.0007,planetStyle:'gas',color:'#86c1d7',phase:3.6},
+ {type:'belt',parentKey:'helios',name:'Outer metallic debris',radiusMeters:1.05e12,innerRadiusRatio:.84,thicknessRatio:.006,material:'metallic',opacity:.3,color:'#9ca9b2'}
+],camera:{focusIndex:1,mode:'track',focusDistance:3.4,yaw:.72,pitch:.22}});
 const mergedScenes=new Set(['crossed-bridges','cold-cloud','stellar-passage','station-eclipse','ribbon-flow','bridge-whitehole','interior-geometry','grid-star','mixed-pair']);
 for(let i=SCENE_PRESETS.length-1;i>=0;i--)if(mergedScenes.has(SCENE_PRESETS[i].id))SCENE_PRESETS.splice(i,1);
 SCENE_PRESETS.push({id:'rainbow-disc',title:'Double rainbow',subtitle:'A spectrum in orbit',heading:'Every color, bent by gravity',category:'Black holes',tags:['Rainbow','Artistic plasma','Lensing'],description:'A playful rainbow emission palette winds through a structured accretion disc. This artistic color mapping is not a physical thermal spectrum.',explore:'Open the disc properties to switch between Physical, Artistic and Rainbow palettes.',className:'mini-disc',patch:{spin:.82,disk:true,diskStyle:'ribbons',diskPalette:'rainbow',diskDensity:1.2,diskOuter:22,diskThickness:.7,stars:true,nebula:false},camera:{yaw:.25,pitch:.035,distanceRg:38}});
@@ -66,9 +73,10 @@ for(const scene of SCENE_PRESETS){
   scene.explore='Press Play for a prescribed circular orbit. Compare A meeting of opposites · inspiral for an approaching pair. The two positive masses bend light inward; the outward coordinate flow is not repulsive gravity. This is not a solved stable black-hole–white-hole binary.';
  }
  if(scene.id==='mixed-merger'){
-  scene.title='A meeting of opposites · inspiral';scene.subtitle='A speculative approach, not mass cancellation';
-  scene.description='A black hole and hypothetical white hole spiral together on a prescribed path. Their positive masses do not cancel: this illustration retains a positive-mass dark remnant rather than flat space. The merger endpoint is an artistic continuation, not a prediction from a solved spacetime.';
-  scene.explore='Press Play to contrast the shrinking separation with Black + white holes · orbit. Both use the same masses, spins (0.86 and 0.65), and initial separation. Spin adds an angular cue to the inward and outward radial flow. Neither example predicts the stability or collision outcome of a real black-hole–white-hole pair.';
+  scene.title='A meeting of opposites · inspiral';scene.subtitle='Illustrative cancellation to flat space';
+  scene.patch={...scene.patch,binaryRatio:1,spin:.86,secondarySpin:.86,mergerOutcome:'illustrative-cancellation'};
+  scene.description='Two equal-mass compact bodies spiral together. In this deliberately fictional comparison, their field strengths decrease linearly with the overlap of their original horizon envelopes, reaching flat space when the centers coincide. A positive-mass white hole does not physically cancel a black hole; this is an illustrative interpolation, not a general-relativistic collision solution.';
+  scene.explore='Press Play to see the two 6.5-million-solar-mass fields overlap and fade to a stationary flat grid. Both spins begin at 0.86. Editing the mass ratio leaves the unmatched excess instead of canceling unequal masses. Compare Black + white holes · orbit for the positive-mass orbit illustration.';
  }
  if(scene.category==='Warp drive'){scene.patch.warpFactor=4;scene.camera={...scene.camera,focusIndex:0,mode:'track',focusDistance:16,yaw:-Math.PI/2,pitch:0,fitWarpSide:true};if(scene.id==='warp-cruise'){scene.subtitle='A moving field in violet clouds';scene.tags=['Warp 4','Moving grid','Filament nebula'];scene.description='A side view reveals the Enterprise and its Alcubierre bubble against a violet filament sky. Drive centers the ship in an orbit view; W/S changes speed and A/D changes turn rate.';}}
  if(scene.id==='orbital-expedition'){scene.patch={...scene.patch,diskStyle:'ribbons',diskColor:'#689dff',nebula:true,nebulaColor:'#6f4166',nebulaIntensity:.5};}
@@ -82,7 +90,7 @@ export const SCENE_PROGRESSIONS = Object.freeze({
  'Black holes':['disk','nebula','radiant-descent','prism-disc','rainbow-disc','extreme-kerr','polar','braided-jets','dust-cathedral','radio-observatory','gamma-engine','sagittarius-a','ton-618','planet','disruption','collapse-cycle','horizon-watch','binary','lens-alignment','xray-binary'],
  'Warp drive':['warp-lab','warp-cruise','warp-orbit','warp-excursion'],
  'Wormholes':['bridge','bridge-planets','bridge-nebulae','bridge-blackhole'],
- 'Solar systems':['solar-system','proxima-centauri','alpha-centauri','thorne-zytkow'],
+ 'Solar systems':['solar-system','proxima-centauri','alpha-centauri','thorne-zytkow','dyson-garden'],
  'Spacecraft':['empty-space','shuttle-space','nasa-shuttle','orbital-expedition'],
  'Geometry':['geometry-orbit','geometry','grid-kerr','white-hole','grid-binary','merger','mixed-pair-geometry','mixed-merger']
 });

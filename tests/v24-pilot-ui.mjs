@@ -7,7 +7,7 @@ import {warpSideFraming} from '../dist/camera-framing.js';
 import {formatFlightDilation,installPilotControls} from '../dist/pilot-ui.js';
 assert.equal(formatFlightDilation(0),'0 ns');
 assert.equal(formatFlightDilation(1e-9),'1.0 ns');
-assert.equal(formatFlightDilation(.123456789),'1.2 × 10⁸ ns');
+assert.equal(formatFlightDilation(.123456789),'120 ms');
 assert.equal(formatFlightDilation(Infinity),'—');
 const html=readFileSync(new URL('../dist/index.html',import.meta.url),'utf8');
 for(const [width,height] of [[1440,806],[900,556],[360,520],[667,281]]){
@@ -41,7 +41,7 @@ for(const [width,height] of [[1440,806],[900,556],[360,520],[667,281]]){
   }
   centered();
   for(let i=1;i<=50;i++){r.advanceSimulation((r.lastTime||1000)+100);centered();}
-  assert(pilot.start(craft.id));if(craft.type==='shuttle')assert.equal($('pilotDilation').textContent,'0 ns');$('pilotStop').click();
+  const lifetimeLag=r.getObjectClock(craft.id)?.lagSeconds;assert(pilot.start(craft.id));if(craft.type==='shuttle')assert.equal($('pilotDilation').textContent,formatFlightDilation(lifetimeLag));$('pilotStop').click();
  }
  pilot.dispose();r.dispose();
 }

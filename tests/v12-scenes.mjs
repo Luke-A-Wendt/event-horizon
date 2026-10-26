@@ -6,8 +6,8 @@ import {REFERENCE_RG_METERS} from '../dist/objects.js';
 import {fixture} from './render-fixture.mjs';
 
 const scene=id=>SCENE_PRESETS.find(s=>s.id===id);
-assert.equal(SCENE_PRESETS.length,44);
-assert.equal(new Set(SCENE_PRESETS.map(s=>s.id)).size,44);
+assert.equal(SCENE_PRESETS.length,45);
+assert.equal(new Set(SCENE_PRESETS.map(s=>s.id)).size,45);
 assert.equal(DEFAULTS.paused,true);
 for(const s of SCENE_PRESETS){
  assert.equal(makePreset(s.id).paused,true,`${s.id} begins paused`);
@@ -48,4 +48,4 @@ r.loadScene('alpha-centauri');r.render();assert.equal(r.objects[1].parentId,r.ob
 r.loadScene('proxima-centauri');r.render();assert.equal(r.objects[1].parentId,r.objects[0].id);assert.equal(r.objects[1].orbitMeters,.04848*AU_METERS);
 r.loadScene('empty-space');const giant=r.addChildObject('space','planet',{name:'Ring laboratory',planetStyle:'gas',radiusMeters:58232000});r.addChildObject(giant.id,'ring',{radiusMeters:140000000,orbitMeters:1,material:'icy'});r.render();assert.equal(r.objects[1].type,'ring');assert.equal(r.objects[1].parentId,r.objects[0].id);assert.equal(r.objects[1].material,'icy');
 assert.deepEqual(errors,[]);r.dispose();
-console.log('PASS: 44 categorized paused scenes, named physical systems, hierarchical Solar System and binary references, honest grid-only limits, contextual cameras, complexity estimates, and finite render geometry.');
+console.log('PASS: 45 categorized paused scenes, named physical systems, hierarchical Solar System and binary references, honest grid-only limits, contextual cameras, complexity estimates, and finite render geometry.');

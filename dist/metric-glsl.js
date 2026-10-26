@@ -50,6 +50,7 @@ vec3 diagnosticSegment(vec3 a,vec3 b,float travelled,float pixelAngle){
  vec3 sum=vec3(0);float pixel=max(travelled+length(b-a)*.5,1e-10)*pixelAngle;
  for(int k=0;k<2;k++){
   if(uWarpFlags.w<.5)break;if(k==1&&uBinary==0)break;
+  if(uHoles[k].w<=0.0)continue;
   vec3 center=uHoles[k].xyz,axis=axisFor(k);float mass=max(uHoles[k].w,1e-20),h=horizonFor(k);
   float width=max(mass*.008,pixel*1.25),rim=uMetricOptions.w>.5?metricSphereRim(a,b,center,h,width):0.0;
   sum+=vec3(.46,.85,1.25)*rim;
@@ -68,6 +69,7 @@ vec3 diagnosticSegment(vec3 a,vec3 b,float travelled,float pixelAngle){
  if(uMetricOptions.x>.5){
   for(int k=0;k<2;k++){
    if(uWarpFlags.w<.5)break;if(k==1&&uBinary==0)break;
+   if(uHoles[k].w<=0.0)continue;
    vec3 center=uHoles[k].xyz;float radius=horizonFor(k),width=max(radius*.012,pixel*1.2);
    float codeValue=floor(fract(k==0?uJetStructure.x:uJetStructure.y)*4194304.0+.5);
    vec3 velocity=metricPackedDirection(codeValue);

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {SCENE_PRESETS,DEFAULTS,makePreset,SCENE_CATEGORIES} from '../dist/config.js';
 const scenes=new Map(SCENE_PRESETS.map(s=>[s.id,s]));
-assert.equal(scenes.size,44);
+assert.equal(scenes.size,45);
 for(const id of ['beacon-sweep','grid-planet','ringed-world','ribbon-flow','bridge-whitehole','interior-geometry'])assert(!scenes.has(id),`${id} was removed without removing its object type`);
 for(const id of ['collapse-cycle','geometry-orbit','mixed-pair-geometry','merger','mixed-merger','bridge-blackhole','bridge-planets','bridge-nebulae','prism-disc','braided-jets'])assert(scenes.has(id));
 assert.deepEqual(makePreset('disk'),{...DEFAULTS},'Opening accretion scene is unchanged');
@@ -26,4 +26,4 @@ assert.equal(makePreset('mixed-pair-geometry').secondaryWhiteHole,true);assert.e
 assert.equal(makePreset('merger').binaryMotion,'merger');assert.equal(makePreset('merger').gravitationalWaves,true);
 assert(!scenes.has('crossed-bridges'));
 assert.equal(makePreset('prism-disc').diskPalette,'artistic');assert.equal(makePreset('braided-jets').jetStructure,'helix');
-console.log('PASS: 44 complete paused scenes, preserved default, removed presets, pure Geometry category, collapse threshold crossing, explicit speculative comparisons, artistic materials, and bridge skies.');
+console.log('PASS: 45 complete paused scenes, preserved default, removed presets, pure Geometry category, collapse threshold crossing, explicit speculative comparisons, artistic materials, and bridge skies.');

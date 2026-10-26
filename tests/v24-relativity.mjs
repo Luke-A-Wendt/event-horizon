@@ -35,13 +35,13 @@ assert.deepEqual(coast.velocity,v);near(coast.coordinateTimeSeconds,10);near(coa
 coast.angularVelocity=0;coast.basis=[[1,0,0],[0,1,0],[0,0,-1]];coast.thrust=10;const before=coast.speed;integratePlanar(coast,1);assert(coast.speed<before);assert(coast.velocity[2]>0);
 const limit=ship(C*(1-1e-12));for(let i=0;i<100;i++)integratePlanar(limit,1);assert(limit.speed<C);
 
-// Both clocks share simulation playback, pause and save/load; Drive sessions
-// reset them. A superluminal warp speed never enters an SR square root.
+// Both clocks share simulation playback, pause and save/load. Lifetime clock
+// totals survive Drive sessions; a superluminal warp speed is never sent to SR.
 const renderer=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});renderer.loadScene('shuttle-space');const shuttle=renderer.objects[0];renderer.setFreeDrive(shuttle.id,true);renderer.update({paused:false,speed:2});renderer.setFlightPower(10);renderer.lastTime=1000;renderer.advanceSimulation(1100);near(renderer.getFlightState().coordinateTimeSeconds,.2);
 renderer.update({paused:true});renderer.advanceSimulation(1200);near(renderer.getFlightState().coordinateTimeSeconds,.2);assert(renderer.getFlightState().timeLagSeconds>0);
 const saved=serializeScene(renderer),copy=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});restoreRenderer(copy,parseScene(saved));near(copy.getFlightState().coordinateTimeSeconds,.2);assert.equal(copy.getFlightState().timeLagSeconds,renderer.getFlightState().timeLagSeconds);
 assert.throws(()=>parseScene(saved.replace('thrust: 10','thrust: 10.5')),/thrust/);assert.throws(()=>parseScene(saved.replace(/velocity: \[[^\n]+\]/,'velocity: [0, 0, 299792458]')),/speed of light/);
-renderer.setFreeDrive(shuttle.id,false);assert.equal(shuttle.flight.coordinateTimeSeconds,0);assert.equal(shuttle.flight.timeLagSeconds,0);renderer.setFreeDrive(shuttle.id,true);near(renderer.getFlightState().coordinateTimeSeconds,0);near(renderer.getFlightState().speedMetersPerSecond,0);
+const lifetimeClock=structuredClone(shuttle.clock);renderer.setFreeDrive(shuttle.id,false);assert.deepEqual(shuttle.clock,lifetimeClock);renderer.setFreeDrive(shuttle.id,true);near(renderer.getFlightState().coordinateTimeSeconds,.2);assert.equal(renderer.getFlightState().timeLagSeconds,lifetimeClock.lagSeconds);near(renderer.getFlightState().speedMetersPerSecond,0);
 renderer.loadScene('warp-cruise');const enterprise=renderer.objects.find(o=>o.type==='enterprise');renderer.setFreeDrive(enterprise.id,true);renderer.update({paused:false,speed:1});renderer.lastTime=2000;renderer.advanceSimulation(2100);const warp=renderer.getFlightState();assert(warp.speedMetersPerSecond>C);near(warp.coordinateTimeSeconds,.1);assert.equal(warp.properTimeSeconds,null);assert.equal(warp.timeLagSeconds,null);
 renderer.dispose();copy.dispose();
 console.log('PASS: SR proper thrust, subluminal motion, analytic collinear trajectory, transverse acceleration, stable nanosecond clock lag, coast/turn-and-burn, pause/reset/YAML clocks and distinct warp-clock semantics.');

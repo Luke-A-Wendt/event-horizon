@@ -61,6 +61,7 @@ vec3 coordinateGridCoordinates(vec3 p,float weakFlowTime){
  for(int k=0;k<2;k++){
   if(uWarpFlags.w<.5)break;
   if(k==1&&uBinary==0)break;
+  if(uHoles[k].w<=0.0)continue;
   float m=max(uHoles[k].w,1e-12);
   vec3 relative=(p-uHoles[k].xyz)/m;
   float r=max(length(relative),max(horizonFor(k)/m,1e-3));
@@ -78,7 +79,7 @@ vec3 coordinateGridCoordinates(vec3 p,float weakFlowTime){
   float radialStretch=sqrt(r/max(abs(material),.0001));
   stretch=max(stretch,max(abs(expansion),radialStretch)*(1.0+min(abs(angle)*3.0,8.0)));
  }
- if(uMetricOptions.y>0.0&&uWarpFlags.w>.5&&uBinary==1){
+ if(uMetricOptions.y>0.0&&uWarpFlags.w>.5&&uBinary==1&&uHoles[0].w>0.0&&uHoles[1].w>0.0){
   // An amplified retarded quadrupole strain cue, NOT numerical relativity.
   // The plus/cross pattern stretches perpendicular directions oppositely;
   // its bounded envelope leaves the distant reference chart flat.
@@ -167,6 +168,7 @@ vec4 coordinateGridAt(vec3 p,vec3 direction,float travelled,float pixelAngle){
  for(int k=0;k<2;k++){
   if(uWarpFlags.w<.5)break;
   if(k==1&&uBinary==0)break;
+  if(uHoles[k].w<=0.0)continue;
   if(uMetricOptions.w<.5&&length(p-uHoles[k].xyz)<=horizonFor(k))return vec4(0);
  }
  if(uWarpFlags.w<.5&&uGridFlowWindow>0.0){

@@ -1,6 +1,14 @@
 // An Ellis wormhole optical chart, compiled only for the bridge experiment.
 // The vacuum Einstein–Rosen bridge cannot be traversed; the UI and math guide
 // explicitly identify this exotic-matter comparison model instead.
+// Both physical vista spheres sit well beyond their mouth, in the local
+// asymptotically flat chart. Inversion sends the far sphere to an exact sphere
+// in the shared isotropic chart: no sky decal or arbitrary portal clipping.
+export const BRIDGE_WORLD_LAYOUT=Object.freeze({distance:15,radius:3});
+export function bridgeWorldSphere(other=false,throat=1,axis=[0,0,1]){
+ const {distance,radius}=BRIDGE_WORLD_LAYOUT,scale=other?1/(4*(distance*distance-radius*radius)):1;
+ return {center:axis.map(v=>v*distance*scale*throat),radius:radius*scale*throat,other};
+}
 export function bridgeGLSL({ultra=false,photo=false,photoSteps=3072,probe=false,attachments=false,bodyGravity=false}={}) {
  return `
 float bridgeConformalAt(vec3 p){return 1.0+.25/max(dot(p,p),1e-12);}
@@ -52,31 +60,63 @@ vec4 bridgeGridSegment(vec3 a,vec3 b,float travelled,float pixelAngle){
  other.rgb*=vec3(1.3,.65,1.35);
  return vec4(first.rgb+(1.0-first.a)*other.rgb,first.a+(1.0-first.a)*other.a);
 }
-// The departure world is finite foreground geometry in this isotropic chart.
-// Its entire bound stays outside r=.5 (the throat). Unlike a sky-painted disc,
-// it can occlude the mouth and is hidden by a nearer traveler on the same ray.
-// This endpoint placement and material are illustrative, not a second source
-// in the Ellis solution. The opposite world remains a distant planetary vista.
-vec3 bridgeDepartureCenter(){
- vec3 center=vec3(.95,-.80,1.30);center.xz=rot(uTime*.006)*center.xz;return center;
+// Finite worlds in both mouths' outward directions. The traveler stays on
+// the common axis and turns around well before either planetary surface.
+vec3 bridgeMouthAxis(){
+ vec3 helper=abs(uPrimaryAxis.z)<.9?vec3(0,0,1):vec3(1,0,0);
+ return cross(unit(cross(uPrimaryAxis,helper)),uPrimaryAxis);
+}
+vec3 bridgeDepartureCenter(){return bridgeMouthAxis()*${BRIDGE_WORLD_LAYOUT.distance.toFixed(1)};}
+vec3 bridgeWorldMaterial(vec3 normal,vec3 ray,bool other){
+ vec3 tex=localPoint(normal,uPrimaryAxis);tex.xz=rot(uTime*.002)*tex.xz;
+ float continent=detailedFbm(tex*4.3+vec3(7.1,2.4,9.8));
+ float fine=detailedFbm(tex*29.0+vec3(19.1,5.7,11.0));
+ float light=.11+.89*max(0.0,dot(normal,unit(-bridgeMouthAxis()+uPrimaryAxis*.65)));
+ vec3 ground;
+ if(other){
+  // Arakas: broad warm dune seas, striated ridges and dark dry uplands.
+  float latitude=asin(clamp(tex.y,-1.0,1.0)),longitude=atan(tex.z,tex.x);
+  float dunes=.5+.5*sin(longitude*92.0+sin(latitude*18.0+continent*6.0)*4.0+fine*2.0);
+  ground=mix(vec3(.27,.085,.028),vec3(.88,.44,.14),.3+continent*.7);
+  ground*=.84+.16*dunes;
+  ground=mix(ground,vec3(.20,.065,.025),smoothstep(.66,.78,continent)*.7);
+ }else{
+  // Caladan: near-equal ocean and continent coverage, lush coasts and clouds.
+  float land=smoothstep(.47,.53,continent);
+  vec3 water=mix(vec3(.008,.065,.15),vec3(.018,.27,.40),smoothstep(.38,.52,continent));
+  vec3 forest=mix(vec3(.025,.13,.055),vec3(.18,.34,.12),fine);
+  forest=mix(forest,vec3(.35,.36,.28),smoothstep(.63,.74,continent));
+  ground=mix(water,forest,land);
+  float coast=1.0-smoothstep(.006,.023,abs(continent-.5));ground+=coast*vec3(.025,.055,.028);
+  float cloud=smoothstep(.59,.73,detailedFbm(tex*12.0+vec3(18.4,1.2,uTime*.002)))*.62;
+  ground=mix(ground,vec3(.75,.83,.88),cloud);
+  ground+=(1.0-land)*pow(max(0.0,dot(reflect(bridgeMouthAxis(),normal),-ray)),44.0)*vec3(.14,.21,.25);
+ }
+ float limb=pow(1.0-max(0.0,dot(normal,-ray)),5.0);
+ vec3 atmosphere=other?vec3(.40,.16,.035):vec3(.035,.24,.48);
+ // The spectral response applies to terrain and atmosphere together.
+ return surfaceSpectrum(ground+limb*atmosphere,light,other?.18:.10,other?.08:.16);
 }
 vec4 bridgeDepartureHit(vec3 a,vec3 b,out float fraction){
  fraction=1.0;if(uBridge.z<.5)return vec4(0);
- vec3 center=bridgeDepartureCenter(),delta=b-a;float span=length(delta);
- if(span<1e-12)return vec4(0);
- vec3 ray=delta/span,offset=a-center;float along=dot(offset,ray),radius=.88;
- float discriminant=radius*radius-dot(cross(offset,ray),cross(offset,ray));
- if(discriminant<0.0)return vec4(0);
- float root=sqrt(discriminant),distance=-along-root;
- if(distance<0.0)distance=-along+root;
- if(distance<0.0||distance>span)return vec4(0);
- fraction=distance/span;vec3 normal=unit(a+ray*distance-center);
- if(uSpectrum==5)return vec4(vec3(.52,.88,1.35)*(1.0-smoothstep(.13,.32,abs(dot(normal,ray)))),1);
- float terrain=detailedFbm(normal*6.0+vec3(8.0,5.0,uTime*.003));
- float light=.08+.92*max(0.0,dot(normal,unit(vec3(-.6,.8,-.4))));
- vec3 ground=mix(vec3(.23,.055,.025),vec3(.75,.38,.12),terrain);
- float atmosphere=pow(1.0-max(0.0,dot(normal,-ray)),5.0);
- return vec4(surfaceSpectrum(ground,light,.12,.14)+atmosphere*vec3(.40,.16,.035),1);
+ vec3 delta=b-a;float span=length(delta);if(span<1e-12)return vec4(0);
+ vec3 ray=delta/span,worldCenter=bridgeDepartureCenter();
+ float worldRadius=${BRIDGE_WORLD_LAYOUT.radius.toFixed(1)},inversion=1.0/(4.0*(dot(worldCenter,worldCenter)-worldRadius*worldRadius));
+ vec4 nearest=vec4(0);
+ for(int end=0;end<2;end++){
+  bool other=end==1;float scale=other?inversion:1.0;
+  vec3 center=worldCenter*scale,offset=a-center;float radius=worldRadius*scale,along=dot(offset,ray);
+  if(dot(offset,offset)>(span+radius)*(span+radius))continue;
+  float discriminant=radius*radius-dot(cross(offset,ray),cross(offset,ray));if(discriminant<0.0)continue;
+  float root=sqrt(discriminant),distance=-along-root;if(distance<0.0)distance=-along+root;
+  if(distance<0.0||distance>span||distance/span>=fraction)continue;
+  fraction=distance/span;vec3 hit=a+ray*distance,point=other?hit/(4.0*dot(hit,hit)):hit;
+  vec3 radial=unit(hit),tangent=other?unit(ray-2.0*radial*dot(radial,ray)):ray;
+  vec3 normal=unit(point-worldCenter);
+  if(uSpectrum==5)nearest=vec4(vec3(.20+.55*max(0.0,dot(normal,-tangent))),1);
+  else nearest=vec4(bridgeWorldMaterial(normal,tangent,other),1);
+ }
+ return nearest;
 }
 vec3 bridgeRegionSky(vec3 direction,bool other){
  if(uSpectrum==5)return vec3(0);
@@ -97,21 +137,6 @@ vec3 bridgeRegionSky(vec3 direction,bool other){
   if(uSpectrum==3){emission=other?vec3(.46,.20,.08):vec3(.18,.06,.27);density*=.42;}
   if(uSpectrum==4){emission=vec3(.50,.24,.75);density*=.003*pow(diffuse,4.0);}
   result+=emission*density;
- }
- // The distant destination is sampled only after the integrated ray reaches
- // the other asymptotic end. The departure planet is intersected above.
- if(uBridge.z>.5&&other){
-  vec3 axis=unit(vec3(.12,-.30,1.0));
-  axis.xz=rot(uTime*.006)*axis.xz;
-  vec3 ray=unit(direction),relative=ray-axis*dot(ray,axis);float angular=length(relative),radius=.38;
-  if(dot(ray,axis)>0.0&&angular<radius){
-   vec3 normal=unit(relative/radius-axis*sqrt(max(0.0,1.0-angular*angular/(radius*radius))));
-   float terrain=detailedFbm(normal*10.0+vec3(31.0,5.0,uTime*.003));
-   float light=.08+.92*max(0.0,dot(normal,unit(vec3(-.6,.8,-.4))));
-   vec3 ground=mix(vec3(.025,.14,.21),vec3(.68,.86,.91),smoothstep(.38,.65,terrain));
-   float atmosphere=pow(1.0-sqrt(max(0.0,1.0-angular*angular/(radius*radius))),5.0);
-   result=surfaceSpectrum(ground,light,.12,.14)+atmosphere*vec3(.10,.46,.85);
-  }
  }
 
  return result;
@@ -135,7 +160,7 @@ vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
   if(i>=uSteps)break;
   float radius=max(length(p),1e-7);
   if(uSceneOptions.y>.5)radius=min(radius,max(length(p-bridgeSecondCenter()),1e-7));
-  if(radius<.018){otherSide=true;break;}
+  if(radius<(uBridge.z>.5?.008:.018)){otherSide=true;break;}
   if(radius>18.05&&dot(p,v)>0.0)break;
   // Scale steps in the isotropic chart: this remains smooth at r=b/2,
   // the nonsingular throat, and resolves the increasingly compressed end.

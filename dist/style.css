@@ -582,3 +582,29 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .viewport-scenes.scene-discovery::after{content:"";position:absolute;inset:-4px;border:1px solid #9ed5f7;border-radius:inherit;box-shadow:0 0 0 2px #8dcfff22,0 0 18px #66bfff66;pointer-events:none;opacity:.15;animation:scene-discovery-pulse 3.2s ease-in-out infinite}
 @keyframes scene-discovery-pulse{0%,100%{opacity:.15}50%{opacity:.95}}
 @media(prefers-reduced-motion:reduce){.viewport-scenes.scene-discovery::after{animation:none;opacity:.75}}
+
+/* Persistent object clocks: a stable numeral column, separate from flight UI. */
+.pilot-telemetry #pilotDilation{display:block;min-width:10ch;text-align:right;font:700 16px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums;color:#e6f4ff;white-space:nowrap}
+.pilot-telemetry #pilotDilationRow{align-items:baseline;gap:14px}
+.pilot-telemetry #pilotClockRateRow{align-items:baseline;gap:14px;color:#9bd2f5}
+.pilot-telemetry #pilotClockRate{min-width:10ch;text-align:right;font-size:16px;font-weight:700}
+.scene.has-object-clock:not(.has-flight-controls) .pilot-telemetry{align-self:flex-end;margin-left:auto}
+@media(max-width:600px){.pilot-telemetry #pilotDilation{font-size:14px}.pilot-telemetry #pilotClockRate{font-size:14px}.scene.has-object-clock .pilot-telemetry>div{gap:9px}}
+/* Keep a focused body's clock available on short phones, even when the rest
+   of the distance readout is hidden to make room for the flight controls. */
+@media(max-height:360px) and (orientation:landscape){
+ .scene.has-object-clock .scene-bottom{visibility:visible;pointer-events:none}
+ .scene.has-object-clock .scene-bottom .distance-readout,.scene.has-object-clock .scene-bottom .scene-note,.scene.has-object-clock #pilotSpeedRow,.scene.has-object-clock #pilotTurnRow{display:none}
+ .scene.has-object-clock .pilot-telemetry{pointer-events:auto}
+ .scene.has-object-clock .pilot-telemetry #pilotDilation{font-size:13px}
+}
+
+/* Reserve the toolbar lane for persistent clocks outside Drive. */
+.scene.has-object-clock:not(.has-flight-controls) .scene-bottom{right:76px;flex-direction:column;align-items:flex-end;gap:8px;max-width:calc(100% - 100px)}
+.scene.has-object-clock:not(.has-flight-controls) .scene-note{display:none}
+.scene.has-object-clock:not(.has-flight-controls) .distance-readout{text-align:right}
+@media(max-width:600px){.scene.has-object-clock:not(.has-flight-controls) .scene-bottom{right:60px;max-width:calc(100% - 77px)}}
+@media(max-height:440px) and (orientation:landscape){.scene.has-object-clock:not(.has-flight-controls) .scene-bottom{right:220px;max-width:calc(100% - 237px)}}
+
+.pilot-telemetry #pilotDilationRateRow{align-items:baseline;gap:14px;color:#9bd2f5}
+.pilot-telemetry #pilotDilationRate{min-width:12ch;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}

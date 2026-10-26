@@ -1,3 +1,4 @@
+import { DYSON_GLSL } from './dyson-glsl.js';
 import { createCraftGLSL } from './craft-glsl.js';
 import { warpFieldGLSL, WARP_TRACE_GLSL } from './warp-glsl.js';
 import { coordinateGridGLSL } from './grid-glsl.js';
@@ -44,7 +45,7 @@ const NO_GRID_GLSL = `
 vec4 coordinateGridSegment(vec3 start,vec3 end,float travelled,float pixelAngle){return vec4(0);}
 vec4 coordinateGridEscape(vec3 start,vec3 direction,float travelled,float pixelAngle){return vec4(0);}
 `;
-export function createFragment({ultra=false,photo=false,photoSteps=3072,craft=false,craftMask=15,warp=false,grid=false,bridge=false,probe=false,stellar=false,rings=false,bodyGravity=false,planetary=false,attachments=false,diagnostics=false,derivatives=false,derivativeExtension=false,objectSlots=12}={}) {
+export function createFragment({ultra=false,photo=false,photoSteps=3072,craft=false,craftMask=15,warp=false,grid=false,bridge=false,probe=false,stellar=false,rings=false,bodyGravity=false,planetary=false,attachments=false,dyson=false,diagnostics=false,derivatives=false,derivativeExtension=false,objectSlots=12}={}) {
  const slots=objectSlots===6?6:objectSlots===8?8:12;
  const photoBudget=[1024,1536,3072].includes(photoSteps)?photoSteps:3072;
  craft=craft||warp||bridge;
@@ -314,7 +315,7 @@ vec3 force(vec3 p,vec3 v){
  if(uWarpFlags.w<.5)return total;
  for(int k=0;k<2;k++){
   if(k==1&&uBinary==0)break;
-  vec3 q=p-uHoles[k].xyz;float m=uHoles[k].w;
+  vec3 q=p-uHoles[k].xyz;float m=uHoles[k].w;if(m<=0.0)continue;
   float rr=max(dot(q,q),m*m*.05),r=sqrt(rr);
   vec3 angular=cross(q,v);
   total-=3.0*m*dot(angular,angular)*q/(rr*rr*r);
@@ -331,7 +332,7 @@ vec4 discAt(vec3 p,vec3 previous,vec3 tangent,float dt){
   if(k==1&&uBinary==0)break;
   if((k==0?uFlags.y:uDiskSecondaryParams.w)<.5)continue;
   vec4 diskParams=k==0?uDiskParams:uDiskSecondaryParams;vec3 diskColor=k==0?uDiskColor:uDiskSecondaryColor;
-  float m=uHoles[k].w,inner=iscoFor(k),outer=outerFor(k)/m;
+  float m=uHoles[k].w;if(m<=0.0)continue;float inner=iscoFor(k),outer=outerFor(k)/m;
   if(outer<inner+.06)continue;
   vec3 axis=axisFor(k),q0=localPoint(previous-uHoles[k].xyz,axis),q1=localPoint(p-uHoles[k].xyz,axis);
   vec3 q=(q0+q1)*.5;float sampleDt=dt;
@@ -444,7 +445,7 @@ vec3 jetField(vec3 previous,vec3 next,float dt){
   if(k==1&&uBinary==0)break;
   if((k==0?uFlags.w:uJetSecondaryParams.w)<.5)continue;
   vec4 jetParams=k==0?uJets:uJetSecondaryParams;vec3 jetColor=k==0?uJetColor:uJetSecondaryColor;
-  float m=max(uHoles[k].w,1e-12);
+  float m=uHoles[k].w;if(m<=0.0)continue;
   vec3 start=localPoint(previous-uHoles[k].xyz,axisFor(k))/m,end=localPoint(next-uHoles[k].xyz,axisFor(k))/m;
   vec2 delta=end.xz-start.xz;
   float closest=clamp(-dot(start.xz,delta)/max(dot(delta,delta),1e-10),0.0,1.0);
@@ -506,7 +507,7 @@ vec3 probeEmissionSegment(vec3 previous,vec3 next){
  return sum;
 }
 vec3 probeInspectorEmission(vec2 uv,float fov){
- if(uInspectIndex<0||sceneTransparent())return vec3(0);
+ if(uInspectIndex<0||sceneTransparent()${dyson?'||true':''})return vec3(0);
  vec3 tint=vec3(0);float luminosity=1.0,type=-1.0;
  for(int j=0;j<12;j++){if(j==uInspectIndex){tint=uColors[j].rgb;type=uColors[j].a;luminosity=uLuminosities[j];}}
  if(type<.5||type>1.5)return vec3(0);
@@ -520,6 +521,7 @@ vec3 probeInspectorEmission(vec2 uv,float fov){
 // Visible illustrative boundary source, shared by primary and nested whites.
 // Geometry retains this source while all discs, jets and sky remain suppressed.
 vec3 whiteBoundaryEmission(vec3 offset,float dt,float mass,float horizon){
+ if(mass<=0.0||horizon<=0.0)return vec3(0);
  float r=length(offset)/max(mass,1e-20),h=horizon/max(mass,1e-20);
  float shell=exp(-(r-h)*.72)*smoothstep(h,h+.3,r);
  float pulse=.62+.38*sin(r*4.0-uTime*3.0);
@@ -682,7 +684,7 @@ vec3 coronaRay(vec3 ro,vec3 rd,float maximum,vec3 tint,vec4 properties){
 vec3 stellarEmissionSegment(vec3 first,vec3 last){
  vec3 delta=last-first;float lengthWorld=length(delta);if(lengthWorld<=1e-20)return vec3(0);vec3 direction=delta/lengthWorld,sum=vec3(0);
  for(int j=0;j<12;j++){
-  if(j>=uObjectCount)break;if(uColors[j].a<1.5||uColors[j].a>2.5||j==uHideObjectIndex||(j==uInspectIndex&&!sceneTransparent()&&2.0*(uBodyMasses[j]/4300000.0)/max(uObjects[j].w,1e-20)<=.01))continue;
+  if(j>=uObjectCount)break;if(uColors[j].a<1.5||uColors[j].a>2.5||j==uHideObjectIndex||(j==uInspectIndex${dyson?'&&false':''}&&!sceneTransparent()&&2.0*(uBodyMasses[j]/4300000.0)/max(uObjects[j].w,1e-20)<=.01))continue;
   vec4 body=uObjects[j],params=uBodyParams[j];float radius=max(body.w,1e-20);
   if(params.z<0.0){if(params.x>8.5)sum+=whiteBoundaryEmission((first+last)*.5-body.xyz,lengthWorld,uBodyMasses[j]/4300000.0,radius);continue;}
   if(uSpectrum==5)continue;
@@ -806,6 +808,7 @@ vec3 ringPlanetShadow(vec3 color,vec3 worldHit,vec4 ring){
  return color;
 }
 `:''}
+${dyson?DYSON_GLSL:''}
 ${diagnostics?METRIC_GLSL:`
 vec3 diagnosticSegment(vec3 a,vec3 b,float travelled,float pixelAngle){return vec3(0);}
 vec3 flightGuideSegment(vec3 a,vec3 b,float travelled,float pixelAngle){return vec3(0);}
@@ -847,7 +850,7 @@ vec4 astronomicalInspector(vec3 worldRay,vec4 focus){
  return solid?vec4(solidColor,1):vec4(0);
 }
 vec4 inspector(vec2 uv,float fov){
- if(uInspectIndex<0||localWarpPass()||sceneTransparent())return vec4(0);
+ if(uInspectIndex<0||localWarpPass()||sceneTransparent()${dyson?'||true':''})return vec4(0);
  vec4 tint=vec4(0),properties=vec4(0),focus=vec4(0);vec3 localLight=unit(vec3(-.4,.85,.65));vec2 heading=vec2(1,0);float luminosity=1.0,focusMass=0.0;
  for(int j=0;j<12;j++){if(j==uInspectIndex){tint=uColors[j];focus=uObjects[j];properties=uBodyParams[j];heading=uHeadings[j];luminosity=uLuminosities[j];focusMass=uBodyMasses[j];localLight=unit(craftFrame(bodyLight(uObjects[j].xyz),heading));}}
  vec3 ro=uInspectCamera,rd=rayFromFrame(uInspectForward,uInspectRight,uInspectUp,uv,fov);
@@ -906,19 +909,22 @@ vec4 objectHit(vec3 p,vec3 previous,vec3 tangent,out float fraction,inout float 
  float nearest=segmentLength,closestAlpha=1.0;int closestIndex=-1;bool found=false;vec3 closestColor=vec3(0);fraction=1.0;
  for(int j=0;j<12;j++){
   if(j>=uObjectCount)break;
-  if(j==uHideObjectIndex||(j==uInspectIndex&&!sceneTransparent()&&!geometryFieldTrace(uColors[j].a)&&!(uColors[j].a>1.5&&uColors[j].a<2.5&&(uBodyParams[j].z<0.0||2.0*(uBodyMasses[j]/4300000.0)/max(uObjects[j].w,1e-20)>.01)))||(localWarpPass()&&j==uWarpObjectIndex))continue;
-  if(uColors[j].a>8.5)continue;
+  if(j==uHideObjectIndex||(j==uInspectIndex${dyson?'&&false':''}&&!sceneTransparent()&&!geometryFieldTrace(uColors[j].a)&&!(uColors[j].a>1.5&&uColors[j].a<2.5&&(uBodyParams[j].z<0.0||2.0*(uBodyMasses[j]/4300000.0)/max(uObjects[j].w,1e-20)>.01)))||(localWarpPass()&&j==uWarpObjectIndex))continue;
+  if(uColors[j].a>8.5${dyson?'&&uColors[j].a<10.5':''})continue;
   vec4 obj=uObjects[j];if(obj.w<=1e-20)continue;if(uColors[j].a>1.5&&uColors[j].a<2.5&&uBodyParams[j].z<0.0)obj.w*=max(1.0,-uBodyParams[j].z);
   vec3 ro=(previous-obj.xyz)/obj.w,offAxis=cross(ro,rd);
   float b=dot(ro,rd),disc=1.0-dot(offAxis,offAxis);
   if(!(disc>=0.0))continue;
   float root=sqrt(disc),enter=-b-root,leave=-b+root,maximum=min(segmentLength,nearest)/obj.w;
   if(!(leave>=0.0&&enter<=maximum&&maximum<1e30))continue;
-  float type=uColors[j].a,t=max(0.0,enter),alpha=type<6.5?bodyOpacity(j):1.0;vec3 color=uColors[j].rgb,normal;
+  float type=uColors[j].a,t=max(0.0,enter),alpha=type<6.5||type>10.5?bodyOpacity(j):1.0;vec3 color=uColors[j].rgb,normal;
   bool cutaway=type>1.5&&type<2.5&&uBodyParams[j].x>6.5&&uBodyParams[j].x<7.5&&uBodyParams[j].z>=0.0&&uSpectrum!=5&&alpha<.999;
   if(alpha<=0.0&&!cutaway)continue;
   if(transparentMask>0.0&&mod(floor(transparentMask/exp2(float(j))),2.0)>.5)continue;
-  ${rings?`if(type>6.5){
+  ${dyson?`if(type>10.5){
+   vec4 hit=dysonSurfaceHit(ro,rd,maximum,uBodyParams[j].x);if(hit.w<0.0)continue;
+   t=hit.w;normal=hit.xyz;color=dysonShade(normal,rd,uBodyParams[j],color);
+  }else `:''}${rings?`if(type>6.5){
    vec3 localOrigin=planetFrame(ro,surfaceProfile(uBodyParams[j],uBodyShape[j],type)),localDirection=planetFrame(rd,surfaceProfile(uBodyParams[j],uBodyShape[j],type));
    vec4 ring=annulusHit(localOrigin,localDirection,color,type,uBodyParams[j],maximum);
    if(ring.w<0.0)continue;t=ring.w;color=ringPlanetShadow(ring.rgb,previous+rd*t*obj.w,obj);
@@ -978,7 +984,7 @@ vec4 attachmentEmissionSegment(vec3 a,vec3 b,float pixelAngle){
  if(uSpectrum==5)return vec4(0);
  vec3 color=vec3(0);float alpha=0.0,worldLength=length(b-a);
  for(int j=0;j<12;j++){
-  if(j>=uObjectCount)break;float kind=uColors[j].a;if(kind<8.5)continue;
+  if(j>=uObjectCount)break;float kind=uColors[j].a;if(kind<8.5||kind>10.5)continue;
   vec4 body=uObjects[j],params=uBodyParams[j];float radius=max(body.w,1e-20);
   vec4 profile=vec4(0,uBodyShape[j].w,0,0);
   vec3 first=planetFrame((a-body.xyz)/radius,profile),last=planetFrame((b-body.xyz)/radius,profile);
@@ -1105,7 +1111,7 @@ void main(){
    for(int k=0;k<2;k++){
     if(uWarpFlags.w<.5)break;
     if(k==1&&uBinary==0)break;
-    float r=length(p-uHoles[k].xyz),m=uHoles[k].w;
+    float r=length(p-uHoles[k].xyz),m=uHoles[k].w;if(m<=0.0)continue;
     closest=min(closest,r);nearRadius=min(nearRadius,r/m);
     if(r<horizonFor(k)&&uMetricOptions.w<.5){
      swallowed=true;break;

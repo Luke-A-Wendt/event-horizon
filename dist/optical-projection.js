@@ -1,6 +1,7 @@
 // Bounded inverse projection through the same optical approximation as shaders.js.
 // A previous solution is only a Newton seed: it never smooths a displayed anchor.
 // Nonconvergent or occulted images fail closed instead of drawing a false locator.
+import {dysonShellHit} from './dyson.js';
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],mul=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],unit=a=>mul(a,1/(Math.hypot(...a)||1));
@@ -11,6 +12,7 @@ function raySphere(a,axis,length,center,radius){const x=center[0]-a[0],y=center[
 function segmentSphere(a,b,center,radius){const v=sub(b,a),length=Math.hypot(...v);return length>1e-30?raySphere(a,mul(v,1/length),length,center,radius):null;}
 const activeGravity=(c,b)=>c.gravityCount===undefined||b.index>=0&&b.index<c.gravityCount;
 function shapeFrame(body,renderer){
+ if(body.type==='dyson')return {dysonCutaway:body.index>=0?(renderer.annotationOptics?.bodyParams?.[body.index*4]??body.bodyParams?.[0]??body.dysonCutaway??.38):(body.dysonCutaway??.38)};
  if(body.waterCap&&body.coreRadius)return {coreRadius:body.coreRadius,waterCap:{...body.waterCap,direction:[...body.waterCap.direction]}};
  if(!['planet','moon'].includes(body.type)||!body.shapeAxes)return {};
  const maximum=Math.max(...body.shapeAxes),shapeAxes=body.shapeAxes.map(v=>Math.max(.01,v/maximum));
@@ -21,6 +23,10 @@ function shapeFrame(body,renderer){
 }
 function rayBody(a,axis,length,body){
  const sphere=raySphere(a,axis,length,body.center,body.radius);if(sphere===null)return null;
+ if(body.type==='dyson'){
+  const hit=dysonShellHit(mul(sub(a,body.center),1/body.radius),axis,body.dysonCutaway??.38,length/body.radius);
+  return hit?hit.t*body.radius/length:null;
+ }
  if(body.waterCap&&body.coreRadius){
   const cap=body.waterCap,center=add(body.center,mul(cap.direction,body.coreRadius*cap.offsetRatio));
   const rock=raySphere(a,axis,length,body.center,body.coreRadius),water=raySphere(a,axis,length,center,body.coreRadius*cap.radiusRatio);
@@ -74,14 +80,14 @@ export function createOpticalContext(renderer){
  const s=renderer.state,k=renderer.configCache||{},o=renderer.annotationOptics;
  const frame=renderer.cameraFrame,rect=renderer.canvas?.getBoundingClientRect?.()||{width:900,height:650},aspect=rect.width/Math.max(1,rect.height),fov=Math.max(.83*Math.max(1,1.35/aspect),renderer.focusMode==='onboard'&&renderer.getFocusFrame?.()?.type==='shuttle'?1.25:0);
  const origin=o?.origin||[0,0,0],observer=o?.observer||sub(frame.observer,origin),bodies=(renderer.renderObjects?.length?renderer.renderObjects:renderer.objectFrames||[]).filter(b=>!['ring','belt','disk','jets'].includes(b.type)).map(b=>({id:b.id,index:b.index,type:b.type,center:o&&b.index>=0?o.objects.slice(b.index*4,b.index*4+3):sub(b.position,origin),radius:o&&b.index>=0?o.objects[b.index*4+3]:b.radius,mass:(o&&b.index>=0?o.bodyMasses?.[b.index]??b.massSolar??0:b.massSolar||0)/4300000,opacity:s.spectrum==='geometry'||b.collapsed||['blackhole','whitehole'].includes(b.type)?1:clamp(o&&b.index>=0?o.bodyOpacity?.[b.index]??b.opacity??1:b.opacity??1,0,1),cutaway:b.starStyle==='tzo'&&!b.collapsed&&s.spectrum!=='geometry'&&(b.opacity??1)<.999,collapsed:!!b.collapsed,spin:b.spinParameter||0,axis:b.spinAxis||b.frame?.[1]||[0,1,0],...shapeFrame(b,renderer)}));
- const holes=[];if(s.blackHole)for(let j=0;j<(s.binary&&!renderer.mergerComplete?2:1);j++)holes.push({id:j?'secondary':'primary',center:(o?.holes||Array.from(renderer.holeData||[])).slice(j*4,j*4+3).map((v,i)=>o?v:v-origin[i]),mass:renderer.holeData[j*4+3],radius:k.horizon?.[j]||0,spin:j?s.secondarySpin:s.spin,axis:j?k.secondaryAxis:k.primaryAxis});
+ const holes=[],holeData=o?.holes||Array.from(renderer.holeData||[]);if(s.blackHole)for(let j=0;j<(s.binary?2:1);j++){const mass=holeData[j*4+3];if(!(mass>0))continue;holes.push({id:j?'secondary':'primary',center:holeData.slice(j*4,j*4+3).map((v,i)=>o?v:v-origin[i]),mass,radius:k.horizon?.[j]||0,spin:j?s.secondarySpin:s.spin,axis:j?k.secondaryAxis:k.primaryAxis});}
  return {geometry:s.spectrum==='geometry',transparent:!!(o?.transparentBodies??renderer.transparentBodyCount),origin,observer,forward:o?.forward||frame.forward,right:o?.right||frame.right,up:o?.up||frame.up,aspect,fov,width:rect.width,height:rect.height,steps:Math.min(768,Math.max(24,o?.steps||renderer.steps||144)),bounds:o?.bounds||k.bounds||100,mass:renderer.massScale||1,bodies,gravityCount:o?.gravityCount??renderer.gravityCount,holes,lensing:!!s.lensing&&!renderer.cpu,interior:!!s.interiorView&&s.spectrum==='geometry',bridge:!!s.bridge&&!renderer.cpu,bridgeRadius:k.bridgeRadius||1,crossed:s.bridgeMode==='crossed',warp:o?.warp||null,inspectIndex:o?.inspectIndex??frame.inspectIndex,hideIndex:o?.hideIndex??frame.hideIndex??-1,cpu:!!renderer.cpu,cpuLensing:!!s.lensing,budget:{rays:0,iterations:0,maxRays:256,maxIterations:12000,deadline:Infinity,limited:false},occluders:[...holes,...bodies],warpBudget:renderer.quality==='ultra'?192:96};
 }
 function warpForce(c,p,v,local=false){const w=c.warp;if(!w?.enabled||w.local&&!local||w.radius<=1e-20||!w.strength)return [0,0,0];const q=mul(sub(p,w.center),1/w.radius),r=Math.hypot(...q);if(r>2.5||r<1e-12)return [0,0,0];const n=mul(q,1/r),d=unit(v),axis=unit(w.axis),s=Math.max(1,w.thickness),a=Math.tanh(clamp(s*(r+1),-12,12)),b=Math.tanh(clamp(s*(r-1),-12,12)),shape=s*(b*b-a*a)/(2*Math.tanh(s)),mu=dot(n,axis);return mul(sub(n,mul(d,dot(n,d))),w.strength*shape*(.24+.12*mu)/w.radius);}
 export function opticalForce(c,p,v){
  if(!c.lensing||c.interior)return [0,0,0];let total=warpForce(c,p,v);
  for(const b of c.bodies){if(!activeGravity(c,b)||!['star','planet','moon','blackhole','whitehole'].includes(b.type)||b.mass<=0)continue;const q=sub(p,b.center),rr=Math.max(dot(q,q),b.radius*b.radius),r=Math.sqrt(Math.max(rr,1e-30)),angular=cross(q,v);total=add(total,mul(q,-3*b.mass*dot(angular,angular)/Math.max(rr*rr*r,1e-30)));}
- for(const h of c.holes){const q=sub(p,h.center),rr=Math.max(dot(q,q),h.mass*h.mass*.05),r=Math.sqrt(rr),angular=cross(q,v);total=add(total,add(mul(q,-3*h.mass*dot(angular,angular)/(rr*rr*r)),mul(cross(h.axis,v),(h.spin||0)*.23*h.mass*h.mass/(rr*r))));}return total;
+ for(const h of c.holes){if(!(h.mass>0))continue;const q=sub(p,h.center),rr=Math.max(dot(q,q),h.mass*h.mass*.05),r=Math.sqrt(rr),angular=cross(q,v);total=add(total,add(mul(q,-3*h.mass*dot(angular,angular)/(rr*rr*r)),mul(cross(h.axis,v),(h.spin||0)*.23*h.mass*h.mass/(rr*r))));}return total;
 }
 function bridgeForce(c,p,v){let gradient=[0,0,0];for(const center of c.crossed?[[0,0,0],[.72,0,0]]:[[0,0,0]]){const q=sub(p,center),r2=Math.max(dot(q,q),1e-12);gradient=add(gradient,mul(q,-2/(r2*(4*r2+1))));}gradient=add(gradient,mul(opticalForce(c,mul(p,c.bridgeRadius),v),c.bridgeRadius));return c.lensing?sub(gradient,mul(v,dot(v,gradient))):[0,0,0];}
 function firstBlocker(c,a,b,ignore){let first=null,t=Infinity;const v=sub(b,a),length=Math.hypot(...v);if(length<=1e-30)return null;const axis=mul(v,1/length);for(const body of c.occluders||[...c.holes,...c.bodies]){if(body.id===ignore||((body.opacity??1)<.999&&!body.cutaway)||c.hideIndex>=0&&body.index===c.hideIndex||!(body.radius>0))continue;const hit=body.cutaway?raySphere(a,axis,length,body.center,body.radius*.22):rayBody(a,axis,length,body);if(hit!==null&&hit<t){t=hit;first=body.id;}}return first;}
@@ -113,7 +119,7 @@ export function traceProjection(c,xy,target,ignoreId=null,{capture=false,skipOcc
  for(let i=0;i<c.steps;i++){
   if(c.budget.iterations++>=c.budget.maxIterations||(c.budget.iterations%32===0&&clock()>c.budget.deadline)){c.budget.limited=true;return null;}let dt=Math.max(.000001,c.bounds*.06);
   if(c.bridge){const local=mul(p,1/c.bridgeRadius),r=Math.max(1e-7,Math.min(Math.hypot(...local),c.crossed?Math.hypot(...sub(local,[.72,0,0])):Infinity));if(r<.018)break;dt=Math.min(Math.min(.13*r,.035+.10*Math.abs(r-.5))*288/c.steps,.30*r)*c.bridgeRadius;}
-  else for(const h of c.holes){const r=Math.hypot(...sub(p,h.center));if(r<h.radius&&!c.interior){if(capture)return {captureId:h.id,point:p,blocked};return null;}let step=Math.max(r*.065,.045*h.mass)*320/c.steps;step=Math.min(step,Math.max(.018*h.mass,Math.abs(r-h.radius)*.35));if(c.interior)step=Math.max(step,h.mass*.065);dt=Math.min(dt,step);}
+  else for(const h of c.holes){if(!(h.mass>0))continue;const r=Math.hypot(...sub(p,h.center));if(r<h.radius&&!c.interior){if(capture)return {captureId:h.id,point:p,blocked};return null;}let step=Math.max(r*.065,.045*h.mass)*320/c.steps;step=Math.min(step,Math.max(.018*h.mass,Math.abs(r-h.radius)*.35));if(c.interior)step=Math.max(step,h.mass*.065);dt=Math.min(dt,step);}
   for(const b of c.bodies)if(activeGravity(c,b)&&b.mass>0){const distance=Math.hypot(...sub(p,b.center));dt=Math.min(dt,Math.max(b.radius*(c.bridge?.03:.02),distance*.08)*288/c.steps);}
   const w=c.warp;if(w?.enabled&&!w.local&&w.radius>0){const r=Math.hypot(...sub(p,w.center))/w.radius;if(r<2.8)dt=Math.min(dt,w.radius*clamp(.022+Math.abs(r-1)*.12,.022,.18)*288/c.steps);}
   if(!(dt>0&&Number.isFinite(dt)))return null;
@@ -144,6 +150,6 @@ export function projectLensedPoint(c,worldPoint,{id=null,radius=0,seed=null,inde
 
 // A hole has no visible central emitter. Its anchor is the midpoint of the
 // actual capture-mask cross sections, not a projected coordinate horizon.
-export function projectShadow(c,body){const target=sub(body.position,c.origin),direct=directProjection(target,c,c.aspect,c.fov);if(!direct)return null;const estimate=body.radius/Math.max(direct.z,1e-20)/c.fov*(c.cpu?1.6:2.6);if(!c.lensing&&!c.cpu)return {...direct,radius:body.radius/Math.max(direct.z,1e-20)/c.fov};if(c.cpu){const mass=c.holes.find(h=>h.id===body.id)?.mass||c.bodies.find(b=>b.id===body.id)?.mass||body.radius/2;return {...direct,radius:(c.cpuLensing?3*Math.sqrt(3)*mass:body.radius)/Math.max(direct.z,1e-20)/c.fov};}let exhausted=false;const capture=xy=>{const trace=traceProjection(c,xy,target,body.id,{capture:true});if(!trace)exhausted=true;return trace?.captureId===body.id;};let center={x:direct.x,y:direct.y};if(!capture(center)){const seed=projectLensedPoint({...c,holes:c.holes.filter(h=>h.id!==body.id),bodies:c.bodies.filter(b=>b.id!==body.id)},body.position,{id:body.id,radius:body.radius});if(!seed||!capture(seed))return null;center={x:seed.x,y:seed.y};}
+export function projectShadow(c,body){if(!(body.radius>0))return null;const target=sub(body.position,c.origin),direct=directProjection(target,c,c.aspect,c.fov);if(!direct)return null;const estimate=body.radius/Math.max(direct.z,1e-20)/c.fov*(c.cpu?1.6:2.6);if(!c.lensing&&!c.cpu)return {...direct,radius:body.radius/Math.max(direct.z,1e-20)/c.fov};if(c.cpu){const mass=c.holes.find(h=>h.id===body.id)?.mass||c.bodies.find(b=>b.id===body.id)?.mass||body.radius/2;return {...direct,radius:(c.cpuLensing?3*Math.sqrt(3)*mass:body.radius)/Math.max(direct.z,1e-20)/c.fov};}let exhausted=false;const capture=xy=>{const trace=traceProjection(c,xy,target,body.id,{capture:true});if(!trace)exhausted=true;return trace?.captureId===body.id;};let center={x:direct.x,y:direct.y};if(!capture(center)){const seed=projectLensedPoint({...c,holes:c.holes.filter(h=>h.id!==body.id),bodies:c.bodies.filter(b=>b.id!==body.id)},body.position,{id:body.id,radius:body.radius});if(!seed||!capture(seed))return null;center={x:seed.x,y:seed.y};}
  const edges=[];for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){let lo=0,hi=Math.max(estimate,1/c.height);for(let j=0;j<3&&capture({x:center.x+dx*hi,y:center.y+dy*hi});j++)hi*=1.8;for(let j=0;j<7;j++){const mid=(lo+hi)*.5;if(capture({x:center.x+dx*mid,y:center.y+dy*mid}))lo=mid;else hi=mid;}edges.push((lo+hi)*.5);}
  if(exhausted)return null;return {...direct,x:center.x+(edges[0]-edges[1])*.5,y:center.y+(edges[2]-edges[3])*.5,radius:(edges[0]+edges[1]+edges[2]+edges[3])*.25,shadow:true};}

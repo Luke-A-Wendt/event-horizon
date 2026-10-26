@@ -1,3 +1,4 @@
+import {formatClockDuration} from './object-clocks.js';
 const keys={KeyW:['speed',1],KeyS:['speed',-1],KeyA:['curvature',1],KeyD:['curvature',-1]};
 const flightNumber=new Intl.NumberFormat(undefined,{minimumSignificantDigits:2,maximumSignificantDigits:2});
 const superscripts={'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
@@ -7,11 +8,8 @@ export function formatFlightNumber(n){
  if(magnitude>=1e5||magnitude<.001){const [mantissa,exponent]=n.toExponential(1).split('e');return mantissa+' × 10'+String(Number(exponent)).split('').map(c=>superscripts[c]).join('');}
  return flightNumber.format(rounded);
 }
-// Preserve the separately accumulated small SR lag; never subtract two large clocks.
-export function formatFlightDilation(seconds){
- if(!Number.isFinite(seconds)||seconds<0)return '—';
- return formatFlightNumber(seconds*1e9)+' ns';
-}
+// Keep the legacy export name for callers; the persistent clock chooses units.
+export const formatFlightDilation=formatClockDuration;
 export function installPilotControls(api){
  const mount=api.mount;if(!mount)return{update(){},start(){return false;},dispose(){}};
  mount.hidden=true;mount.className='pilot-console';
@@ -22,14 +20,14 @@ export function installPilotControls(api){
  <section id="pilotSettings" class="pilot-settings" aria-label="Flight camera" hidden><button id="pilotChase" aria-pressed="false">Chase · 360°</button><button id="pilotOnboard" aria-pressed="false">Ride · 360°</button></section>`;
  const scene=mount.parentElement||mount.parentNode;
  const telemetry=document.createElement('div');telemetry.id='pilotTelemetry';telemetry.className='pilot-telemetry';telemetry.hidden=true;
- telemetry.innerHTML='<div><span>Speed</span><output id="pilotSpeed" aria-label="Speed">0 m/s</output></div><div><span>Angular velocity</span><output id="pilotK" aria-label="Angular velocity">0 rad/s</output></div><div id="pilotDilationRow" hidden><span>Time dilation</span><output id="pilotDilation" aria-label="Accumulated time dilation in nanoseconds" title="Accumulated coordinate time minus proper time; local special-relativity estimate">0 ns</output></div>';
+ telemetry.innerHTML='<div id="pilotSpeedRow"><span>Speed</span><output id="pilotSpeed" aria-label="Speed">0 m/s</output></div><div id="pilotTurnRow"><span>Angular velocity</span><output id="pilotK" aria-label="Angular velocity">0 rad/s</output></div><div id="pilotDilationRow" hidden><span>Time dilation</span><output id="pilotDilation" aria-label="Accumulated time dilation since creation">0 ns</output></div><div id="pilotDilationRateRow" hidden><span>Current rate</span><output id="pilotDilationRate" aria-label="Time dilation accumulated per reference second">0 ns / s</output></div><div id="pilotClockRateRow" hidden><span>Distant clock rate</span><output id="pilotClockRate" aria-label="Distant-to-local clock rate at the horizon">∞</output></div>';
  (scene?.querySelector('.scene-bottom')||scene||mount).append(telemetry);
  const $=id=>mount.querySelector('#'+id)||telemetry.querySelector('#'+id),keyboardHeld=new Set(),pointerHeld=new Map(),listeners=[];let currentId=null,disposed=false,lastInput='',lastHeld='',lastType=null;const pointerTimes=new Map(),thrustStepTimes=new Map();
  const listen=(node,event,fn,options)=>{node.addEventListener(event,fn,options);listeners.push(()=>node.removeEventListener(event,fn,options));};
  function setCameraOpen(open){$('pilotSettings').hidden=!open;$('pilotCompact').setAttribute('aria-expanded',String(open));scene?.classList.toggle('pilot-camera-open',open);}
  const blocked=()=>disposed||!currentId||document.hidden||!!api.state().paused||!!document.querySelector('dialog[open]');
  const editable=target=>/^(INPUT|SELECT|TEXTAREA)$/.test(target?.tagName||'')||target?.isContentEditable||target?.closest?.('[contenteditable="true"]');
- const isShuttle=()=>api.renderer()?.getFlightState?.().type==='shuttle';
+ const isShuttle=()=>api.renderer()?.getFlightState?.()?.type==='shuttle';
  function send(force=false){
   const held=new Set([...keyboardHeld,...pointerHeld.values()]),input={speed:0,curvature:0,torsion:0},shuttle=isShuttle();for(const code of held){const spec=keys[code];if(spec&&(!shuttle||spec[0]!=='speed'))input[spec[0]]+=spec[1];}for(const key of Object.keys(input))input[key]=Math.max(-1,Math.min(1,input[key]));
   const signature=Object.values(input).join('|');if(force||signature!==lastInput){lastInput=signature;api.renderer()?.setFlightInput?.(input);}
@@ -66,9 +64,26 @@ export function installPilotControls(api){
  listen($('pilotPower'),'input',()=>{api.renderer()?.setFlightPower?.(Number($('pilotPower').value));update();});
  listen($('pilotCompact'),'click',()=>{const open=$('pilotSettings').hidden;if(open)api.closePanels?.();setCameraOpen(open);});
  listen(document,'pointerdown',event=>{if(!mount.contains(event.target))setCameraOpen(false);});
+ function updateTelemetry(r,flight,driveId){
+  // Tracking takes precedence over a selected object elsewhere in the tree.
+  // The clock remains visible while paused and outside the driving interface.
+  let clock=null;
+  if(typeof r?.getObjectClock==='function'){
+   for(const id of new Set([r.focusId,r.selectedId,driveId].filter(Boolean))){clock=r.getObjectClock(id);if(clock)break;}
+  }else if(flight?.type==='shuttle')clock={lagSeconds:flight.timeLagSeconds||0};
+  telemetry.hidden=!driveId&&!clock;scene?.classList.toggle('has-object-clock',!!clock);
+  $('pilotSpeedRow').hidden=!driveId;$('pilotTurnRow').hidden=!driveId;
+  $('pilotDilationRow').hidden=!clock;$('pilotDilationRateRow').hidden=!Number.isFinite(clock?.lossRate);$('pilotClockRateRow').hidden=!clock?.horizonLimit;
+  if(!clock)return;
+  const rate=Number.isFinite(clock.lossRate)?formatClockDuration(clock.lossRate)+' / s':'';if($('pilotDilationRate').textContent!==rate)$('pilotDilationRate').textContent=rate;
+  $('pilotDilationRate').title='Current time difference accrued per distant-reference second, at this position and velocity. Updates when the orbit changes, including while paused; the lifetime total is preserved.';
+  const value=formatClockDuration(Math.max(0,clock.lagSeconds||0));if($('pilotDilation').textContent!==value)$('pilotDilation').textContent=value;
+  $('pilotDilation').title=(clock.name?clock.name+' · ':'')+'Accumulated distant-reference time minus local proper time since creation. Gravitational and speed effects are approximate; flight and orbital scenes use their respective simulation clocks.'+(clock.idealizedInfall?' The idealized radial clock path reaches the horizon; the displayed camera keeps a small exterior clearance.':'');
+  $('pilotClockRate').title='The distant-to-local rate ratio diverges at the coordinate horizon. The accumulated time lost above remains finite; an infalling local clock does not stop.';
+ }
  function update(){
   const r=api.renderer(),flight=r?.getFlightState?.(),id=r?.driveId||flight?.id||null;
-  if(currentId!==id){clear(true);setCameraOpen(false);currentId=id;}if(blocked())clear();const changed=mount.hidden===!!id;mount.hidden=!id;telemetry.hidden=!id;scene?.classList.toggle('has-flight-controls',!!id);if(changed)r?.resize?.();if(!id){setCameraOpen(false);return;}
+  if(currentId!==id){clear(true);setCameraOpen(false);currentId=id;}if(blocked())clear();const changed=mount.hidden===!!id;mount.hidden=!id;scene?.classList.toggle('has-flight-controls',!!id);updateTelemetry(r,flight,id);if(changed)r?.resize?.();if(!id){setCameraOpen(false);return;}
   const paused=!!api.state().paused;$('pilotStatus').hidden=!paused;$('pilotStatus').textContent=paused?'Paused · press Play to continue flying.':'';for(const button of mount.querySelectorAll('[data-pilot-key]'))button.disabled=paused;
   const object=r.objects?.find(o=>o.id===id)||api.objects?.().find(o=>o.id===id)||{},type=object.type||flight?.type;
   const v=flight?.speedMetersPerSecond??0,k=flight?.curvaturePerMeter??0;
@@ -77,11 +92,10 @@ export function installPilotControls(api){
   mount.classList.toggle('pilot-shuttle',!enterprise);
   $('pilotBrakeSpeed').textContent=enterprise?'Stop motion':'Cut thrust';$('pilotBrakeSpeed').setAttribute('data-short-label',enterprise?'■':'0 g');$('pilotBrakeSpeed').setAttribute('aria-label',enterprise?'Stop motion':'Cut thrust');$('pilotBrakeSpeed').title=enterprise?'Stop forward motion and turning':'Set acceleration to 0 g; keep coasting and turning';
   $('pilotPower').title=enterprise?'Warp factor':'Forward acceleration. To brake, turn 180° and burn forward. Red ≥4 g marks sustained-load risk, not a survival limit.';
-  $('pilotDilationRow').hidden=enterprise;$('pilotDilation').textContent=enterprise?'—':formatFlightDilation(Math.max(0,flight?.timeLagSeconds??0));
   $('pilotK').title='Angular velocity: '+formatFlightNumber(flight?.turnRateRadiansPerSecond??v*k)+' rad/s';
   mount.title=(enterprise?'W / S changes warp factor. ':'W / S adjusts forward acceleration by 0.5 g. Hold to repeat; release to hold thrust. To brake, turn 180° and burn forward. ')+'A / D changes angular velocity. Release to hold each value. Drag to look; Esc resumes orbit.';
   $('pilotChase').setAttribute('aria-pressed',String(r?.focusMode==='chase'));$('pilotOnboard').setAttribute('aria-pressed',String(r?.focusMode==='onboard'));$('pilotReverse').hidden=!enterprise||!api.state().bridge;const reverseLabel=flight?.travelDirection===-1?'Travel forward':'Travel backward';$('pilotReverse').setAttribute('aria-label',reverseLabel);$('pilotReverse').title=reverseLabel+' without turning the camera';
  }
  function start(id){const r=api.renderer();if(!r?.setFreeDrive?.(id,true))return false;r.focusTarget?.(id,'track',false,true);clear(true);currentId=id;api.setPaused(false);api.refresh();update();return true;}
- return{start,update,dispose(){clear(true);setCameraOpen(false);disposed=true;observer?.disconnect();listeners.forEach(fn=>fn());mount.hidden=true;telemetry.remove();scene?.classList.remove('has-flight-controls');}};
+ return{start,update,dispose(){clear(true);setCameraOpen(false);disposed=true;observer?.disconnect();listeners.forEach(fn=>fn());mount.hidden=true;telemetry.remove();scene?.classList.remove('has-flight-controls');scene?.classList.remove('has-object-clock');}};
 }

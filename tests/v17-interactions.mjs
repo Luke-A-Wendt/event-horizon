@@ -9,7 +9,7 @@ import {serializeScene,parseScene} from '../dist/scene-file.js';
 import {installRenderWorker} from '../dist/render-worker.js';
 const close=(a,b,t=1e-8)=>assert(Math.abs(a-b)<t,`${a} != ${b}`),vec=(a,b)=>a.forEach((v,i)=>close(v,b[i]));
 const f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false});
-assert.equal(SCENE_PRESETS.length,44);assert.deepEqual(SCENE_PRESETS.map(p=>p.id),Object.values(SCENE_PROGRESSIONS).flat());
+assert.equal(SCENE_PRESETS.length,45);assert.deepEqual(SCENE_PRESETS.map(p=>p.id),Object.values(SCENE_PROGRESSIONS).flat());
 for(const preset of SCENE_PRESETS){r.loadScene(preset.id);assert.equal(r.state.annotations,preset.category==='Geometry');assert.equal(r.state.metrics,false);assert(r.state.paused);parseScene(serializeScene(r));}
 for(const preset of SCENE_PRESETS.filter(p=>p.category==='Warp drive')){r.loadScene(preset.id);close(r.camera.yaw,-Math.PI/2);assert.equal(r.focusMode,'track');assert.equal(r.state.warpFactor,4);}
 for(const scene of ['nasa-shuttle','warp-cruise'])for(const mode of ['track','onboard','chase']){

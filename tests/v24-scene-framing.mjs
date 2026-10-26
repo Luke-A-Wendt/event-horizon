@@ -5,7 +5,7 @@ import {SCENE_PRESETS,makePreset} from '../dist/config.js';
 const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
 const near=(a,b,tol=1e-8)=>assert(Math.abs(a-b)<=tol*Math.max(1,Math.abs(a),Math.abs(b)),`${a} != ${b}`);
 const scenes=SCENE_PRESETS.filter(scene=>scene.category==='Geometry');
-assert.equal(SCENE_PRESETS.length,44);assert(!SCENE_PRESETS.some(s=>s.id==='mixed-pair'));
+assert.equal(SCENE_PRESETS.length,45);assert(!SCENE_PRESETS.some(s=>s.id==='mixed-pair'));
 assert(scenes.some(s=>s.id==='white-hole'));assert(scenes.some(s=>s.id==='merger'));assert(scenes.some(s=>s.id==='mixed-merger'));
 assert.match(SCENE_PRESETS.find(s=>s.id==='mixed-pair-geometry').title,/orbit/);
 assert.match(SCENE_PRESETS.find(s=>s.id==='mixed-merger').title,/inspiral/);
