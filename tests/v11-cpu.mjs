@@ -71,7 +71,7 @@ assert.equal(cpuProject([0,0,0],camera,Infinity,400),null);
 renderer.loadScene('nasa-shuttle');renderer.focusObject(renderer.objects[0].id,'onboard');
 for(const spectrum of spectra){
  renderer.update({spectrum});const commands=record().commands;
- assert.ok(commands.some(c=>c[0]==='property'&&c[1]==='fillStyle'&&c[2]===cpuColor('#252d2e',spectrum)),`cockpit panels follow the ${spectrum} response`);
+ assert.ok(!commands.some(c=>c[0]==='property'&&c[1]==='fillStyle'&&c[2]===cpuColor('#4b5145',spectrum)),`No cockpit overlay in ${spectrum}`);
 }
 renderer.dispose();
 console.log(`PASS: ${SCENE_PRESETS.length} CPU presets, ${frames} first/settled/evolved spectral frames, finite geometry, invalid-frame refusal, component spectra, cockpit response, and bounded cooperative stages (${maxCommands} commands/frame; ${maxStageCommands} commands/stage maximum).`);

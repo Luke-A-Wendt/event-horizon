@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {cpuRingOccluded,cpuSpectrum} from '../dist/cpu-renderer.js';
+import {createOpticalContext,projectDirectVisible} from '../dist/optical-projection.js';
+import {createFragment} from '../dist/shaders.js';
+const near=(a,b)=>assert(Math.abs(a-b)<1e-6,`${a} != ${b}`);
+const f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false});
+r.loadScene('disk');r.update({annotations:false});r.update({spectrum:'geometry'});assert.equal(r.state.annotations,true);
+r.update({annotations:false});r.update({exposure:1.3});assert.equal(r.state.annotations,false);
+r.update({spectrum:'visible'});r.update({spectrum:'geometry',annotations:false});assert.equal(r.state.annotations,false);
+r.loadScene('planet');r.render();let body=r.getFocusFrame(r.objects[0].id);
+const core=body.coreRadius,index=body.index;
+near(body.radius/core,1.425);assert.deepEqual(body.shapeAxes,[1,1,1]);
+near(r.bodyShapeData[index*4]*body.radius,core);near(r.bodyShapeData[index*4+1]*body.radius,core*.85);near(r.bodyShapeData[index*4+2]*body.radius,core*.575);
+assert.equal(r.bodyParamData[index*4+2],3,'Only the composite body selects the union intersection');
+assert.equal(r.objects[0].shapeStyle,undefined,'Runtime cap geometry does not leak into serialized shape enums');
+const optics=createOpticalContext(r),opticalBody=optics.bodies.find(b=>b.id===body.id);near(opticalBody.coreRadius,core);assert.deepEqual(opticalBody.waterCap,body.waterCap);assert.notEqual(opticalBody.waterCap.direction,body.waterCap.direction);
+r.updateObject(body.id,{planetStyle:'rocky'});r.fillObjects();body=r.getFocusFrame(body.id);assert.equal(body.waterCap,undefined);near(body.radius,core);
+const cap={position:[0,0,0],center:[0,0,0],id:'water',radius:1.425,coreRadius:1,waterCap:{direction:[1,0,0],radiusRatio:.85,offsetRatio:.575}};
+for(const [x,y,blocked] of [[1.2,0,true],[-1.2,0,false],[0,.9,true],[0,1.1,false]]){
+ const eye=[x,y,-5],target=[x,y,5];assert.equal(cpuRingOccluded(eye,cap,target),blocked,`CPU union occlusion ${x},${y}`);
+ const c={origin:[0,0,0],observer:eye,forward:[0,0,1],right:[1,0,0],up:[0,1,0],aspect:1,fov:.83,occluders:[cap],hideIndex:-1};
+ assert.equal(projectDirectVisible(c,target)===null,blocked,`GPU label union occlusion ${x},${y}`);
+}
+assert.deepEqual(cpuSpectrum([.4,.6,.8],'geometry','white-hole'),[.4,.6,.8]);
+const source=createFragment({grid:true,stellar:true,bodyGravity:true,diagnostics:true,derivatives:true,attachments:true});
+assert.doesNotMatch(source,/captureEdge|captureMask/);
+assert.match(source,/if\(uMetricOptions\.x<\.5&&uSpectrum!=5\)return vec3\(0\);\n vec3 n=unit\(point\)/);
+assert.match(source,/if\(kind>1\.5&&kind<2\.5&&uBodyParams\[j\]\.z<0\.0\)continue/);
+assert.match(source,/if\(kind>2\.5\)return waterCapHit/);
+assert.match(source,/vec4 attachmentEmissionSegment[^]*?if\(uSpectrum==5\)return vec4\(0\)/);
+r.dispose();console.log('PASS: Geometry labels, traced graticules, visible compact boundaries, cap-only packing, physical core preservation, and CPU/optical composite occlusion.');

@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {REFERENCE_RG_METERS} from '../dist/objects.js';
+import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
+import {createFragment} from '../dist/shaders.js';
+const near=(a,b,t=1e-8)=>assert(Math.abs(a-b)<=t*Math.max(1,Math.abs(a),Math.abs(b)),`${a} ≠ ${b}`);
+const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});
+r.loadScene('solar-system');r.time=47;r.fillHoles();r.fillObjects();
+const earth=r.objects.find(o=>o.name==='Earth'),sun=r.objects.find(o=>o.name==='Sun'),moon=r.objects.find(o=>o.name==='Moon');
+const initial=r.getOrbitEditInfo(earth.id),phase=r.currentPhase(earth),oldPosition=[...r.getFocusFrame(earth.id).position];
+assert(initial.editable);assert.equal(initial.parentId,sun.id);assert(initial.periodDays>360&&initial.periodDays<370);
+const changed=r.setOrbitRadiusMeters(earth.id,initial.radiusMeters*2);assert(changed.ok);near(r.currentPhase(earth),phase);near(changed.radiusMeters,initial.radiusMeters*2);near(changed.periodDays/initial.periodDays,2**1.5);near(changed.speedMetersPerSecond/initial.speedMetersPerSecond,1/Math.sqrt(2));
+const center=r.getFocusFrame(sun.id).position;r.getFocusFrame(earth.id).position.forEach((x,i)=>near(x-center[i],(oldPosition[i]-center[i])*2));near(earth.orbitalPeriodSeconds,changed.periodDays*86400);
+assert(r.getOrbitEditInfo(moon.id).editable);const moonBefore=r.currentPhase(moon),moonInfo=r.getOrbitEditInfo(moon.id);r.setOrbitRadiusMeters(moon.id,moonInfo.radiusMeters*.8);near(r.currentPhase(moon),moonBefore);
+const savedRadius=earth.orbitMeters;assert.equal(r.setOrbitRadiusMeters(earth.id,NaN),false);assert.equal(earth.orbitMeters,savedRadius);assert.equal(r.getOrbitEditInfo(sun.id).editable,false);
+const rings=r.objects.find(o=>o.type==='ring');assert.equal(r.getOrbitEditInfo(rings.id).editable,false);assert.equal(r.setOrbitRadiusMeters(rings.id,1e9),false);
+// Objects directly under a primary hole use the same physical radius for
+// geometry and orbital speed. Converting legacy r_g units keeps their height.
+r.loadScene('nasa-shuttle');r.time=32;r.fillHoles();r.fillObjects();const ship=r.objects[0],shipPhase=r.currentPhase(ship),shipInfo=r.getOrbitEditInfo(ship.id),beforeHeight=r.getFocusFrame(ship.id).position[1];
+r.setOrbitRadiusMeters(ship.id,shipInfo.radiusMeters*1.5);near(r.currentPhase(ship),shipPhase);near(r.getFocusFrame(ship.id).position[1],beforeHeight);near(Math.hypot(r.getFocusFrame(ship.id).position[0],r.getFocusFrame(ship.id).position[2])*REFERENCE_RG_METERS,shipInfo.radiusMeters*1.5);
+const newPhase=r.currentPhase(ship);r.updateObject(ship.id,{orbitMeters:shipInfo.radiusMeters*1.8});near(r.currentPhase(ship),newPhase);near(Math.hypot(r.getFocusFrame(ship.id).position[0],r.getFocusFrame(ship.id).position[2])*REFERENCE_RG_METERS,shipInfo.radiusMeters*1.8);near(ship.orbitalPeriodSeconds,r.getOrbitEditInfo(ship.id).periodDays*86400);
+r.updateObject(ship.id,{motion:'infall'});assert.equal(r.getOrbitEditInfo(ship.id).editable,false);
+// Radius edits of legacy components preserve their angular position too.
+r.loadScene('lens-alignment');r.time=91;r.fillHoles();r.fillObjects();const angle=Math.atan2(r.holeData[2],r.holeData[0]),binary=r.getOrbitEditInfo('secondary');assert(binary.editable);r.setOrbitRadiusMeters('secondary',binary.radiusMeters*1.5);near(Math.atan2(r.holeData[2],r.holeData[0]),angle,2e-7);near(r.getOrbitEditInfo('secondary').periodDays/binary.periodDays,1.5**1.5);assert.equal(r.orbitOverrides.secondary.epoch,r.time);
+const snap=snapshotRenderer(r),restored=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});restoreRenderer(restored,snap);assert.deepEqual(restored.orbitOverrides,r.orbitOverrides);restored.holeData.forEach((v,i)=>near(v,r.holeData[i]));
+r.loadScene('disk');r.update({planet:true});r.time=72;r.fillHoles();r.fillObjects();const planetAngle=r.getFocusFrame('planet').angle,planet=r.getOrbitEditInfo('planet');r.setOrbitRadiusMeters('planet',planet.radiusMeters*.7);near(r.getFocusFrame('planet').angle,planetAngle);assert(r.orbitOverrides.planet);
+r.loadScene('bridge');assert.deepEqual(r.orbitOverrides,{});assert.equal(r.getOrbitEditInfo(r.bridgeObjectId).editable,false);assert(r.validateFrameGeometry());
+const bridgeFeatures=r.shaderFeatures(),bridgeShader=createFragment(bridgeFeatures),bridgeProgram={features:bridgeFeatures};assert(!bridgeShader.slice(bridgeShader.indexOf('void main(){')).includes('for(int k=0;k<2;k++)'),'Bridge main omits the unused black-hole integrator');assert(bridgeShader.includes('bridgeTrace(camera,original,pixelAngle)'));assert(r.programSupports(bridgeFeatures,bridgeProgram));assert(!r.programSupports({...bridgeFeatures,bridge:false},bridgeProgram),'A specialized bridge program cannot draw an ordinary spacetime');assert(!r.programSupports(bridgeFeatures,{features:{...bridgeFeatures,bridge:false}}));
+const shuttleBridge=createFragment({bridge:true,craft:true,craftMask:2});assert(shuttleBridge.includes('// Shuttle: nose-to-engine'));assert(!shuttleBridge.includes('// TOS studio-model silhouette.'),'A shuttle crossing does not compile an unused Enterprise');
+// Camera-only worker updates must not copy or rebuild a 515-body catalog.
+r.loadScene('solar-system');r.fillObjects();const objects=r.objects,frames=r.objectFrames,revision=r.geometryRevision,sparse=snapshotRenderer(r,{includeObjects:false});assert(!Object.hasOwn(sparse,'objects'));sparse.camera.yaw+=.2;sparse.target.yaw+=.2;restoreRenderer(r,sparse);assert.equal(r.objects,objects);assert.equal(r.objectFrames,frames);assert.equal(r.geometryRevision,revision);
+const physical=snapshotRenderer(r,{includeObjects:false});physical.state.mass*=2;restoreRenderer(r,physical);assert(r.geometryRevision>revision,'Physical state changes invalidate geometry even in a sparse transport');
+const transitionFixture=fixture({parallelCompile:true}),transition=new BlackHoleRenderer(transitionFixture.canvas,{autoStart:false,bindControls:false});transition.loadScene('bridge');transition.render();transition.render();assert(transition.activeProgram.features.bridge);transition.releaseFence();transition.programs.clear();transitionFixture.control.compileComplete=false;transition.loadScene('disk');const draws=transitionFixture.draws;assert.equal(transition.render(),false);assert.equal(transitionFixture.draws,draws,'No bridge image is emitted as a completed ordinary scene while its program compiles');transitionFixture.control.compileComplete=true;assert(transition.render());assert.equal(transition.activeProgram.features.bridge,false);
+r.dispose();restored.dispose();transition.dispose();console.log('PASS: physical orbit-radius editing, phase continuity, Kepler period/speed scaling, nested moons, primary-hole geometry consistency, binary/component continuity, saved orbital epochs, sparse geometry reuse, and exclusive bridge shader transitions.');

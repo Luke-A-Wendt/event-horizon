@@ -5,6 +5,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { SCENE_PRESETS } from '../dist/config.js';
 import { RENDER_WORKER_SOURCE } from '../dist/render-worker-bundle.js';
+import { SCENE_FILE_WORKER_SOURCE } from '../dist/scene-file-worker-bundle.js';
+import { PLANET_TEXTURE_DATA } from '../dist/planet-texture-data.js';
 
 // Inspect the shipped artifact, not merely the inputs to the bundler. This is
 // static validation; it does not substitute for a real browser/WebGL test.
@@ -36,10 +38,31 @@ new vm.Script(RENDER_WORKER_SOURCE, {filename:'embedded-render-worker.js'});
 assert(RENDER_WORKER_SOURCE.includes('__modules["render-worker.js"].installRenderWorker(globalThis)'), 'Worker entrypoint is bundled');
 assert(!/\bimport\s*(?:\(|\{|\*|['"])|^\s*export\s/m.test(RENDER_WORKER_SOURCE), 'Worker must contain no executable imports or exports');
 for(const [label,pattern] of forbiddenRuntime)assert(!pattern.test(RENDER_WORKER_SOURCE),`Unexpected worker ${label} dependency`);
+new vm.Script(SCENE_FILE_WORKER_SOURCE,{filename:'embedded-scene-file-worker.js'});
+assert(SCENE_FILE_WORKER_SOURCE.includes('__modules["scene-file-worker.js"].installSceneFileWorker(globalThis)'));
+assert(javascript.includes(JSON.stringify(SCENE_FILE_WORKER_SOURCE)),'Scene-file worker is included in the offline page');
+assert(!/\bimport\s*(?:\(|\{|\*|['"])|^\s*export\s/m.test(SCENE_FILE_WORKER_SOURCE),'Scene-file worker has no executable imports');
+for(const [label,pattern] of forbiddenRuntime)assert(!pattern.test(SCENE_FILE_WORKER_SOURCE),`Unexpected scene-file worker ${label} dependency`);
+assert(!SCENE_FILE_WORKER_SOURCE.includes('data:image/jpeg;base64,'),'Scene files do not duplicate the mission image catalog');
 assert(javascript.includes(JSON.stringify(RENDER_WORKER_SOURCE)), 'Standalone HTML embeds the exact complete worker source');
+// Reference maps appear once in the page. GPU workers receive their data via
+// the init message; embedding a second full catalog in the worker string would
+// waste startup memory on older devices, including CPU-only sessions.
+const planetImages=[PLANET_TEXTURE_DATA.atlas,...Object.values(PLANET_TEXTURE_DATA.maps)];
+assert.equal(Object.keys(PLANET_TEXTURE_DATA.maps).length,13,'Complete reviewed mission-map set is included');
+for(const uri of planetImages){
+ assert(/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(uri),'Planet map must be an embedded JPEG');
+ const bytes=Buffer.from(uri.split(',')[1],'base64');assert(bytes.length>1000&&bytes[0]===255&&bytes[1]===216,'Valid nonempty JPEG map');
+ const first=javascript.indexOf(uri);assert(first>=0,'Planet map is embedded in the standalone page');
+ assert.equal(javascript.indexOf(uri,first+uri.length),-1,'Map payload must not be duplicated');
+ assert(!RENDER_WORKER_SOURCE.includes(uri),'Worker starts with an empty asset container');
+}
+assert.match(RENDER_WORKER_SOURCE,/PLANET_TEXTURE_DATA=\{atlas:"",maps:\{\},meta:\{\}\}/,'Worker texture data is injected locally before initialization');
 assert.match(javascript,/URL\.createObjectURL\(new Blob\(\[RENDER_WORKER_SOURCE\],\{type:'text\/javascript'\}\)\)/,'Worker URL must come from its embedded source Blob');
-assert.equal([...javascript.matchAll(/new Worker\s*\(/g)].length,1,'Exactly one reviewed dedicated-worker constructor');
+assert.equal([...javascript.matchAll(/new Worker\s*\(/g)].length,2,'Only the reviewed rendering and scene-file workers are created');
 assert.match(javascript,/new Worker\(url,\{name:'event-horizon-renderer'\}\)/,'Worker must use the local Blob URL');
+assert.match(javascript,/URL\.createObjectURL\(new Blob\(\[SCENE_FILE_WORKER_SOURCE\],\{type:'text\/javascript'\}\)\)/,'File worker must use embedded source');
+assert.match(javascript,/new Worker\(url,\{name:'event-horizon-scene-file'\}\)/,'Scene-file worker must use the local Blob URL');
 assert.match(javascript,/URL\.revokeObjectURL\(url\)/,'Worker Blob URL is released');
 
 const embeddedMatch = javascript.match(/const __atlasImages = (\{[^\n]+\});/);
@@ -129,7 +152,7 @@ const creditOffsets = creditHrefOffsets(html);
 const remoteLiterals = [...html.matchAll(/https?:\/\/[^\s"'`<>)]*/g)];
 for (const match of remoteLiterals) {
   const before = html.slice(Math.max(0, match.index - 30), match.index);
-  assert(/(?:\bxmlns\s*=\s*["']|\blink\(\s*["'])$/.test(before) || creditOffsets.has(match.index), 'Remote URL appears outside a reference link, approved author anchor, or XML namespace');
+  assert(/(?:\bxmlns\s*=\s*["']|\blink\(\s*["'])$/.test(before) || (match[0]==='http://www.w3.org/2000/svg'&&/createElementNS\(\s*['"]$/.test(before)) || creditOffsets.has(match.index), 'Remote URL appears outside a reference link, approved author anchor, or XML namespace');
 }
 
 const credentialPatterns = [

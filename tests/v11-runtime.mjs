@@ -15,7 +15,8 @@ now=65001;assert.equal(load.check(),false,'Resuming excludes the hidden transiti
 assert.equal(load.complete(first),false,'Late work cannot erase a visible failure');
 load.begin();assert(load.complete(load.revision));now+=14000;assert.equal(load.check(),false);
 assert(load.complete(load.revision));now+=15001;assert(load.check());assert.match(load.error,/stopped producing/);
-const gpu=new SceneLoadLifecycle({now:()=>now});now+=29000;assert.equal(gpu.check(),false);now+=1001;assert(gpu.check());
+const gpu=new SceneLoadLifecycle({now:()=>now});assert.equal(gpu.timeout,60000);now+=59000;assert.equal(gpu.check(),false);now+=1001;assert(gpu.check());assert.equal(gpu.timeout,60000,'A cold failure reports its actual deadline');
+gpu.begin();assert(gpu.complete(gpu.revision));assert.equal(gpu.timeout,30000,'The first complete frame restores the shorter stall watchdog');now+=29999;assert.equal(gpu.check(),false);now+=2;assert(gpu.check());
 
 // Validate the real presentation boundary with recording Canvas surfaces. An
 // invalid frame never resizes or overwrites the last complete front canvas.
@@ -70,7 +71,7 @@ assert.equal(host.sceneRevision,host.getState().sceneLoadRevision);
 worker.emit({type:'status',stats:{frameReady:true,renderedSignature:renderSignature(host),sceneRevision:host.sceneRevision}});assert.equal(host.getState().sceneLoadState,'ready');
 // A worker that sends telemetry but no new complete frames cannot hold the
 // loading overlay forever. Explicit error UI gets a finite failure result.
-host.now=()=>now;host.requestSceneLoad();host.loadScene('binary');now+=30001;host.checkSceneLoad();
+host.now=()=>now;host.requestSceneLoad();host.loadScene('binary');worker.emit({type:'status',stats:{shaderCompiling:true}});assert.equal(host.getDiagnostics().deadlineMs,60000);now+=45001;host.frame(now);host.checkSceneLoad();assert.equal(host.getState().sceneLoadState,'loading','The old 45s heartbeat guard cannot cut off a cold scene');assert(!worker.terminated);now+=15000;host.checkSceneLoad();
 assert.equal(host.getState().sceneLoadState,'failed');assert.equal(host.getState().renderBusy,false);assert(worker.terminated);assert(!host.cpu);
 const failedWorker=worker;host.loadScene('disk');worker=workers.at(-1);assert.notEqual(worker,failedWorker);assert.equal(host.getState().sceneLoadState,'loading');
 worker.emit({type:'ready',available:true});failedWorker.emit({type:'status',stats:{frameReady:true,renderedSignature:renderSignature(host),sceneRevision:host.sceneRevision}});assert.equal(host.getState().renderReady,false);

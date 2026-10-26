@@ -34,15 +34,16 @@ const flags=enabled=>{
 assert.equal(DEFAULTS.grid,false);assert.equal(DEFAULTS.warpGrid,false);flags(false);
 for(const scene of SCENE_PRESETS){
  r.loadScene(scene.id);assert.equal(r.state.grid,r.state.warpGrid,`${scene.id} must load one coherent grid state`);
- for(const control of ['grid','warpGrid']){r.update({[control]:true});flags(true);r.update({[control]:false});flags(false);}
+ for(const control of ['grid','warpGrid']){r.update({[control]:true});flags(true);r.update({[control]:false});flags(r.state.spectrum==='geometry');}
 }
 for(const scenario of ['isolated','orbit','excursion']){
  r.loadWarpScenario(scenario);assert.equal(r.state.grid,r.state.warpGrid);
+ r.update({spectrum:'visible'});
  r.update({warpGrid:false});flags(false);r.update({grid:true});flags(true);
  // A binary is meaningful only with the black-hole spacetime enabled; isolated
  // open-space contexts deliberately suppress black-hole-only components.
  r.update({blackHole:true,binary:true,primaryTilt:73,primaryAzimuth:41,secondaryTilt:124,secondaryAzimuth:-19});r.time=13;r.render();
- const holes=f.uniforms.get('uHoles[0]').args[0];near(holes[1],0);near(holes[5],0);
+ const holes=f.uniforms.get('uHoles[0]').args[0],origin=f.uniforms.get('uWorldOrigin').args[0];near(holes[1]+origin[1],0,Math.max(1e-7,Math.abs(origin[1])*1e-7));near(holes[5]+origin[1],0,Math.max(1e-7,Math.abs(origin[1])*1e-7));
  assert.notEqual(holes[0],holes[4],'Distinct binary centers must remain available to the common grid');
 }
 r.dispose();

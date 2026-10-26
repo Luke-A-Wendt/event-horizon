@@ -78,7 +78,7 @@ for(const scaleMode of ['illustrative','physical']){
   renderer.update({warpFactor:10});renderer.render();
   assert.equal(uniform('uWarpFlags')[0],1);assert(uniform('uWarpStrength')[0]<=3);
   for(const record of f.uniforms.values())assert(record.args.flat(3).filter(value=>typeof value==='number').every(Number.isFinite),'Warp10 must not put infinities into GPU uniforms');
-  renderer.update({warpFactor:0});renderer.render();assert.equal(uniform('uWarpFlags')[0],0);assert.equal(renderer.getObjects().length,1);
+  renderer.update({warpFactor:0});renderer.render();assert.equal(uniform('uWarpStrength')[0],0);assert.equal(renderer.getObjects().length,1);
   renderer.clearObjects();renderer.update({starDensity:1.2});renderer.render();
   assert.equal(renderer.getObjects().length,0,'Changing the environment must not respawn a cleared warp ship');
   assert.equal(renderer.state.warp,false);

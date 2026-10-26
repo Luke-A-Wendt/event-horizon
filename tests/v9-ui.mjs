@@ -24,7 +24,7 @@ assert(app.includes('viewportUI?.openElements();toast('),'Adding opens the Eleme
 assert(ui.includes("${icon('video')}<span>Camera</span>"),'Camera uses the video-camera symbol');
 assert(!app.includes('Ⅱ')&&!ui.includes('Ⅱ')&&!html.includes('Ⅱ'),'Pause uses two SVG bars, not a serif character');
 assert(html.includes('id="localPlacement"')&&html.includes('id="orbitalPlacement"'));
-assert(app.includes("$('addOrbitPlacement').hidden=context.kind!=='orbit'"));
+assert(app.includes("$('addOrbitPlacement').hidden=!blackHoleParent"));
 assert(app.includes('renderer.setObjectWarp?.(item.id,event.target.checked)'));
 assert(app.includes('renderer.exploreWarp?.()'));
 assert(app.includes('setBridgeTraveler?.(event.target.value)'));

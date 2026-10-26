@@ -14,8 +14,8 @@ const [readme, license, sourceHtml, standalone, manifest] = await Promise.all([
 // companion offline-bundle test checks its executable and resource closure.
 assert((await stat(path.join(root, '.nojekyll'))).isFile(), 'GitHub Pages marker must exist at the root');
 assert.match(standalone, /<!doctype html>/i, 'Root entry point is a complete HTML document');
-assert.match(readme, /index\.html[\s\S]*?\.nojekyll[\s\S]*?repository root/i, 'README explains the root upload layout');
-assert.match(readme, /Settings → Pages/, 'README provides the GitHub Pages setup route');
+assert(!readme.includes('## Run completely offline'), 'Preserve author removal of setup instructions');
+assert(!readme.includes('## Publish on GitHub Pages'), 'Preserve author removal of hosting walkthrough');
 assert.match(readme, /No `npm install` is needed/, 'Offline build requires no package download');
 const pkg = JSON.parse(manifest);
 assert.equal(pkg.license, 'MIT');
@@ -64,9 +64,9 @@ for (const id of ['radio-observatory', 'gamma-engine']) {
   assert(scene, `Publication includes ${id}`);
   assert(readme.includes(`**${scene.title}**`), 'README names the spectral starting points accurately');
 }
-for (const band of ['Visible', 'Infrared', 'X-ray', 'Radio / mm', 'Gamma']) assert(readme.includes(`| ${band} |`), `README explains ${band}`);
-assert.match(readme, /microwaves belong to the high-frequency part of the radio spectrum/);
+for (const band of ['Visible', 'Infrared', 'X-ray', 'Radio', 'Gamma']) assert(readme.includes(`| ${band} |`), `README explains ${band}`);
+assert.match(readme, /millimeter.wave/i);
 assert.match(readme, /not calibrated instrument simulations/);
-assert.match(readme, /not tested on a physical phone or headset/);
-assert.match(readme, /does not rely on a browser cache/);
-console.log('PASS: publication entry point and Pages instructions; exact linked author credits; complete MIT text; dependency-free manifest; spectral documentation and 29-scene inventory.');
+assert.match(readme, /Runtime architecture/);
+assert.doesNotMatch(readme, /passwords|API keys|archive excludes/i, 'README describes the project rather than delivery assurances');
+console.log('PASS: publication entry point and author README choices; exact linked author credits; complete MIT text; dependency-free manifest; spectral documentation and current scene inventory.');

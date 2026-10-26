@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {effectiveWarpRadius} from '../dist/warp-physics.js';
 import {fixture} from './render-fixture.mjs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {DEFAULTS,SCENE_PRESETS} from '../dist/config.js';
@@ -7,8 +8,8 @@ import {composeEyeFrame} from '../dist/xr-view.js';
 import {REFERENCE_RG_METERS,objectRadiusMeters} from '../dist/objects.js';
 
 const bands=['visible','infrared','xray','radio','gamma'];
-assert.equal(SCENE_PRESETS.length,29);
-assert.equal(new Set(SCENE_PRESETS.map(scene=>scene.id)).size,29);
+assert.equal(SCENE_PRESETS.length,44);
+assert.equal(new Set(SCENE_PRESETS.map(scene=>scene.id)).size,44);
 for(const [id,band] of [['radio-observatory','radio'],['gamma-engine','gamma']]){
  const scene=SCENE_PRESETS.find(scene=>scene.id===id);
  assert.equal(scene.patch.spectrum,band);assert.equal(scene.patch.jets,true);
@@ -32,12 +33,12 @@ for(const webgl2 of [false,true]){
   }
  }
  assert.deepEqual(errors,[]);
- r.loadScene('disk');assert.deepEqual(r.state,{...DEFAULTS,paused:false,objectScaleMode:'physical'});
+ r.loadScene('disk');assert.deepEqual(r.state,{...DEFAULTS,warpRadius:effectiveWarpRadius(DEFAULTS.warpFactor),paused:true,objectScaleMode:'physical'});
  r.dispose();
 }
 
 const errors=[],f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false,onError:message=>{if(message)errors.push(message);}});
-r.loadScene('station-eclipse');r.render();
+r.loadScene('orbital-expedition');r.render();
 for(const body of r.objects)assert.equal(r.objectRadius(body)*REFERENCE_RG_METERS,objectRadiusMeters(body.type,body.scale),'Physical dimensions are not enlarged to hide precision problems');
 const image=r.beginPhotoCapture();r.endPhotoCapture();assert(image.uniforms.every(uniform=>uniform.args.flat(Infinity).every(value=>typeof value!=='number'||Number.isFinite(value))));
 const saved=snapshotRenderer(r),f2=fixture(),copy=new BlackHoleRenderer(f2.canvas,{autoStart:false});
@@ -56,4 +57,4 @@ r.loadScene('disk');r.update({stars:false,nebula:false,disk:false,grid:false,jet
 r.configCache.diskOuter[0]=NaN;assert.equal(r.render(),false);assert.match(errors.at(-1),/gravitational geometry/);
 r.loadScene('gamma-engine');r.update({mass:NaN,spin:Infinity,jetSpread:NaN});assert(r.render(),'Public edits sanitize invalid numeric values');
 r.dispose();copy.dispose();
-console.log('PASS: 29 scene presets, all five spectral indices on both WebGL contracts, finite dynamics and uniforms, physical sizes, snapshot/photo/VR compatibility, and safe invalid-frame rejection.');
+console.log('PASS: 44 scene presets, all five spectral indices on both WebGL contracts, finite dynamics and uniforms, physical sizes, snapshot/photo/VR compatibility, and safe invalid-frame rejection.');

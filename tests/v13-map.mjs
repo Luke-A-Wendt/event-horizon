@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {mapRadius,mapPotential,mapModel,renderOrbitMap,mapProjectedVelocity} from '../dist/orbit-map.js';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+const near=(a,b)=>assert(Math.abs(a-b)<1e-12);
+near(mapRadius(0,1000,1),0);near(mapRadius(1000,1000,1),1);near(mapRadius(500,1000,1,false),.5);
+assert(mapRadius(10,1000,1)>mapRadius(10,1000,1,false),'Log distance reveals inner orbits');
+const radii=[0,1,10,100,1000].map(r=>mapRadius(r,1000,1));assert(radii.every((v,i)=>!i||v>radii[i-1]));
+near(mapPotential(1,149597870700),1476.62504/149597870700);assert.equal(mapPotential(0,1),0);
+const projected=mapProjectedVelocity(3,4,2,-1,100,1,50,false);near(projected[0],1);near(projected[1],.5);
+const mapPoint=(x,y)=>{const r=Math.hypot(x,y),R=50*mapRadius(r,100,1,true);return[x/r*R,-y/r*R];};const p=mapPoint(3,4),q=mapPoint(3.000002,3.999999),analytic=mapProjectedVelocity(3,4,2,-1,100,1,50,true);for(let i=0;i<2;i++)assert(Math.abs((q[i]-p[i])/1e-6-analytic[i])<1e-5,'Map velocity includes the radial log transform Jacobian');
+const f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false});r.loadScene('solar-system');r.render();const before=JSON.stringify({state:r.state,objects:r.objects,camera:r.camera});
+const rootMap=mapModel(r,'space');assert.equal(rootMap.host.name,'Space');assert(rootMap.children.some(b=>b.name==='Sun'));const solar=mapModel(r);assert.equal(solar.host.name,'Sun');assert(solar.children.some(b=>b.name==='Earth'));assert(solar.children.some(b=>b.name==='Pluto'));assert(!solar.children.some(b=>b.name==='Moon'),'Top-down chart preserves immediate-parent relationship');
+const earth=r.objects.find(o=>o.name==='Earth'),earthMap=mapModel(r,earth.id);assert(earthMap.children.some(b=>b.name==='Moon'));
+for(const logarithmic of [false,true])for(const exaggeration of [0,6,12]){const output=renderOrbitMap(solar,{logDistance:logarithmic,logSize:logarithmic,amplification:exaggeration});assert(!/NaN|Infinity/.test(output.svg+output.profileSvg));assert(output.svg.includes('not an ephemeris'));assert(output.profileSvg.includes('−GM'));}
+const selected=renderOrbitMap(solar,{selectedId:earth.id});assert.equal(selected.selected.name,'Earth');assert.equal(JSON.stringify({state:r.state,objects:r.objects,camera:r.camera}),before,'Educational scales never resize or move physical scene bodies');
+const mobile=renderOrbitMap(solar,{viewportWidth:320});assert(mobile.svg.includes('viewBox="0 0 320 360"'));for(const name of ['Mercury','Venus','Earth','Mars','Jupiter','Saturn','Uranus','Neptune'])assert(mobile.svg.includes(`>${name}</text>`),`Major planet label stays visible: ${name}`);
+const malicious={...solar,host:{...solar.host,name:'<Sun & stars>'},children:[{...solar.children[0],name:'<world onload="x">'}]};const safe=renderOrbitMap(malicious);assert(safe.svg.includes('&lt;Sun &amp; stars&gt;'));assert(!safe.svg.includes('<world'));
+r.loadScene('binary');r.render();const pair=mapModel(r,'primary');assert(pair.children.some(b=>b.id==='secondary'));assert(pair.children.every(b=>Number.isFinite(b.massSolar)));assert(Number.isFinite(mapModel(r,'secondary').host.massSolar));
+r.loadScene('empty-space');r.render();const empty=renderOrbitMap(mapModel(r,'space'));assert(!/NaN|Infinity/.test(empty.svg+empty.profileSvg));
+r.dispose();console.log('PASS: logarithmic coordinate mapping, physical compactness, hierarchy-centered maps, finite potential amplification, safe labels and unchanged physical scene.');

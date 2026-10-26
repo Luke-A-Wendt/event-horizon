@@ -19,12 +19,13 @@ function createRenderHost(canvas,callbacks,{cpu}){
  let state={...DEFAULTS},items=[],serial=0;const calls=[];
  const api={ready:true,cpu,gl:cpu?null:{},camera:{yaw:.25,pitch:.19,distance:32,lookYaw:0,lookPitch:0,focusDistance:6},target:{yaw:.25,pitch:.19,distance:32,lookYaw:0,lookPitch:0,focusDistance:6},time:0,sceneId:'disk',quality:cpu?'cpu':'adaptive',get state(){return state;},set state(value){state=value;},get objects(){return items;},set objects(value){items=value;},get nextObjectId(){return serial;},set nextObjectId(value){serial=value;},refreshConfiguration(){},fillHoles(){},fillObjects(){},updateCameraFrame(){},focusId:null,focusMode:'track',selectedId:null,calls,startup:nextStartup||Promise.resolve({available:true,worker:true,cpu}),
   getObjectContext(){return {kind:state.bridge?'bridge':state.blackHole?'orbit':'local',referenceLabel:'scene origin',allowedTypes:state.bridge?['enterprise','shuttle','astronaut']:OBJECT_TYPES.map(o=>o.id)};},
+  getObjectTree(){const nodes=[{id:'space',parentId:null,type:'space',label:'Space',canAdd:!state.bridge},...(state.blackHole?[{id:'primary',parentId:'space',type:'blackhole',label:'Black hole',canAdd:true}]:[]),...items.map(o=>({id:o.id,parentId:o.parentId||'space',type:o.type,label:o.label,canAdd:true}))];for(const n of nodes)n.children=nodes.filter(c=>c.parentId===n.id).map(c=>c.id);return nodes;},
   getObjects(){return items.map(o=>({...o,focused:o.id===api.focusId}));},
   getState(){return {...state,objects:api.getObjects(),objectContext:api.getObjectContext(),objectCount:items.length,maxObjects:10,selectedId:api.selectedId,focusId:api.focusId,focusMode:api.focusMode,warpObjectId:items.find(o=>o.warpEnabled)?.id,bridgeObjectId:items.find(o=>o.bridgeTraveler)?.id,bridgeRegion:'near',fps:30,scale:1,steps:100,effectiveQuality:'medium',renderReady:true,renderBusy:false,cameraDistanceMeters:1000,worldDistance:35};},
   getSceneTargets(){return [...(state.blackHole?[{id:'primary',label:'Black hole',enabled:true,canTrack:true}]:[]),...items.map(o=>({id:o.id,label:o.label,enabled:true,canTrack:true,canBoard:true}))];},
   update(patch){Object.assign(state,patch);},setQuality(value){api.quality=value;},selectObject(id){api.selectedId=id;},
   loadScene(id){api.sceneId=id;state=makePreset(id);items=[];api.focusId=null;api.selectedId=null;for(const o of SCENE_PRESETS.find(p=>p.id===id)?.objects||[])api.addObject(o.type,o.radius,o.phase,o.scale);return api.getState();},
-  addObject(type,radius=12,phase=0,scale=1){const placement=api.getObjectContext().kind,o={id:'object-'+(++serial),type,label:OBJECT_TYPES.find(o=>o.id===type).label,radius,height:0,phase,scale,placement,x:0,y:0,z:0,headingDegrees:phase*180/Math.PI,warpEnabled:false,bridgeTraveler:placement==='bridge',lengthMeters:OBJECT_DIMENSIONS[type].lengthMeters};items.push(o);return o;},
+  addObject(type,radius=12,phase=0,scale=1){const placement=api.getObjectContext().kind,o={id:'object-'+(++serial),type,label:OBJECT_TYPES.find(o=>o.id===type).label,radius,height:0,phase,scale,placement,parentId:placement==='orbit'?'primary':'space',x:0,y:0,z:0,headingDegrees:phase*180/Math.PI,warpEnabled:false,bridgeTraveler:placement==='bridge',lengthMeters:OBJECT_DIMENSIONS[type].lengthMeters};items.push(o);return o;},
   updateObject(id,patch){Object.assign(items.find(o=>o.id===id),patch);calls.push(['updateObject',id,patch]);},
   removeObject(id){items=items.filter(o=>o.id!==id);},clearObjects(){items=[];},
   setObjectWarp(id,enabled){for(const o of items)o.warpEnabled=o.id===id&&enabled;state.warp=enabled;calls.push(['setObjectWarp',id,enabled]);},
@@ -43,7 +44,7 @@ const $=id=>{const node=document.getElementById(id);assert(node,`Missing control
 // Exercise the shipped UI event handlers with the same limited DOM contract.
 // This verifies affordances/state wiring, not browser layout or real rendering.
 const addBody=$('addObjectPanel').querySelector('.object-body');
-assert.equal(addBody.children.find(n=>n.tagName!=='#TEXT').id,'addObject','The creation action is the first control, above descriptions');
+assert(addBody.querySelector('#addParent')&&addBody.querySelector('#objectType')&&addBody.querySelector('#addObject'),'Parent, type, and action remain available');
 assert.equal(document.querySelector('link[rel="preload"]').getAttribute('href'),'assets/loading-orbit.gif');
 assert.equal(document.querySelector('.loading-orbit-motion').getAttribute('src'),'assets/loading-orbit.gif');
 assert.equal(document.querySelector('.loading-orbit-still').getAttribute('src'),'assets/loading-orbit-still.svg');
@@ -51,17 +52,15 @@ const css=await readFile(new URL('../dist/style.css',import.meta.url),'utf8');
 assert(css.includes('.loading-orbit-motion{display:none!important}'));
 assert(!css.includes('@keyframes hole-orbit'),'No CSS spinner competes with the self-contained GIF');
 assert.deepEqual($('diskStyle').querySelectorAll('option').slice(-2).map(o=>o.value),['radiant','ribbons']);
-assert.equal($('mass').getAttribute('max'),'100');assert.equal($('spin').getAttribute('max'),'0.998');
+assert.equal($('mass').getAttribute('max'),'1','Normalized exponential slider');assert.equal($('maxMass').value,'100000000000','Maximum includes TON 618');assert.equal($('spin').getAttribute('max'),'0.998');
 
-function add(type){$('elementsToggle').click();if($('elementsPanel').hidden)$('elementsToggle').click();$('viewportAdd').click();$('objectType').value=type;$('objectType').dispatch('change');$('addObject').click();const item=host.getObjects().at(-1);document.querySelector(`[data-element="${item.id}"]`).click();return item;}
-const shuttle=add('shuttle');
-assert.equal($('inspectorCockpit').hidden,false);assert.equal($('cockpitObject').hidden,false);
-$('inspectorCockpit').click();assert.equal(host.focusId,shuttle.id);assert.equal(host.focusMode,'onboard');assert($('toast').textContent.includes('cockpit'));
-$('cameraToggle').click();$('viewportTarget').value=shuttle.id;$('viewportTarget').dispatch('change');assert.equal($('viewportCockpit').hidden,false);$('viewportCockpit').click();assert.equal(host.focusId,shuttle.id);assert.equal(host.focusMode,'onboard');
-const astronaut=add('astronaut');assert.equal($('inspectorCockpit').hidden,true);assert.equal($('cockpitObject').hidden,true);
+async function add(type){$('elementsToggle').click();if($('elementsPanel').hidden)$('elementsToggle').click();$('viewportAdd').click();$('objectType').value=type;$('objectType').dispatch('change');$('addObject').click();await Promise.resolve();await Promise.resolve();const item=host.getObjects().at(-1);document.querySelector(`[data-element="${item.id}"]`).click();return item;}
+const shuttle=await add('shuttle');
+assert.equal(document.getElementById('inspectorCockpit'),null);$('inspectorRide').click();await Promise.resolve();await Promise.resolve();assert.equal(host.focusMode,'onboard');
+const astronaut=await add('astronaut');
 $('editMotion').value='infall';$('editMotion').dispatch('change');assert.equal(host.getObjects().find(o=>o.id===astronaut.id).motion,'infall');assert.equal($('editRadiusLabel').textContent,'Starting distance from black hole');
 $('editMotion').value='horizon';$('editMotion').dispatch('change');assert.equal($('editRadius').disabled,true);assert.equal($('editHeight').disabled,true);assert.equal($('editPhase').disabled,false);
-const probe=add('probe');assert.equal($('probeProperties').hidden,false);
+const probe=await add('probe');assert.equal($('probeProperties').hidden,false);
 $('editLuminosity').value='3';$('editLuminosity').dispatch('input');assert.equal(host.getObjects().find(o=>o.id===probe.id).logLuminosity,3);assert.equal($('editLuminosityValue').textContent,'1.0 thousand ×');
 $('editLuminosity').value='8';$('editLuminosity').dispatch('input');assert.equal(host.getObjects().find(o=>o.id===probe.id).logLuminosity,8);assert.equal($('editLuminosityValue').textContent,'100.0 million ×');
 $('closeInspector').click();
@@ -80,12 +79,12 @@ now+=300;sandbox.handleStats({...host.getState(),cpu:true,cpuBackend:'cooperativ
 $('bridgeOtherNebula').checked=false;$('bridgeOtherNebula').dispatch('change');assert.equal(host.getState().bridgeOtherNebula,false);
 // Backend retries retain state even when the previous startup never completed.
 $('closeInspector').click();document.querySelector('[data-scene="empty-space"]').click();await Promise.resolve();
-const cabin=add('shuttle');$('editX').value='125';$('editX').dispatch('change');$('inspectorCockpit').click();
+const cabin=await add('shuttle');$('editX').value='125';$('editX').dispatch('change');$('inspectorRide').click();await Promise.resolve();await Promise.resolve();
 sandbox.updateParameter('exposure',2.2);$('quality').value='high';host.camera.lookYaw=.4;host.target.lookYaw=.4;host.time=23;
 const previous=host;let resolveOldStartup;nextStartup=new Promise(resolve=>resolveOldStartup=resolve);
 const staleStartup=sandbox.initRenderer(false),pending=host;
 assert.notEqual(pending,previous);assert(previous.disposed);assert.equal(pending.sceneId,'empty-space');assert.equal(pending.getObjects()[0].x,125);assert.equal(pending.camera.lookYaw,.4);assert.equal(pending.time,23);assert.equal(pending.getState().exposure,2.2);assert.equal(pending.focusId,cabin.id);
-const addedWhileStarting=add('probe');$('editLuminosity').value='5';$('editLuminosity').dispatch('input');pending.camera.lookYaw=.8;pending.target.lookYaw=.8;pending.time=42;
+const addedWhileStarting=await add('probe');$('editLuminosity').value='5';$('editLuminosity').dispatch('input');pending.camera.lookYaw=.8;pending.target.lookYaw=.8;pending.time=42;
 $('continueCPU').click();const cpuHost=host;await Promise.resolve();await Promise.resolve();
 assert.notEqual(cpuHost,pending);assert(pending.disposed);assert.equal(cpuHost.cpu,true);assert.equal(cpuHost.quality,'cpu');assert.equal(cpuHost.sceneId,'empty-space');assert.equal(cpuHost.camera.lookYaw,.8);assert.equal(cpuHost.time,42);assert.equal(cpuHost.getObjects().find(o=>o.id===addedWhileStarting.id).logLuminosity,5);assert.equal(cpuHost.selectedId,addedWhileStarting.id);assert.equal(cpuHost.getObjects()[0].x,125);
 resolveOldStartup({workerFailed:true,reason:'Old startup failed after CPU was ready'});await staleStartup;assert.equal(host,cpuHost);assert.equal($('renderError').hidden,true,'An obsolete startup cannot replace or error the current renderer');

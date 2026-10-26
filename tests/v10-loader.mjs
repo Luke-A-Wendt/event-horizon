@@ -31,5 +31,5 @@ const still=readFileSync(new URL('../dist/assets/loading-orbit-still.svg',import
 assert.match(still,/viewBox="0 0 192 128"/);
 assert(!/<(?:script|animate|animateMotion|animateTransform|image)\b/.test(still),'Reduced-motion still must have no animation or image dependency');
 assert(!/\b(?:href|src)=/.test(still));
-assert.match(still,/fill="#010408"/,'The central shadow occludes the rear source image');
+assert.match(still,/fill="#000"/,'The central shadow remains a dark geometric reference');
 console.log(`PASS: ${frames}-frame, ${total/1000}s looping lensed-orbit GIF (${gif.length} bytes), bounded delta frames, and self-contained reduced-motion SVG.`);

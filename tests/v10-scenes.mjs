@@ -1,3 +1,4 @@
+const SHUTTLE_COCKPIT_EYE=[0,.28,.65];
 import assert from 'node:assert/strict';
 import {fixture} from './render-fixture.mjs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
@@ -8,7 +9,7 @@ const near=(a,b,t=1e-10)=>assert(Math.abs(a-b)<t,`${a} != ${b}`);
 const dot=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0);
 const norm=v=>Math.hypot(...v);
 const f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false});
-assert.equal(SCENE_PRESETS.length,29);assert.equal(new Set(SCENE_PRESETS.map(p=>p.id)).size,29);
+assert.equal(SCENE_PRESETS.length,44);assert.equal(new Set(SCENE_PRESETS.map(p=>p.id)).size,44);
 r.loadScene('lens-alignment');r.render();assert.equal(r.state.grid,true);assert.equal(r.state.warpGrid,true);
 const project=point=>{const c=r.cameraFrame,q=point.map((v,i)=>v-c.observer[i]),z=dot(q,c.forward);return [dot(q,c.right)/z,dot(q,c.up)/z,z];};
 const primary=project(Array.from(r.holeData.slice(0,3))),secondary=project(Array.from(r.holeData.slice(4,7)));
@@ -17,9 +18,9 @@ for(const p of [primary,secondary])assert(Math.abs(p[0])<.55&&Math.abs(p[1])<.38
 r.loadScene('polar');assert(r.state.mass>DEFAULTS.mass);assert.equal(r.state.spin,.998);assert(r.state.grid&&r.state.jets);
 r.loadScene('nasa-shuttle');assert.equal(r.state.diskStyle,DEFAULTS.diskStyle);assert.equal(r.state.diskColor,DEFAULTS.diskColor);assert.equal(r.objects[0].type,'shuttle');
 const shuttle=r.objects[0];r.target.lookYaw=2;r.camera.lookYaw=2;r.focusTarget(shuttle.id,'onboard');r.render();
-assert.deepEqual(r.cameraFrame.inspectCamera,[-.045,.075,.48]);assert.deepEqual(r.cameraFrame.inspectForward,[0,0,1]);assert.equal(f.uniforms.get('uCockpitMode').args[0],1);
-r.time=30;r.render();assert.deepEqual(r.cameraFrame.inspectForward,[0,0,1],'Cockpit gaze is fixed to the moving craft');
-r.target.lookYaw=r.camera.lookYaw=1;r.target.lookPitch=r.camera.lookPitch=.5;r.focusTarget(shuttle.id,'onboard');assert.equal(r.camera.lookYaw,0);assert.equal(r.camera.lookPitch,0);assert.deepEqual(r.cameraFrame.inspectForward,[0,0,1],'Choosing Cockpit again restores its forward view');
+assert.deepEqual(r.cameraFrame.inspectCamera,SHUTTLE_COCKPIT_EYE);r.cameraFrame.inspectForward.forEach((v,i)=>near(v,[0,0,1][i]));assert.equal(f.uniforms.get('uCockpitMode').args[0],0);
+r.time=30;r.render();r.cameraFrame.inspectForward.forEach((v,i)=>near(v,[0,0,1][i]));
+r.target.lookYaw=r.camera.lookYaw=1;r.target.lookPitch=r.camera.lookPitch=.5;r.focusTarget(shuttle.id,'onboard');assert.equal(r.camera.lookYaw,0);assert.equal(r.camera.lookPitch,0);r.cameraFrame.inspectForward.forEach((v,i)=>near(v,[0,0,1][i]));
 r.loadScene('bridge');r.render();assert.equal(r.state.nebula,false);assert.equal(r.state.stars,true);assert.equal(r.state.bridgeOtherNebula,true);assert.equal(r.state.bridgeOtherColor,'#875ba3');
 assert.equal(f.uniforms.get('uBridgeOtherNebula').args[0],1);r.update({bridgeOtherNebula:false,nebula:true});r.render();assert.equal(f.uniforms.get('uBridgeOtherNebula').args[0],0);assert.equal(r.state.nebula,true,'Both bridge sky controls are independent');
 r.loadScene('radiant-descent');const astronaut=r.objects[0],physicalRadius=r.objectRadius(astronaut);assert.equal(astronaut.motion,'infall');
@@ -32,13 +33,15 @@ r.time=100000;r.render();assert(norm(r.objectFrames[0].position)>r.configCache.h
 r.loadScene('horizon-watch');r.render();assert.equal(r.focusMode,'onboard');const frame=r.cameraFrame,radial=frame.observer.map((v,i)=>v-r.holeData[i]);
 assert(dot(frame.forward,radial)/norm(radial)>.999999,'Horizon camera starts looking outward');near(norm(r.objectFrames[0].position)/r.massScale,horizonRg(r.state.spin)*1.035+2*r.objectRadius(r.objects[0])/r.massScale);assert(norm(radial)>r.configCache.horizon[0]*1.013);
 r.target.lookYaw=1;r.camera.lookYaw=1;r.resetCamera();r.render();assert(dot(r.cameraFrame.forward,radial)/norm(radial)>.999999,'Reset restores the outward onboard view');
-r.loadScene('beacon-sweep');const probe=r.objects[0],radiusBefore=r.objectRadius(probe);assert.equal(probe.logLuminosity,2);r.render();assert.equal(f.uniforms.get('uLuminosities[0]').args[0][0],1e2);assert.equal(r.shaderFeatures().probe,true);
+r.loadScene('disk');r.addChildObject('primary','probe',{radius:6,phase:.6,height:1.5,logLuminosity:2});const probe=r.objects[0],radiusBefore=r.objectRadius(probe);assert.equal(probe.logLuminosity,2);r.render();assert.equal(f.uniforms.get('uLuminosities[0]').args[0][0],1e2);assert.equal(r.shaderFeatures().probe,true);
 r.updateObject(probe.id,{logLuminosity:99});r.render();assert.equal(r.getObjects()[0].luminosity,1e8);near(r.objectRadius(probe),radiusBefore,1e-20);
 r.updateObject(probe.id,{logLuminosity:-5});r.render();assert.equal(r.getObjects()[0].luminosity,1);assert.equal(f.uniforms.get('uLuminosities[0]').args[0][0],1);
 r.updateObject(probe.id,{logLuminosity:4});const frozen=r.beginPhotoCapture();r.endPhotoCapture();assert.equal(frozen.uniforms.find(u=>u.name==='uLuminosities[0]').args[0][0],1e4);
 near(r.objectRadius(probe)*REFERENCE_RG_METERS,objectRadiusMeters('probe'));
 r.loadScene('disk');assert.equal(r.shaderFeatures().probe,false);assert.equal(r.state.diskStyle,'thermal');assert.equal(r.state.grid,false);
-for(const id of ['radiant-descent','ribbon-flow','station-eclipse']){r.loadScene(id);r.render();assert([5,6].includes(f.uniforms.get('uDiskParams').args[0]));assert(r.getState().objects.every(o=>Number.isFinite(o.lengthMeters)));}
-r.loadScene('station-eclipse');r.render();const positions=f.uniforms.get('uObjects[0]').args[0];assert(Math.hypot(...[0,1,2].map(i=>positions[i+4]-positions[i]))>r.massScale,'Station and astronaut tracks remain distinct in GPU coordinates');
+for(const id of ['radiant-descent','orbital-expedition']){r.loadScene(id);r.render();assert([5,6].includes(f.uniforms.get('uDiskParams').args[0]));assert(r.getState().objects.every(o=>Number.isFinite(o.lengthMeters)));}
+// The ribbon material remains configurable after removing its redundant gallery card.
+r.loadScene('radiant-descent');r.update({diskStyle:'ribbons'});r.render();assert.equal(f.uniforms.get('uDiskParams').args[0],6);
+r.loadScene('orbital-expedition');r.render();const positions=f.uniforms.get('uObjects[0]').args[0];assert(Math.hypot(...[0,1,2].map(i=>positions[i+4]-positions[i]))>r.massScale,'Station and astronaut tracks remain distinct in GPU coordinates');
 r.dispose();copy.dispose();
 console.log('PASS: distinct scene compositions, physical shuttle cockpit, independent bridge skies, bounded illustrative descent and outward horizon view, route/worker/photo continuity, logarithmic probe emission, and original default preservation.');

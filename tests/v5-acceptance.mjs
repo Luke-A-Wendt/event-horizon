@@ -8,7 +8,8 @@ import { fixture } from './render-fixture.mjs';
 import { bridgeConformal } from '../dist/bridge-math.js';
 
 const f=fixture(),r=new BlackHoleRenderer(f.canvas);
-const near=(a,b,tolerance=1e-8)=>assert(Math.abs(a-b)<tolerance,`${a} differs from ${b}`);
+// Retain the absolute tolerance, with a few machine ulps for supergiant/AU dimensions.
+const near=(a,b,tolerance=1e-8)=>assert(Math.abs(a-b)<Math.max(tolerance,4*Number.EPSILON*Math.max(Math.abs(a),Math.abs(b))),`${a} differs from ${b}`);
 const dot=(a,b)=>a.reduce((sum,value,i)=>sum+value*b[i],0);
 const finite=()=>{
  for(const record of f.uniforms.values())assert(record.args.flat(3).filter(value=>typeof value==='number').every(Number.isFinite));
@@ -29,7 +30,10 @@ for(const preset of SCENE_PRESETS){
   // In the Ellis isotropic chart, physical lengths are Ω times coordinate
   // lengths. The same SI-sized ship must shrink in coordinates near the throat.
   const spatialScale=r.state.bridge?bridgeConformal(Math.hypot(...frame.position),r.configCache.bridgeRadius):1;
-  near(frame.radius*spatialScale*REFERENCE_RG_METERS,objectRadiusMeters(object.type,object.scale),1e-5);
+  // The ocean illustration keeps its physical rocky core and adds a bounded
+  // cap; ordinary shaped bodies retain their existing SI reference dimensions.
+  near((frame.coreRadius||frame.radius)*spatialScale*REFERENCE_RG_METERS,(object.radiusMeters?object.radiusMeters*object.scale:objectRadiusMeters(object.type,object.scale))*Math.max(...(frame.waterCap?[1,1,1]:object.shapeAxes||[1,1,1])),1e-5);
+  if(frame.waterCap)near(frame.radius/frame.coreRadius,Math.max(1,frame.waterCap.offsetRatio+frame.waterCap.radiusRatio),1e-10);
  }
  if(Number.isInteger(preset.camera?.focusIndex))assert.equal(r.focusId,r.objects[preset.camera.focusIndex].id);
  for(const time of [3,11,23]){r.time=time;r.render();finite();}

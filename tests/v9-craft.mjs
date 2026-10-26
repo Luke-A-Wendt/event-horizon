@@ -1,9 +1,10 @@
+const SHUTTLE_COCKPIT_EYE=[0,.28,.65];
 // Procedural asset contracts and an optional exact-GLSL image fixture.
 // Native rendering via v6_shader_check.py checks actual primitive intersections;
 // the recording renderer here checks local camera frames, not browser speed.
 import assert from 'node:assert/strict';
 import { CRAFT_GLSL, createCraftGLSL } from '../dist/craft-glsl.js';
-import { COCKPIT_GLSL, SHUTTLE_COCKPIT_EYE } from '../dist/cockpit-glsl.js';
+import { COCKPIT_GLSL, SHUTTLE_COCKPIT_EYE as LEGACY_COCKPIT_EYE } from '../dist/cockpit-glsl.js';
 import { OBJECT_DIMENSIONS, objectRadiusMeters } from '../dist/objects.js';
 import { BlackHoleRenderer } from '../dist/renderer.js';
 import { fixture } from './render-fixture.mjs';
@@ -52,7 +53,7 @@ assert(CRAFT_GLSL.includes('nasaLetters')&&CRAFT_GLSL.includes('nasaPatch'));
 assert(CRAFT_GLSL.includes('vec3 conductor=vec3(1.0,.71,.25)'));
 assert(CRAFT_GLSL.includes('if(uDetail>=1.0)')&&CRAFT_GLSL.includes('if(uDetail>=2.0)'));
 assert(!/https?:|sampler2D|texture2D/.test(CRAFT_GLSL+COCKPIT_GLSL),'The procedural assets require no remote or raster assets');
-const [x,y,z]=SHUTTLE_COCKPIT_EYE;
+const [x,y,z]=LEGACY_COCKPIT_EYE;
 assert((x/.133)**2+((y-.075)/.072)**2+((z-.46)/.205)**2<1,'Pilot eye must be within raised cabin');
 assert(Math.abs(x)<.112&&y>-.055&&y<.133&&z>.315&&z<.620);
 
@@ -61,7 +62,7 @@ assert(Math.abs(x)<.112&&y>-.055&&y<.133&&z>.315&&z<.620);
  const f=fixture(),r=new BlackHoleRenderer(f.canvas);
  const shuttle=r.addObject('shuttle',16,.7,1);assert(shuttle);
  r.focusObject(shuttle.id,'onboard');r.render();
- assert.equal(f.uniforms.get('uCockpitMode').args[0],1);
+ assert.equal(f.uniforms.get('uCockpitMode').args[0],0);
  const before=f.uniforms.get('uInspectCamera').args[0];
  assert.deepEqual(before,SHUTTLE_COCKPIT_EYE);
  const worldBefore=[...f.uniforms.get('uForward').args[0]];

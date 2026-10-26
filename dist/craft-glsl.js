@@ -58,17 +58,23 @@ vec4 wingHit(vec3 ro,vec3 rd,vec2 a,vec2 b,vec2 c,float thickness){
  return vec4(normal,nearT);
 }
 
-// A rounded forebody clipped by the flat roof and sloping six-pane windscreen.
-// The ellipsoid blends the side cheeks into the nose; only the glazing is planar.
+// Continuous rounded forebody with three inset windscreen facets.
+// The roof stays curved: a horizontal clipping plane would make a cylindrical
+// cap hovering above the nose, instead of the orbiter's integrated flight deck.
+// The side facets wrap the six windows around the cabin, rather than drawing
+// six parallel strips on one flat bus-like windscreen.
 vec4 shuttleCabinHit(vec3 ro,vec3 rd){
- vec3 center=vec3(0,.071,.445),radii=vec3(.137,.091,.225);
+ vec3 center=vec3(0,.010,.405),radii=vec3(.143,.149,.350);
  vec3 q=(ro-center)/radii,d=rd/radii;
  float aa=dot(d,d),bb=dot(q,d),cc=dot(q,q)-1.0,h=bb*bb-aa*cc;
  if(h<0.0)return vec4(0,0,0,-1);
  float root=sqrt(h),nearT=(-bb-root)/aa,farT=(-bb+root)/aa;
  vec3 normal=unit((ro+rd*nearT-center)/(radii*radii));bool valid=true;
- clipPlane(ro,rd,vec3(0,1,0),.151,nearT,farT,normal,valid);
- clipPlane(ro,rd,unit(vec3(0,1,1)),.704/sqrt(2.0),nearT,farT,normal,valid);
+ clipPlane(ro,rd,vec3(1,0,0),.132,nearT,farT,normal,valid);
+ clipPlane(ro,rd,vec3(-1,0,0),.132,nearT,farT,normal,valid);
+ clipPlane(ro,rd,unit(vec3(0,1,.8)),.584/length(vec3(0,1,.8)),nearT,farT,normal,valid);
+ clipPlane(ro,rd,unit(vec3(.70,.85,.80)),.615/length(vec3(.70,.85,.80)),nearT,farT,normal,valid);
+ clipPlane(ro,rd,unit(vec3(-.70,.85,.80)),.615/length(vec3(.70,.85,.80)),nearT,farT,normal,valid);
  if(!valid||farT<max(nearT,0.0)||nearT<0.0)return vec4(0,0,0,-1);
  return vec4(normal,nearT);
 }
@@ -148,28 +154,35 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
  }else if(type<4.5){
   // Shuttle: nose-to-engine extent 1.72, span 1.10; 37.24 m x 23.79 m.
   // The cockpit is part of the raised forward cabin, not a bubble canopy.
-  selectSurface(capsuleHit(ro,rd,vec3(0,0,-.54),vec3(0,0,.34),.125),white,2.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,0,.37),vec3(.125,.128,.49)),white,2.0,s);
+  // Full cylindrical payload bay, tapering cheeks, then a blunt rounded nose.
+  // The forebody closes its short nose cap at the 0.86 forward endpoint;
+  // a separate overlapping cap produces an artificial muzzle in front view.
+  selectSurface(capsuleHit(ro,rd,vec3(0,.008,-.54),vec3(0,.008,.29),.128),white,2.0,s);
+  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.025,.460),vec3(.137,.115,.400)),white,2.0,s);
   selectSurface(shuttleCabinHit(ro,rd),white,12.0,s);
   selectSurface(boxHit(ro,rd,vec3(0,0,-.64),vec3(.14,.125,.08)),white,2.0,s);
   for(int side=0;side<2;side++){
    float x=side==0?-1.0:1.0;
    // Compound-delta planform: steep inner sweep, then the shallower outer edge.
-   selectSurface(wingHit(ro-vec3(0,-.065,0),rd,vec2(.105*x,.35),vec2(.235*x,-.055),vec2(.55*x,-.55),.021),white,2.0,s);
-   selectSurface(wingHit(ro-vec3(0,-.065,0),rd,vec2(.105*x,.35),vec2(.55*x,-.55),vec2(.10*x,-.67),.021),white,2.0,s);
+   // Triangulate through the kink B to the rear root D. A-to-tip C would
+   // bridge the concavity and erase the double-delta shape entirely.
+   selectSurface(wingHit(ro-vec3(0,-.065,0),rd,vec2(.110*x,.42),vec2(.205*x,-.18),vec2(.10*x,-.67),.012),white,2.0,s);
+   selectSurface(wingHit(ro-vec3(0,-.065,0),rd,vec2(.205*x,-.18),vec2(.55*x,-.55),vec2(.10*x,-.67),.012),white,2.0,s);
    // OV-101 aerodynamic aft fairings; no operational OMS/RCS is implied.
-   selectSurface(ellipsoidHit(ro,rd,vec3(.135*x,.071,-.54),vec3(.068,.075,.19)),white,2.0,s);
+   selectSurface(ellipsoidHit(ro,rd,vec3(.142*x,.086,-.535),vec3(.065,.074,.195)),white,2.0,s);
    // Forward fuselage chine merges the broad underside into the tapered nose.
    selectSurface(wingHit(ro-vec3(0,-.050,0),rd,vec2(.115*x,.40),vec2(.043*x,.77),vec2(.118*x,.18),.012),white,2.0,s);
   }
   // Swept vertical stabilizer, clipped as a triangular prism in the yz plane.
   // Trapezoidal stabilizer with a clipped tip, broad root and swept leading edge.
-  vec4 fin=wingHit(ro.yxz,rd.yxz,vec2(.055,-.69),vec2(.58,-.64),vec2(.61,-.47),.017);
+  vec4 fin=wingHit(ro.yxz,rd.yxz,vec2(.055,-.69),vec2(.495,-.65),vec2(.515,-.49),.014);
   selectSurface(vec4(fin.yxz,fin.w),white,13.0,s);
-  fin=wingHit(ro.yxz,rd.yxz,vec2(.055,-.69),vec2(.61,-.47),vec2(.10,-.22),.017);
+  fin=wingHit(ro.yxz,rd.yxz,vec2(.055,-.69),vec2(.515,-.49),vec2(.10,-.22),.014);
   selectSurface(vec4(fin.yxz,fin.w),white,13.0,s);
   selectSurface(ellipsoidHit(ro,rd,vec3(0,.122,-.47),vec3(.034,.041,.23)),white,2.0,s);
-  selectSurface(boxHit(ro,rd,vec3(0,-.105,-.675),vec3(.14,.012,.07)),dark,0.0,s);
+  // Broad body flap below the engine cluster, with a light upper face.
+  selectSurface(boxHit(ro,rd,vec3(0,-.109,-.68),vec3(.153,.013,.075)),dark,2.0,s);
+  selectSurface(boxHit(ro,rd,vec3(0,-.094,-.68),vec3(.15,.002,.071)),white,2.0,s);
   // Three dummy main-engine bells, as on OV-101's tailcone-off ALT flights.
   // OV-101 was an atmospheric prototype: all space placement is hypothetical.
   for(int engine=0;engine<3;engine++){
@@ -184,13 +197,19 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
     float x=side==0?-1.0:1.0;
     selectSurface(capsuleHit(ro,rd,vec3(.083*x,.097,-.48),vec3(.083*x,.097,.29),.004),vec3(.58,.61,.60),0.0,s);
     selectSurface(capsuleHit(ro,rd,vec3(.11*x,-.054,.32),vec3(.045*x,-.050,.77),.004),dark,0.0,s);
-    selectSurface(capsuleHit(ro,rd,vec3(.18*x,-.043,-.586),vec3(.48*x,-.043,-.562),.003),dark,0.0,s);
+    selectSurface(capsuleHit(ro,rd,vec3(.18*x,-.052,-.586),vec3(.48*x,-.052,-.562),.002),dark,0.0,s);
     // Simulated tile band over the leading edges, not glowing thrusters.
-    selectSurface(capsuleHit(ro,rd,vec3(.112*x,-.065,.34),vec3(.235*x,-.065,-.055),.006),vec3(.10,.105,.11),0.0,s);
-    selectSurface(capsuleHit(ro,rd,vec3(.235*x,-.065,-.055),vec3(.547*x,-.065,-.55),.007),vec3(.10,.105,.11),0.0,s);
+    selectSurface(capsuleHit(ro,rd,vec3(.112*x,-.065,.41),vec3(.205*x,-.065,-.18),.005),vec3(.10,.105,.11),0.0,s);
+    selectSurface(capsuleHit(ro,rd,vec3(.205*x,-.065,-.18),vec3(.547*x,-.065,-.55),.006),vec3(.10,.105,.11),0.0,s);
+    // Twin pod nozzles and dark RCS ports distinguish the raised aft shoulders.
+    selectSurface(frustumHit(ro,rd,vec3(.146*x,.089,-.734),.032,.026,.015),silver,14.0,s);
+    selectSurface(ellipsoidHit(ro,rd,vec3(.146*x,.089,-.765),vec3(.022,.022,.002)),dark,0.0,s);
+    for(int port=0;port<3;port++){
+     selectSurface(ellipsoidHit(ro,rd,vec3(.204*x,.069,-.50-float(port)*.043),vec3(.003,.010,.012)),dark,0.0,s);
+    }
     selectSurface(boxHit(ro,rd,vec3(.15*x,.012,-.727),vec3(.028,.045,.005)),vec3(.22,.24,.23),0.0,s);
    }
-   selectSurface(capsuleHit(ro,rd,vec3(0,.58,-.609),vec3(0,.17,-.66),.003),dark,0.0,s);
+   selectSurface(capsuleHit(ro,rd,vec3(0,.49,-.610),vec3(0,.17,-.66),.002),dark,0.0,s);
   }
  }else if(type<5.5){
   // EMU-inspired articulated pressure suit. y extent [-.88,.84] = 1.72.
@@ -341,6 +360,22 @@ float nasaLetters(vec2 p){
  return ink;
 }
 float line2(vec2 p,vec2 a,vec2 b){vec2 v=b-a;return length(p-a-v*clamp(dot(p-a,v)/dot(v,v),0.0,1.0));}
+// Smooth, legible NASA lettering for the large Shuttle decals. The small suit
+// patch retains its existing bitmap mark, so this does not affect other craft.
+float shuttleNasaMark(vec2 p){
+ float x=(p.x+.81)/.42,glyph=floor(x),u=fract(x);vec2 q=vec2(u,(p.y+.255)/.51);
+ if(x<0.0||x>=4.0||q.y<-.15||q.y>1.15)return 0.0;
+ float d=10.0;
+ if(glyph<.5){d=min(line2(q,vec2(.10,0),vec2(.10,1)),min(line2(q,vec2(.10,1),vec2(.72,0)),line2(q,vec2(.72,0),vec2(.72,1))));}
+ else if(glyph<1.5||glyph>2.5){d=min(line2(q,vec2(.07,0),vec2(.40,1)),min(line2(q,vec2(.40,1),vec2(.73,0)),line2(q,vec2(.20,.40),vec2(.60,.40))));}
+ else{
+  d=min(line2(q,vec2(.73,.93),vec2(.21,.98)),line2(q,vec2(.21,.98),vec2(.10,.79)));
+  d=min(d,line2(q,vec2(.10,.79),vec2(.20,.56)));d=min(d,line2(q,vec2(.20,.56),vec2(.62,.45)));
+  d=min(d,line2(q,vec2(.62,.45),vec2(.73,.24)));d=min(d,line2(q,vec2(.73,.24),vec2(.61,.03)));
+  d=min(d,line2(q,vec2(.61,.03),vec2(.08,.08)));
+ }
+ return 1.0-smoothstep(.055,.080,d);
+}
 vec3 nasaPatch(vec2 p,vec3 under){
  float radius=length(p);if(radius>1.02)return under;
  vec3 color=mix(vec3(.012,.045,.24),vec3(.035,.14,.42),clamp(.5+.45*p.y,0.0,1.0));
@@ -423,23 +458,35 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
  }
  if((material>1.5&&material<2.5)||(material>11.5&&material<12.5)){
   // Simulated thermal tiles, payload-bay seams and test-era red NASA lettering.
-  if(hit.y<-.075){
-   vec2 cell=abs(fract(hit.xz*vec2(58,70))-.5);
-   float gap=step(.465,max(cell.x,cell.y));albedo=mix(vec3(.018,.022,.025),vec3(.055,.059,.06),gap);
+  // The black forebody rises smoothly out of the belly band. A hard z cutoff
+  // creates a square black patch in profile and makes the nose look detached.
+  float noseBand=-.078+.110*smoothstep(.36,.84,hit.z);
+  bool blackNose=hit.z>.29&&hit.y<noseBand;
+  if(hit.y<-.075||blackNose){
+   vec2 cell=abs(fract(vec2(hit.z,hit.y+hit.x*.4)*vec2(80,105))-.5);
+   float gap=step(.465,max(cell.x,cell.y));albedo=mix(vec3(.027,.032,.038),vec3(.065,.070,.075),gap*.55);
+   spec*=.08;
   }else{
    float seam=(1.0-smoothstep(.001,.003,abs(hit.x)))*step(.095,hit.y)*step(-.42,hit.z)*step(hit.z,.3);
    albedo*=1.0-seam*.55;
-   if(abs(n.x)>.43&&abs(hit.z-.06)<.205&&abs(hit.y-.023)<.05){
-    float letters=nasaLetters(vec2(-(hit.z-.06)*sign(n.x)/.23,(hit.y-.023)/.12));
+   if(abs(n.x)>.43&&abs(hit.z-.04)<.15&&abs(hit.y-.040)<.036){
+    float letters=shuttleNasaMark(vec2(-(hit.z-.04)*sign(n.x)/.18,(hit.y-.040)/.085));
     albedo=mix(albedo,vec3(.72,.035,.045),letters);
    }
    if(n.y>.5&&hit.x>.19&&hit.x<.49&&hit.z<-.29&&hit.z>-.57){
-    float letters=nasaLetters(vec2((hit.x-.34)/.17,(hit.z+.43)/.17));albedo=mix(albedo,vec3(.72,.035,.045),letters);
+    float letters=shuttleNasaMark(vec2((hit.x-.34)/.17,(hit.z+.43)/.17));albedo=mix(albedo,vec3(.72,.035,.045),letters);
    }
    if(abs(n.x)>.70&&hit.z<-.16&&hit.z>-.29&&hit.y>-.005&&hit.y<.055){
     vec2 flag=vec2((-.16-hit.z)/.13,(hit.y+.005)/.06);
     albedo=mix(vec3(.87),vec3(.64,.06,.065),step(.5,fract(flag.y*6.5)));
     if(flag.x<.42&&flag.y>.46)albedo=vec3(.055,.085,.18);
+   }
+   // Fine nose blankets and flush access seams follow the curved skin.
+   if(hit.z>.34&&hit.z<.79&&hit.y>.035){
+    float blankets=1.0-smoothstep(.0006,.0013,min(abs(mod(hit.z,.052)-.026),abs(mod(hit.x,.039)-.0195)));
+    albedo*=1.0-.065*blankets;
+    vec2 access=vec2((abs(hit.x)-.066)/.017,(hit.z-.670)/.024);
+    if(length(access)<1.0&&n.y>.45){float ring=1.0-smoothstep(.06,.10,abs(length(access)-.82));albedo*=1.0-ring*.40;}
    }
    if(uDetail>=2.0){
     float panels=1.0-smoothstep(.0007,.0014,min(abs(mod(hit.z+.45,.126)-.063),abs(abs(hit.x)-.079)));
@@ -448,17 +495,19 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
   }
  }
  if(material>11.5&&material<12.5){
-  // Six dark cockpit windows projected onto the raised cabin.
-  // Three panes on each half of the broad sloping front, two aft/overhead panes.
-  float pane=abs(mod(hit.x+.132,.044)-.022);
-  bool forward=n.z>.6&&n.y>.6&&hit.y>.118&&hit.y<.151&&abs(hit.x)<.124&&pane<.018;
-  bool side=abs(n.x)>.58&&hit.y>.092&&hit.y<.139&&hit.z>.405&&hit.z<.515;
-  if(n.y>.95&&hit.z>.333&&hit.z<.391&&abs(hit.x)>.020&&abs(hit.x)<.086){albedo=vec3(.017,.037,.047);spec*=2.0;}
-  if(forward||side){albedo=vec3(.012,.035,.048)+reflectedSky*.13;spec*=2.5;}
+  // Six dark cockpit windows: two forward, two angled corners and two sides.
+  float ax=abs(hit.x);
+  bool forward=n.z>.60&&n.y>.72&&abs(n.x)<.10&&hit.y>.104&&hit.y<.141&&ax>.005&&ax<.050;
+  bool corner=abs(n.x)>.45&&abs(n.x)<.60&&n.z>.5&&hit.y>.100&&hit.y<.137&&ax>.056&&ax<.121;
+  bool side=abs(n.x)>.60&&hit.y>.079&&hit.y<.130&&hit.z>.420&&hit.z<.515;
+  if(n.y>.85&&hit.z>.333&&hit.z<.391&&abs(hit.x)>.020&&abs(hit.x)<.078){albedo=vec3(.017,.037,.047);spec*=2.0;}
+  // Black frames surround glass panes; the center mullion stays visible.
+  if(n.z>.5&&n.y>.5&&hit.y>.096&&hit.y<.149&&ax<.128)albedo=vec3(.027,.031,.034);
+  if(forward||corner||side){albedo=vec3(.018,.039,.050)+reflectedSky*.17;spec*=2.5;}
  }
  if(material>12.5&&material<13.5){
-  if(hit.y>.565)albedo*=.18;
-  if(abs(n.x)>.4&&hit.y>.17&&hit.y<.41){float letters=nasaLetters(vec2(-(hit.z+.49)*sign(n.x)/.13,(hit.y-.285)/.18));albedo=mix(albedo,vec3(.72,.035,.045),letters);}
+  if(hit.y>.487)albedo*=.18;
+  if(abs(n.x)>.4&&hit.y>.17&&hit.y<.41){float letters=shuttleNasaMark(vec2(-(hit.z+.50)*sign(n.x)/.12,(hit.y-.285)/.16));albedo=mix(albedo,vec3(.72,.035,.045),letters);}
  }
  if(material>4.5&&material<5.5){
   // Gold is a colored conductor. The convex visor reflects the actual sky

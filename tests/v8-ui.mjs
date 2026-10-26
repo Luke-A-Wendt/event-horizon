@@ -2,25 +2,25 @@
 // layout, touchscreen, or accessibility-tree emulation.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-const [html,app,viewport,css]=await Promise.all(['dist/index.html','dist/app.js','dist/viewport-ui.js','dist/style.css'].map(path=>readFile(new URL('../'+path,import.meta.url),'utf8')));
+const [html,app,viewport,css,pilot]=await Promise.all(['dist/index.html','dist/app.js','dist/viewport-ui.js','dist/style.css','dist/pilot-ui.js'].map(path=>readFile(new URL('../'+path,import.meta.url),'utf8')));
 const ids=source=>[...source.matchAll(/\bid\s*=\s*["']([A-Za-z][\w-]*)["']/g)].map(m=>m[1]);
 const staticIds=ids(html);assert.equal(staticIds.length,new Set(staticIds).size,'Static HTML IDs must be unique');
-const available=new Set([...staticIds,...ids(app),...ids(viewport)]);
+const available=new Set([...staticIds,...ids(app),...ids(viewport),...ids(pilot)]);
 for(const match of app.matchAll(/\b(?:range|toggle|select|color)\('([\w-]+)'/g)){available.add(match[1]);available.add('out-'+match[1]);}
 for(const source of [app,viewport])for(const match of source.matchAll(/\$\('([\w-]+)'\)/g))assert(available.has(match[1]),`Control references a missing element: ${match[1]}`);
 for(const match of html.matchAll(/<use\b[^>]*href="#([\w-]+)"/g))assert(available.has(match[1]),`Missing SVG symbol ${match[1]}`);
 for(const id of ['elementsPanel','cameraPanel','displayPanel','pictureDialog','cpuFallbackPrompt','cpuQualityNotice','viewportTarget','inspectorTrack','inspectorRide','viewportReset','enterVR','pictureProgress','downloadPicture'])assert(available.has(id),`Missing primary interaction ${id}`);
 assert(!staticIds.includes('approach'));assert(!app.includes("$('approach')"),'Removed approach button must not leave a live null reference');
 assert(viewport.includes("scene.append(controls)"),'Property inspector must remain in fullscreen subtree');
-assert(viewport.includes("['mathDialog','atlasDialog','warpDialog','helpDialog']")&&viewport.includes('scene.append($(id))'),'All guides/Scenes must remain available fullscreen');
+assert(viewport.includes("['mathHubDialog','mathDialog','atlasDialog','warpDialog','bridgeDialog','helpDialog']")&&viewport.includes('scene.append($(id))'),'All guides/Scenes must remain available fullscreen');
 assert(viewport.includes("$('displayControlSlot').append($('performanceControls'))"),'Quality is reachable inside the viewport');
 assert(viewport.includes("renderer()?.setViewMode('free')"));
 assert(app.includes("renderer?.setViewMode('look');renderer?.look(direction)"),'Look presets must be applied after leaving free mode');
-assert(viewport.includes("picture.addEventListener('close',()=>requestAnimationFrame(()=>$('capture').click()),{once:true})"),'Quick capture must wait for modal presentation to resume');
+assert(!viewport.includes('quickCapturePicture'),'Picture studio has one quality selector and one capture action');
 assert(app.includes('await renderer.startup')&&app.includes('if(!cpu&&!startup.available)'),'CPU is offered only after the graphics host reports GPU unavailable');
 assert(app.includes("$('continueCPU').addEventListener('click',()=>initRenderer(true))"),'CPU needs an explicit choice');
 assert(viewport.includes("$('pictureToggle').disabled=false"),'CPU users can still reach ordinary frame capture');
-assert(viewport.includes("sceneChanged:()=>{selection='primary'"),'Loading a scene clears stale object selection');
+assert(/sceneChanged:\(\)=>\{[^}]*selection='space'/.test(viewport),'Loading a scene clears stale object selection, after cancelling pending map edits');
 assert(app.includes("$('editPhase').disabled=guided||bridgeShip"),'Prescribed bridge route must not expose ineffective phase control');
 assert(css.includes('.scene.no-focus-banner .focus-banner{display:none!important}'),'No persistent previous-view banner');
 assert(css.includes('scrollbar-gutter:stable'),'Property scrolling must remain discoverable');

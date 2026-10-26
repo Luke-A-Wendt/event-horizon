@@ -121,7 +121,7 @@ console.log('PASS: exact named adaptive presets, rapid healthy startup to High, 
  const s=simulation();s.run(6000);const paused=s.r.state.paused,draws=s.f.draws;
  s.r.setPresentationPaused(true);s.run(6000);
  assert.equal(s.f.draws,draws);assert.equal(s.r.state.paused,paused);
- await assert.rejects(s.r.captureImage());
+ const captureTime=s.r.time;s.f.control.now+=100;assert((await s.r.captureImage()).size>0,'Picture capture owns a fresh draw while a dialog pauses live presentation');assert.equal(s.r.presentationPaused,true);assert.equal(s.r.time,captureTime);
  s.r.setPresentationPaused(false);s.run(2000);
  assert(s.f.draws>draws);assert.equal(s.r.getState().effectiveQuality,'high');
  assert.equal(s.r.state.paused,paused);s.r.dispose();

@@ -1,3 +1,4 @@
+const SHUTTLE_COCKPIT_EYE=[0,.28,.65];
 import assert from 'node:assert/strict';
 import { fixture } from './render-fixture.mjs';
 import { BlackHoleRenderer } from '../dist/renderer.js';
@@ -30,10 +31,11 @@ const relativeMeters=(r,childId,parentId)=>{
  const initial=meters(frame(r,person.id).position);r.time=80;r.update({mass:70});refresh(r);
  vectorNear(meters(frame(r,person.id).position),initial);
  assert.equal(r.getObjectContext().kind,'local');
- // Removing the reference preserves the child's world pose and ride camera.
- r.focusTarget(person.id,'onboard');const observer=meters(r.cameraFrame.observer);
- r.removeObject(ship.id);refresh(r);vectorNear(meters(frame(r,person.id).position),initial);
- vectorNear(meters(r.cameraFrame.observer),observer);assert.equal(r.focusId,person.id);
+ // Removing a parent now cascades through its nested objects and releases a
+ // camera riding a deleted descendant, instead of retaining an orphan.
+ r.focusTarget(person.id,'onboard');
+ r.removeObject(ship.id);refresh(r);assert.equal(frame(r,person.id),undefined);assert.equal(frame(r,ship.id),undefined);
+ assert.equal(r.focusId,null);assert(r.cameraFrame.observer.every(Number.isFinite));
  r.dispose();
 }
 
@@ -65,7 +67,7 @@ const relativeMeters=(r,childId,parentId)=>{
  r.focusTarget(original,'onboard');const clock=r.bridgeTime;
  r.setBridgeTraveler('shuttle');assert.equal(r.bridgeObjectId,original);assert.equal(r.focusId,original);near(r.bridgeTime,clock);
  near(r.configCache.bridgeRadius*REFERENCE_RG_METERS,objectRadiusMeters('shuttle')*r.state.bridgeRadius);
- vectorNear(r.cameraFrame.inspectCamera,[-.045,.075,.48]);
+ vectorNear(r.cameraFrame.inspectCamera,SHUTTLE_COCKPIT_EYE);
  const ship=frame(r,original),factor=bridgeConformal(Math.hypot(...ship.position),r.configCache.bridgeRadius);
  near(ship.radius*factor*REFERENCE_RG_METERS,objectRadiusMeters('shuttle'));
  // A retained local passenger uses the same local proper-length conversion,

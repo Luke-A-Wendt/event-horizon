@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readFile} from 'node:fs/promises';
+import {uiDomFixture} from './ui-dom-fixture.mjs';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {installViewportUI} from '../dist/viewport-ui.js';
+import {createLoadingIndicator} from '../dist/loading-indicator.js';
+import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
+import {DEFAULTS,SCENE_PRESETS,makePreset,horizonRg,iscoRg,REFERENCE_MASS} from '../dist/config.js';
+import {OBJECT_TYPES} from '../dist/objects.js';
+const [html,app]=await Promise.all(['index.html','app.js'].map(n=>readFile(new URL('../dist/'+n,import.meta.url),'utf8')));
+const f=fixture(),document=uiDomFixture(html);globalThis.document=document;
+const window={devicePixelRatio:1,matchMedia:()=>({matches:false}),addEventListener(){},removeEventListener(){}};globalThis.window=window;
+const frames=[];globalThis.requestAnimationFrame=fn=>(frames.push(fn),frames.length);globalThis.cancelAnimationFrame=()=>{};
+async function frame(){for(const fn of frames.splice(0))fn(performance.now());await Promise.resolve();}
+let host,bridgeGuideOpened=0;
+function createRenderHost(canvas,callbacks){host=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false,...callbacks});host.startup=Promise.resolve({available:true,worker:true,cpu:false});host.prepareMutation=()=>{};host.finishMutation=()=>{};return host;}
+const sandbox={document,window,matchMedia:window.matchMedia,performance,requestAnimationFrame:globalThis.requestAnimationFrame,cancelAnimationFrame(){},setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},console,createRenderHost,snapshotRenderer,restoreRenderer,createLoadingIndicator,installViewportUI,renderMathGuide(){},renderWarpGuide(){},renderWormholeGuide(){bridgeGuideOpened++;},DEFAULTS,SCENE_PRESETS,makePreset,horizonRg,iscoRg,REFERENCE_MASS,OBJECT_TYPES};
+vm.runInNewContext(app.replace(/^import[^\n]+\n/gm,''),sandbox,{filename:'app.js'});await Promise.resolve();await Promise.resolve();
+const $=id=>{const el=document.getElementById(id);assert(el,`Missing ${id}`);return el;};
+assert.equal($('lookTangent').textContent,'In plane');assert($('lookAbove'));
+document.querySelector('[data-scene="solar-system"]').click();await frame();await frame();assert(host.objects.length>100);
+$('elementsToggle').click();const earth=host.objects.find(o=>o.name==='Earth'),moon=host.objects.find(o=>o.name==='Moon'),pluto=host.objects.find(o=>o.name==='Pluto'),charon=host.objects.find(o=>o.name==='Charon');assert(earth&&moon&&pluto&&charon);
+assert(document.querySelector(`[data-element="${earth.id}"]`));assert.equal(document.querySelector(`[data-element="${moon.id}"]`),null,'Large catalog moon branches start collapsed');
+assert.equal(document.getElementById('objectSearch'),null);document.querySelector(`[data-tree-expand="${charon.parentId}"]`)?.click();
+document.querySelector(`[data-element="${charon.id}"]`).click();assert.equal($('surfaceProfileField').hidden,false);assert.equal(Number($('editSurfaceProfile').value),11);assert.equal($('editBodyStyle').disabled,true);assert($('objectDataNote').textContent.length>0);
+$('editSurfaceProfile').value='1';$('editSurfaceProfile').dispatch('change');assert.equal($('editBodyColor').value,'#ffffff');assert($('editBodyColorLabel').textContent.includes('Tint'));const originalColor=charon.color;$('editBodyColor').value='#ff4444';$('editBodyColor').dispatch('change');assert.equal(charon.surfaceTint,'#ff4444');assert.equal(charon.color,originalColor,'Named surface tint preserves the original generic/marker color');
+$('editSurfaceProfile').value='0';$('editSurfaceProfile').dispatch('change');assert.equal(host.objects.find(o=>o.id===charon.id).surfaceId,0);assert.equal($('editBodyStyle').disabled,false);assert.equal($('editBodyColorLabel').textContent,'Color');assert.equal($('editBodyColor').value,originalColor);$('editBodyColor').value='#123456';$('editBodyColor').dispatch('change');assert.equal(charon.color,'#123456');assert.equal(charon.surfaceTint,'#ff4444');assert.equal($('distanceInput').getAttribute('max'),null,'Physical overview distance is constrained by the engine scene extent');
+$('closeInspector').click();$('cameraToggle').click();assert.equal(document.getElementById('cameraTargetSearch'),null);$('viewportTarget').value=earth.id;$('orbitMapOpen').click();assert.equal($('orbitMapDialog').open,true);assert($('orbitMapDrawing').innerHTML.includes('Moon'));assert($('mapSelected').textContent.includes('Earth'));const priorRadius=earth.radiusMeters;
+$('mapAmplification').value='12';$('mapAmplification').dispatch('input');assert($('mapAmplificationValue').textContent.includes('12'));assert.equal(earth.radiusMeters,priorRadius);$('mapGrid').checked=true;$('mapGrid').dispatch('change');assert.equal(host.state.grid,true);$('mapAnnotations').checked=true;$('mapAnnotations').dispatch('change');assert.equal(host.state.annotations,true);
+$('closeOrbitMap').click();assert.equal($('orbitMapDialog').open,false);$('cameraToggle').click();if($('cameraPanel').hidden)$('cameraToggle').click();$('viewportTarget').value=earth.id;$('viewportTrack').click();await frame();await frame();assert.equal(host.focusId,earth.id);
+$('cameraToggle').click();$('lookAbove').click();assert(host.target.pitch>1.4);$('lookTangent').click();assert.equal(host.target.pitch,0);assert.equal(document.getElementById('idleRefinementStatus'),null,'Automatic idle refinement status is removed');
+host.dispose();console.log('PASS: large-catalog search with ancestry, visible data provenance and surface profiles, generic camera planes, map controls and physical-scale isolation. DOM contract only; no browser layout emulation.');

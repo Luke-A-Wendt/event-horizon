@@ -23,7 +23,7 @@ const physicalRadius=entry.radius;r.update({mass:8});r.render();near(r.objectFra
 const overview={camera:{...r.camera},target:{...r.target},viewMode:r.state.viewMode};
 r.focusObject(ship.id,'track');r.render();
 assert.equal(r.getState().focusId,ship.id);assert.equal(r.getState().focusMode,'track');assert.equal(r.cameraFrame.inspectIndex,r.objectFrames.find(o=>o.id===ship.id).index);
-near(Math.hypot(...r.cameraFrame.inspectCamera),6);
+near(Math.hypot(...r.cameraFrame.inspectCamera),Math.hypot(1.44,4.32));
 const before=[...r.cameraFrame.observer];r.time+=1;r.render();assert(Math.hypot(...r.cameraFrame.observer.map((x,i)=>x-before[i]))>.01,'Tracked observer must travel with its target');
 near(Math.hypot(...r.cameraFrame.forward),1);near(Math.hypot(...r.cameraFrame.right),1);near(r.cameraFrame.forward.reduce((x,v,i)=>x+v*r.cameraFrame.right[i],0),0);
 const localBefore=r.target.focusDistance;r.zoom(.5);near(r.target.focusDistance,localBefore*.5);r.zoom(1e-20);near(r.target.focusDistance,1.15);r.zoom(1e20);near(r.target.focusDistance,160);

@@ -7,13 +7,13 @@ import {fixture} from './render-fixture.mjs';
 // worker, live, stereo and still rendering, rather than testing a UI-only tint.
 const bands=['visible','infrared','xray','radio','gamma'];
 const f=fixture(),renderer=new BlackHoleRenderer(f.canvas);
-for(const scene of ['disk','bridge','station-eclipse','nasa-shuttle','warp-lab']){
+for(const scene of ['disk','bridge','orbital-expedition','nasa-shuttle','warp-lab']){
  renderer.loadScene(scene);
  assert.equal(renderer.sceneId,scene,'The test must exercise the requested scene');
  if(scene==='nasa-shuttle')renderer.focusObject(renderer.getObjects()[0].id,'onboard');
  for(const [index,spectrum] of bands.entries()){
   renderer.update({spectrum,paused:true});renderer.render();
-  if(scene==='nasa-shuttle')assert.equal(f.uniforms.get('uCockpitMode').args[0],1);
+  if(scene==='nasa-shuttle')assert.equal(f.uniforms.get('uCockpitMode').args[0],0);
   assert.equal(renderer.state.spectrum,spectrum);
   assert.equal(f.uniforms.get('uSpectrum').args[0],index,`${scene}: ${spectrum} reaches the live shader`);
   const snapshot=renderer.beginPhotoCapture();renderer.endPhotoCapture();
@@ -36,18 +36,20 @@ function body(source,name){
 const full=createFragment({craft:true,craftMask:15,warp:true,grid:true,bridge:true,probe:true});
 // Each physical source class has a response; annotations are intentionally not
 // spectrum-filtered. This also catches accidental visible-color bypasses.
-for(const name of ['surfaceSpectrum','stellarSpectrum','skyWithNebula','discAt','jetField','probeEmissionRay','whiteHoleEmission','debris','bridgeRegionSky']){
+for(const name of ['surfaceSpectrum','stellarSpectrum','skyWithEnvironment','discAt','jetField','probeEmissionRay','whiteBoundaryEmission','debris','bridgeRegionSky']){
  const implementation=body(full,name);
  for(const band of [1,3,4])assert(implementation.includes(`uSpectrum==${band}`),`${name} handles band ${band}`);
  if(!['surfaceSpectrum','stellarSpectrum'].includes(name))assert(implementation.includes('uSpectrum==2'),`${name} handles X-rays`);
 }
-for(const name of ['coordinateGridSegment','bridgeGridAt','horizonOverlay']){
+assert(body(full,'whiteHoleEmission').includes('whiteBoundaryEmission('),'Primary white holes use the shared spectral boundary source');
+assert(!body(full,'whiteBoundaryEmission').includes('uSpectrum==5'),'Geometry keeps the visible white boundary source');
+for(const name of ['coordinateGridSegment']){
  assert(!body(full,name).includes('uSpectrum'),'Coordinate annotations retain readable colors in every band');
 }
 assert(body(full,'inspector').includes('surfaceSpectrum('),'Tracked objects use their material response');
 assert(body(full,'objectHit').includes('surfaceSpectrum('),'Untracked objects use the same material response');
 assert(body(full,'warpLocalTrace').includes('surfaceSpectrum('),'The warp-local ship cannot bypass its material response');
-assert(full.includes('surfaceSpectrum(cabin.rgb'),'Cockpit surfaces use the selected spectral band');
+assert(!full.includes('surfaceSpectrum(cabin.rgb'),'Removed cockpit adds no spectral overlay');
 assert(body(full,'surfaceSpectrum').includes('if(uSpectrum==0)return visible;'),'Visible material appearance is unchanged');
 assert(body(full,'stellarSpectrum').includes('if(uSpectrum==0)return visible;'),'Visible stellar appearance is unchanged');
 

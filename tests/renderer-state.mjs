@@ -25,7 +25,7 @@ renderer.update({spectrum:'xray'});renderer.render();assert.equal(uniform('uSpec
 renderer.update({planetColor:'#ff00ff',starColor:'#00ff00',jetColor:'#00ffff',diskColor:'#ffffff'});renderer.render();
 assert.deepEqual(uniform('uJetColor')[0],[0,1,1]);assert.deepEqual(uniform('uDiskColor')[0],[1,1,1]);
 const colors=uniform('uColors[0]')[0];close(colors[0],1);close(colors[1],0);close(colors[4],0);close(colors[5],1);
-for(let i=0;i<10;i++)assert(renderer.addObject('planet',12,i));assert.equal(renderer.addObject('star',12),false);renderer.render();assert.equal(uniform('uObjectCount')[0],12);
+for(let i=0;i<10;i++)assert(renderer.addObject('planet',12,i));assert(renderer.addObject('star',12));renderer.render();assert(uniform('uObjectCount')[0]<=12,'Logical additions retain a bounded GPU draw list');assert.equal(renderer.objects.length,11);
 renderer.clearObjects();assert.equal(renderer.getState().objectCount,0);
 
 // Barycentric binary, aligned spin frame, and disjoint Roche-limited discs.
@@ -42,7 +42,7 @@ assert(h0[2]*(holes[0]-h0[0])-h0[0]*(holes[2]-h0[2])>0,'Binary angular momentum 
 renderer.update({...DEFAULTS});renderer.resetCamera();settle();
 const position={yaw:renderer.camera.yaw,pitch:renderer.camera.pitch,distance:renderer.camera.distance};
 renderer.look('outward');close(renderer.camera.lookYaw,Math.PI);close(renderer.camera.distance,position.distance);close(renderer.camera.yaw,position.yaw);close(renderer.camera.pitch,position.pitch);
-renderer.zoom(1.25);close(renderer.camera.lookYaw,0);renderer.look('tangent');close(renderer.camera.lookYaw,Math.PI/2);renderer.rotate(.1,0);close(renderer.camera.lookYaw,0);
+renderer.zoom(1.25);close(renderer.camera.lookYaw,Math.PI);renderer.look('tangent');close(renderer.camera.lookYaw,Math.PI/2);renderer.rotate(.1,0);close(renderer.camera.lookYaw,0);
 renderer.setDistanceRg(1e6);close(renderer.target.distance/renderer.massScale,5000);renderer.setDistanceRg(.0001);assert(renderer.target.distance>renderer.configCache.horizon[0]);
 renderer.setDistanceRg(horizonRg(renderer.state.spin)*1.08);renderer.look('outward');settle();assert(renderer.camera.distance>renderer.configCache.horizon[0]);close(renderer.camera.lookYaw,Math.PI);
 

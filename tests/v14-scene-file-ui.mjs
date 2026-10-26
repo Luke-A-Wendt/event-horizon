@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {fixture} from './render-fixture.mjs';
+import {uiDomFixture} from './ui-dom-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {serializeScene,parseScene,SCENE_FILE_VERSION,MAX_SCENE_FILE_BYTES} from '../dist/scene-file.js';
+import {installSceneFiles,readSceneFile} from '../dist/scene-file-ui.js';
+
+const f=fixture(),renderer=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false});
+renderer.loadScene('solar-system');
+const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8'),doc=uiDomFixture(html);
+const $=id=>{const node=doc.getElementById(id);assert(node,id+' exists');return node;};
+let downloaded,anchor,loaded=[],context=0,messages=[],parseGate=null,acceptLoad=true;
+const create=doc.createElement;doc.createElement=tag=>{const node=create(tag);if(tag==='a')anchor=node;return node;};
+const originalURL=globalThis.URL,originalTimeout=globalThis.setTimeout;
+globalThis.URL={createObjectURL(blob){downloaded=blob;return 'blob:local-scene';},revokeObjectURL(){}};
+globalThis.setTimeout=()=>1;
+const ui=installSceneFiles({saveButton:$('sceneSave'),loadButton:$('sceneLoad'),fileInput:$('sceneFileInput'),status:$('sceneFileStatus'),document:doc,renderer:()=>renderer,context:()=>context,afterPaint:()=>Promise.resolve(),service:{serialize:async r=>serializeScene(r),parse:async text=>{if(parseGate)await parseGate;return parseScene(text);},dispose(){}},load:async(snapshot,name)=>{if(!acceptLoad)return false;loaded.push({snapshot,name});return true;},onMessage:text=>messages.push(text)});
+await ui.save();assert(downloaded instanceof Blob);assert.match(anchor.download,/\.yaml$/);assert.match(await downloaded.text(),new RegExp(SCENE_FILE_VERSION.replaceAll('.','\\.')));assert.equal($('sceneSave').disabled,false);
+const source=serializeScene(renderer);
+async function openFile(name,text,size=text.length){$('sceneFileInput').files=[{name,size,text:async()=>text}];await ui.load();}
+await openFile('my-system.yaml',source);assert.equal(loaded.length,1);assert.equal(loaded[0].snapshot.objects.length,517);assert.equal(loaded[0].name,'my-system.yaml');assert.equal($('sceneFileInput').value,'');
+await openFile('old.yaml',source.replace(SCENE_FILE_VERSION,'0.0.0'));assert.equal(loaded.length,1,'Version mismatch cannot mutate the live scene');assert.match(messages.at(-1),/Cannot load/);assert.equal($('sceneFileStatus').dataset.error,'true');
+await openFile('broken.yml','scene: [broken');assert.equal(loaded.length,1);assert.match(messages.at(-1),/Cannot load/);
+await openFile('bad.txt',source);assert.equal(loaded.length,1);
+await openFile('huge.yaml',source,MAX_SCENE_FILE_BYTES+1);assert.equal(loaded.length,1);assert.equal($('sceneLoad').disabled,false);
+let resolveRead;
+$('sceneFileInput').files=[{name:'stale.yaml',size:source.length,text:()=>new Promise(resolve=>resolveRead=resolve)}];
+const stale=ui.load();await Promise.resolve();context++;resolveRead(source);await stale;assert.equal(loaded.length,1,'Changing scenes while a file reads cancels its stale result');
+let resolveParse;parseGate=new Promise(resolve=>resolveParse=resolve);
+const staleValidation=openFile('delayed.yaml',source);await Promise.resolve();await Promise.resolve();context++;resolveParse();await staleValidation;assert.equal(loaded.length,1,'Changing scenes during worker validation cannot overwrite the new scene');parseGate=null;
+acceptLoad=false;await openFile('superseded.yaml',source);assert.match(messages.at(-1),/cancelled/);assert.equal(loaded.length,1,'A superseded scene application is reported as cancelled');acceptLoad=true;
+globalThis.FileReader=class{readAsText(){this.result=source;queueMicrotask(()=>this.onload());}};
+assert.equal(await readSceneFile({}),source,'Older browsers can use FileReader');delete globalThis.FileReader;
+ui.dispose();const count=messages.length;await ui.save();assert.equal(messages.length,count);
+globalThis.URL=originalURL;globalThis.setTimeout=originalTimeout;renderer.dispose();
+console.log('PASS: scene download and upload controls, exact-version rejection before mutation, file size/type errors, stale-read cancellation, legacy FileReader, and cleanup.');

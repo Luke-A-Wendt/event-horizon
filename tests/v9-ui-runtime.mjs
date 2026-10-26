@@ -18,12 +18,13 @@ function createRenderHost(canvas,callbacks,{cpu}){
  let state={...DEFAULTS},items=[],serial=0;const calls=[];
  const api={ready:true,cpu,gl:cpu?null:{},focusId:null,focusMode:'track',selectedId:null,calls,startup:Promise.resolve({available:true,worker:true,cpu}),
   getObjectContext(){return {kind:state.bridge?'bridge':state.blackHole?'orbit':'local',referenceLabel:'scene origin',allowedTypes:state.bridge?['enterprise','shuttle','astronaut']:OBJECT_TYPES.map(o=>o.id)};},
+  getObjectTree(){const nodes=[{id:'space',parentId:null,type:'space',label:'Space',canAdd:!state.bridge},...(state.blackHole?[{id:'primary',parentId:'space',type:'blackhole',label:'Black hole',canAdd:true}]:[]),...items.map(o=>({id:o.id,parentId:o.parentId||'space',type:o.type,label:o.label,canAdd:true}))];for(const n of nodes)n.children=nodes.filter(c=>c.parentId===n.id).map(c=>c.id);return nodes;},
   getObjects(){return items.map(o=>({...o,focused:o.id===api.focusId}));},
   getState(){return {...state,objects:api.getObjects(),objectContext:api.getObjectContext(),objectCount:items.length,maxObjects:10,selectedId:api.selectedId,focusId:api.focusId,focusMode:api.focusMode,warpObjectId:items.find(o=>o.warpEnabled)?.id,bridgeObjectId:items.find(o=>o.bridgeTraveler)?.id,bridgeRegion:'near',fps:30,scale:1,steps:100,effectiveQuality:'medium',renderReady:true,renderBusy:false,cameraDistanceMeters:1000,worldDistance:35};},
   getSceneTargets(){return [...(state.blackHole?[{id:'primary',label:'Black hole',enabled:true,canTrack:true}]:[]),...items.map(o=>({id:o.id,label:o.label,enabled:true,canTrack:true,canBoard:true}))];},
   update(patch){Object.assign(state,patch);},setQuality(){},selectObject(id){api.selectedId=id;},
   loadScene(id){state=makePreset(id);items=[];api.focusId=null;api.selectedId=null;for(const o of SCENE_PRESETS.find(p=>p.id===id)?.objects||[])api.addObject(o.type,o.radius,o.phase,o.scale);return api.getState();},
-  addObject(type,radius=12,phase=0,scale=1){const placement=api.getObjectContext().kind,o={id:'object-'+(++serial),type,label:OBJECT_TYPES.find(o=>o.id===type).label,radius,height:0,phase,scale,placement,x:0,y:0,z:0,headingDegrees:phase*180/Math.PI,warpEnabled:false,bridgeTraveler:placement==='bridge',lengthMeters:OBJECT_DIMENSIONS[type].lengthMeters};items.push(o);return o;},
+  addObject(type,radius=12,phase=0,scale=1){const placement=api.getObjectContext().kind,o={id:'object-'+(++serial),type,label:OBJECT_TYPES.find(o=>o.id===type).label,radius,height:0,phase,scale,placement,parentId:placement==='orbit'?'primary':'space',x:0,y:0,z:0,headingDegrees:phase*180/Math.PI,warpEnabled:false,bridgeTraveler:placement==='bridge',lengthMeters:OBJECT_DIMENSIONS[type].lengthMeters};items.push(o);return o;},
   updateObject(id,patch){Object.assign(items.find(o=>o.id===id),patch);calls.push(['updateObject',id,patch]);},
   removeObject(id){items=items.filter(o=>o.id!==id);},clearObjects(){items=[];},
   setObjectWarp(id,enabled){for(const o of items)o.warpEnabled=o.id===id&&enabled;state.warp=enabled;calls.push(['setObjectWarp',id,enabled]);},
@@ -42,24 +43,24 @@ assert.equal($('fpsCorner').textContent,'30 FPS');
 assert($('scene').contains(document.querySelector('.controls')),'Properties remain available in fullscreen');
 $('elementsToggle').click();assert.equal($('elementsPanel').hidden,false);
 $('viewportAdd').click();assert.equal(document.querySelector('.controls').dataset.inspectorKind,'add');
-$('objectType').value='shuttle';$('objectType').dispatch('change');$('addObject').click();
+$('objectType').value='shuttle';$('objectType').dispatch('change');$('addObject').click();await Promise.resolve();await Promise.resolve();
 assert.equal(host.getObjects()[0].type,'shuttle');assert.equal($('elementsPanel').hidden,false);assert(document.querySelector('.controls').hidden,'Creating an object opens the list, not a floating editor');
 let object=host.getObjects()[0];document.querySelector(`[data-element="${object.id}"]`).click();
 assert.equal(document.querySelector('.controls').dataset.inspectorKind,'object');assert.equal($('orbitalPlacement').hidden,false);assert.equal($('localPlacement').hidden,true);
-$('inspectorRide').click();assert.equal(host.focusId,object.id);assert.equal(host.focusMode,'onboard');
+$('inspectorRide').click();await Promise.resolve();await Promise.resolve();assert.equal(host.focusId,object.id);assert.equal(host.focusMode,'onboard');
 $('cameraToggle').click();$('releaseFocusToolbar').click();assert.equal(host.focusId,null);
 
 document.querySelector('[data-scene="empty-space"]').click();await Promise.resolve();
-$('elementsToggle').click();assert.equal(document.querySelector('[data-element-toggle="planet"]').disabled,true,'No orphan orbital planet control without a black hole');$('viewportAdd').click();assert.equal($('addOrbitPlacement').hidden,true);assert($('addPlacementContext').textContent.includes('meters'));
-$('objectType').value='astronaut';$('addObject').click();object=host.getObjects()[0];document.querySelector(`[data-element="${object.id}"]`).click();
+$('elementsToggle').click();assert.equal(document.querySelector('[data-element="planet"]'),null,'Empty Space contains no orphan planet');$('viewportAdd').click();assert.equal($('addOrbitPlacement').hidden,true);assert($('addPlacementContext').textContent.includes('Space'));
+$('objectType').value='astronaut';$('addObject').click();await Promise.resolve();await Promise.resolve();object=host.getObjects()[0];document.querySelector(`[data-element="${object.id}"]`).click();
 assert.equal($('localPlacement').hidden,false);assert.equal($('orbitalPlacement').hidden,true);
 $('editX').value='125';$('editX').dispatch('change');assert.equal(host.getObjects()[0].x,125);
-document.querySelector('[data-feature="warp"]').click();object=host.getObjects().find(o=>o.type==='enterprise');assert(object);assert.equal(host.focusId,object.id);assert.equal($('enterpriseProperties').hidden,false);
+$('inspectorBack').click();$('viewportAdd').click();$('objectType').value='enterprise';$('addObject').click();await Promise.resolve();await Promise.resolve();object=host.getObjects().find(o=>o.type==='enterprise');assert(object);document.querySelector(`[data-element="${object.id}"]`).click();assert.equal($('enterpriseProperties').hidden,false);$('objectWarpEnabled').checked=true;$('objectWarpEnabled').dispatch('change');assert.equal(host.getObjects().find(o=>o.id===object.id).warpEnabled,true);
 $('objectWarpEnabled').checked=false;$('objectWarpEnabled').dispatch('change');assert.equal(host.getObjects().find(o=>o.id===object.id).warpEnabled,false);
 $('editObjectWarp').click();assert.equal(host.getObjects().find(o=>o.id===object.id).warpEnabled,true);assert.equal($('pane-warp').hidden,false);
 
-document.querySelector('[data-scene="bridge"]').click();await Promise.resolve();$('elementsToggle').click();document.querySelector('[data-element="bridge"]').click();
+document.querySelector('[data-scene="bridge"]').click();await Promise.resolve();$('elementsToggle').click();document.querySelector('[data-element="space"]').click();
 const travelerId=host.getObjects()[0].id;$('bridgeTravelerType').value='astronaut';$('bridgeTravelerType').dispatch('change');assert.equal(host.getObjects()[0].id,travelerId);assert.equal(host.getObjects()[0].type,'astronaut');
-$('inspectorBack').click();$('viewportAdd').click();assert.deepEqual($('objectType').querySelectorAll('option').map(o=>o.value),['shuttle','astronaut','enterprise']);assert.equal($('addObject').textContent,'Use as traveler');
+$('inspectorBack').click();$('viewportAdd').click();assert.deepEqual($('objectType').querySelectorAll('option').map(o=>o.value).sort(),['astronaut','enterprise','shuttle']);assert.equal($('addObject').textContent,'Use as traveler');
 assert.equal(document.getElementById('viewportSelection'),null);assert.equal(document.getElementById('objectMarkers'),null);
 console.log('PASS: actual app/viewport startup and event wiring: add/select/track/ride/return, local meter edits, intrinsic Enterprise warp, Explore Warp selection, and bridge traveler replacement. DOM contract fixture; no browser layout or hardware emulation.');

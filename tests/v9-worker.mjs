@@ -34,7 +34,7 @@ const {parentPort,workerData}=require('node:worker_threads');
   if(data.type==='init')data.canvas={width:640,height:400,convertToBlob:async()=>new Blob(['canvas'])};
   if(data.type==='test:draw'){controller.renderer.render(100);parentPort.postMessage({type:'test:drawn'});return;}
   if(data.type==='test:complete'){controller.renderer.gpuFence.complete=true;controller.renderer.gpuAvailable(120);parentPort.postMessage({type:'test:completed'});return;}
-  if(data.type==='test:inspect'){parentPort.postMessage({type:'test:inspect',state:controller.renderer.state,objects:controller.renderer.objects,paused:controller.renderer.presentationPaused,hidden:document.hidden});return;}
+  if(data.type==='test:inspect'){parentPort.postMessage({type:'test:inspect',state:controller.renderer.state,objects:controller.renderer.objects,paused:controller.renderer.presentationPaused,hidden:document.hidden,cssWidth:window.innerWidth,cssHeight:window.innerHeight});return;}
   handler({data});
  });}};
  const photo=async(renderer,{signal,onProgress})=>{onProgress({fraction:.25,phase:'Resolving procedural detail'});await new Promise((resolve,reject)=>{const id=setTimeout(resolve,60);signal.addEventListener('abort',()=>{clearTimeout(id);reject(Object.assign(new Error('Cancelled'),{name:'AbortError'}));},{once:true});});return {blob:new Blob(['photo']),width:64,height:64};};
@@ -45,14 +45,14 @@ const messages=[],waiters=[];
 thread.on('message',message=>{messages.push(message);for(const w of [...waiters])if(w.predicate(message)){waiters.splice(waiters.indexOf(w),1);clearTimeout(w.timeout);w.resolve(message);}});
 const waitFor=(predicate,after=0)=>{const found=messages.slice(after).find(predicate);if(found)return Promise.resolve(found);return new Promise((resolve,reject)=>{const w={predicate,resolve,timeout:setTimeout(()=>reject(new Error('Worker protocol response timed out')),3000)};waiters.push(w);});};
 await waitFor(m=>m.type==='test:installed');
-thread.postMessage({type:'init',cpu:false,viewport:{width:640,height:400,dpr:1},snapshot:{state:{mass:5},objects:[{id:'craft-1',placement:'local',warpEnabled:true}],quality:'high'},signature:'first'});
+thread.postMessage({type:'init',cpu:false,viewport:{width:640,height:400,dpr:1,cssWidth:1200,cssHeight:800},snapshot:{state:{mass:5},objects:[{id:'craft-1',placement:'local',warpEnabled:true}],quality:'high'},signature:'first'});
 assert.equal((await waitFor(m=>m.type==='ready')).available,true);
 const beforeDraw=messages.length;thread.postMessage({type:'test:draw'});await waitFor(m=>m.type==='test:drawn',beforeDraw);
 assert(!messages.slice(beforeDraw).some(m=>m.type==='status'&&m.stats.frameReady),'Submitting a GPU draw must not dismiss loading');
 thread.postMessage({type:'test:complete'});const completed=await waitFor(m=>m.type==='status'&&m.stats.frameReady,beforeDraw);assert.equal(completed.stats.renderedSignature,'first');
-thread.postMessage({type:'state',serial:9,signature:'latest',snapshot:{state:{mass:9},objects:[{id:'craft-2',placement:'local',x:9,warpEnabled:false}],quality:'medium'},presentationPaused:true});
+thread.postMessage({type:'state',serial:9,signature:'latest',viewport:{width:600,height:410,dpr:1,cssWidth:620,cssHeight:550},snapshot:{state:{mass:9},objects:[{id:'craft-2',placement:'local',x:9,warpEnabled:false}],quality:'medium'},presentationPaused:true});
 assert.equal((await waitFor(m=>m.type==='ack')).serial,9);
-let mark=messages.length;thread.postMessage({type:'test:inspect'});let inspect=await waitFor(m=>m.type==='test:inspect',mark);assert.equal(inspect.state.mass,9);assert.equal(inspect.objects[0].id,'craft-2');assert.equal(inspect.paused,true);
+let mark=messages.length;thread.postMessage({type:'test:inspect'});let inspect=await waitFor(m=>m.type==='test:inspect',mark);assert.equal(inspect.state.mass,9);assert.equal(inspect.objects[0].id,'craft-2');assert.equal(inspect.paused,true);assert.equal(inspect.cssWidth,620);assert.equal(inspect.cssHeight,550);
 thread.postMessage({type:'visibility',hidden:true,presentationPaused:false});mark=messages.length;thread.postMessage({type:'test:inspect'});inspect=await waitFor(m=>m.type==='test:inspect',mark);assert(inspect.hidden&&inspect.paused);
 thread.postMessage({type:'visibility',hidden:false,presentationPaused:false});
 thread.postMessage({type:'state',serial:10,signature:'latest',presentationPaused:true});await waitFor(m=>m.type==='ack'&&m.serial===10);
@@ -68,8 +68,9 @@ thread.postMessage({type:'dispose'});await new Promise(resolve=>thread.once('exi
 const previousWorker=globalThis.Worker;
 let created=[];
 class BrowserWorker{
- constructor(url){assert(url.startsWith('blob:'));this.listeners=new Map();this.messages=[];created.push(this);}
- addEventListener(name,fn){this.listeners.set(name,fn);}postMessage(message){this.messages.push(message);}terminate(){this.terminated=true;}
+ constructor(url){assert(url.startsWith('blob:'));this.listeners=new Map();this.messages=[];this.waiters=[];created.push(this);}
+ addEventListener(name,fn){this.listeners.set(name,fn);}postMessage(message){this.messages.push(message);for(const waiter of [...this.waiters])if(waiter.type===message.type){this.waiters.splice(this.waiters.indexOf(waiter),1);clearTimeout(waiter.timeout);waiter.resolve(message);}}terminate(){this.terminated=true;}
+ next(type){return new Promise((resolve,reject)=>{const waiter={type,resolve,timeout:setTimeout(()=>reject(Error('Expected host '+type+' request')),1000)};this.waiters.push(waiter);});}
  emit(message){this.listeners.get('message')?.({data:message});}error(message){this.listeners.get('error')?.({message});}
 }
 globalThis.Worker=BrowserWorker;
@@ -80,9 +81,9 @@ function hostFixture(){
  let width=0,height=0;for(const key of ['width','height'])Object.defineProperty(f.canvas,key,{configurable:true,get:()=>key==='width'?width:height,set:value=>{assert(!transferred,'A transferred placeholder cannot resize');if(key==='width')width=value;else height=value;}});
  return {...f,get contexts(){return contexts;},get replacements(){return replacements;}};
 }
-let h=hostFixture(),errors=[],host=new RenderHost(h.canvas,{onError:e=>errors.push(e)}),browserWorker=created.at(-1);
+let h=hostFixture();window.innerWidth=620;window.innerHeight=550;let errors=[],host=new RenderHost(h.canvas,{onError:e=>errors.push(e)}),browserWorker=created.at(-1);
 assert.equal(h.contexts,0,'The synchronous controller cannot compile or create GPU contexts');
-assert.equal(browserWorker.messages[0].type,'init');browserWorker.emit({type:'ready',available:true});assert.equal((await host.startup).worker,true);
+assert.equal(browserWorker.messages[0].type,'init');assert.equal(browserWorker.messages[0].viewport.cssWidth,620);assert.equal(browserWorker.messages[0].viewport.cssHeight,550);browserWorker.emit({type:'ready',available:true});assert.equal((await host.startup).worker,true);
 host.loadScene('empty-space');const object=host.addObject('shuttle');assert(object?.id);host.updateObject(object.id,{x:24,y:2});host.setObjectWarp(object.id,true);
 const snapshot=snapshotRenderer(host);snapshot.state.mass=99;assert.notEqual(host.state.mass,99,'Snapshots are isolated copies');
 host.frame(100);host.resize();assert.equal(h.contexts,0);
@@ -90,8 +91,33 @@ const newerScene=host.sceneId;browserWorker.emit({type:'status',stats:{fps:45,ef
 browserWorker.emit({type:'status',stats:{fps:45,renderedSignature:renderSignature(host),frameReady:true}});assert.equal(host.getState().renderBusy,false);
 document.hidden=true;document.emit('visibilitychange');assert(browserWorker.messages.some(m=>m.type==='visibility'&&m.hidden));document.hidden=false;
 const currentState=snapshotRenderer(host),oldWorker=browserWorker;host.restartRendering();browserWorker=created.at(-1);assert.notEqual(browserWorker,oldWorker);assert.equal(h.replacements,1);assert.equal(host.sceneId,currentState.sceneId);oldWorker.error('Late failure');assert.equal(browserWorker.terminated,undefined,'A terminated worker cannot kill its successor');browserWorker.emit({type:'ready',available:true});
-// Taking a still travels through RPC, including progress and cancellation.
-const abort=new AbortController(),progress=[];const picture=host.renderPicture({presetId:'fine',signal:abort.signal,onProgress:p=>progress.push(p)});const request=browserWorker.messages.find(m=>m.type==='photo');assert(request);browserWorker.emit({type:'progress',id:request.id,progress:{fraction:.4}});assert.equal(progress[0].fraction,.4);abort.abort();assert(browserWorker.messages.some(m=>m.type==='cancel-photo'));browserWorker.emit({type:'error',id:request.id,name:'AbortError',message:'Cancelled'});await assert.rejects(picture,{name:'AbortError'});host.dispose();
+// A complete baseline crosses RPC before refinement. PNG dimensions come from
+// the captured image rather than the transferred placeholder canvas.
+const pngHeader=new Uint8Array(24);pngHeader.set([137,80,78,71,13,10,26,10]);const pngView=new DataView(pngHeader.buffer);pngView.setUint32(16,1280);pngView.setUint32(20,720);const pngBlob=new Blob([pngHeader],{type:'image/png'});
+let pictureClock=1000;host.now=()=>pictureClock;
+const abort=new AbortController(),progress=[];const captureRequest=browserWorker.next('capture');
+const picture=host.renderPicture({presetId:'maximum',signal:abort.signal,onProgress:p=>progress.push(p)});
+assert.equal(host.photoRunning,true,'Picture ownership starts before the baseline capture');
+await assert.rejects(host.renderPicture({presetId:'quick'}),/already/,'A second capture cannot overlap baseline/refinement ownership');
+const capture=await captureRequest;assert(!browserWorker.messages.some(m=>m.type==='photo'),'Do not refine until a complete fallback exists');
+const photoRequest=browserWorker.next('photo');pictureClock=1250;browserWorker.emit({type:'result',id:capture.id,value:pngBlob});const request=await photoRequest;
+assert.equal(request.options.presetId,'maximum');assert.equal(request.options.baseline.blob,pngBlob);assert.equal(request.options.baseline.width,1280);assert.equal(request.options.baseline.height,720);
+assert.equal(request.options.budgetMs,119750,'Baseline capture spends the same total budget');
+browserWorker.emit({type:'progress',id:request.id,progress:{progress:.4,elapsedMs:25}});assert.equal(progress.at(-1).progress,.4);assert.equal(progress.at(-1).elapsedMs,275,'Reported progress includes baseline capture time');
+abort.abort();assert(browserWorker.messages.some(m=>m.type==='cancel-photo'));browserWorker.emit({type:'error',id:request.id,name:'AbortError',message:'Cancelled'});await assert.rejects(picture,{name:'AbortError'});assert.equal(host.photoRunning,false);
+const quickRequest=browserWorker.next('capture'),quickPicture=host.renderPicture({presetId:'quick'}),quickCapture=await quickRequest;
+pictureClock=1325;browserWorker.emit({type:'result',id:quickCapture.id,value:pngBlob});const quick=await quickPicture;
+assert.equal(quick.width,1280);assert.equal(quick.height,720);assert.equal(quick.complete,true);assert.equal(quick.steps,0);assert.equal(quick.elapsedMs,75);assert.equal(browserWorker.messages.filter(m=>m.type==='photo').length,1,'Quick never compiles a picture shader');
+const alreadyAborted=new AbortController();alreadyAborted.abort();const messagesBefore=browserWorker.messages.length;
+await assert.rejects(host.renderPicture({presetId:'quick',signal:alreadyAborted.signal}),{name:'AbortError'});assert.equal(browserWorker.messages.length,messagesBefore,'Pre-cancelled pictures do not start a capture');
+const earlyAbort=new AbortController(),pendingCapture=browserWorker.next('capture'),cancelledCapture=host.renderPicture({presetId:'high',signal:earlyAbort.signal});const earlyRequest=await pendingCapture;earlyAbort.abort();
+await assert.rejects(cancelledCapture,{name:'AbortError'});assert.equal(host.photoRunning,false,'Cancellation while obtaining the baseline releases UI ownership promptly');
+browserWorker.emit({type:'result',id:earlyRequest.id,value:pngBlob});await Promise.resolve();assert.equal(browserWorker.messages.filter(m=>m.type==='photo').length,1,'Late baseline completion cannot start cancelled refinement');host.dispose();
+{
+ const pauses=[],delegate={presentationPaused:true,setPresentationPaused(value){this.presentationPaused=value;pauses.push(value);},captureImage:async()=>{assert.equal(delegate.presentationPaused,true,'Frozen capture does not resume live presentation behind the modal');return pngBlob;}};
+ assert.equal(await RenderHost.prototype.captureImage.call({delegate}),pngBlob);assert.deepEqual(pauses,[]);
+ delegate.captureImage=async()=>{throw Error('capture failed');};await assert.rejects(RenderHost.prototype.captureImage.call({delegate}),/capture failed/);assert.equal(delegate.presentationPaused,true,'Failed direct captures restore the prior pause');
+}
 // Worker-WebGL absence and blocked startup both try ordinary GPU before CPU.
 for(const failure of ['unavailable','blocked']){
  h=hostFixture();let rafs=[];globalThis.requestAnimationFrame=fn=>{rafs.push(fn);return rafs.length;};host=new RenderHost(h.canvas);browserWorker=created.at(-1);

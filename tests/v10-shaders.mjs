@@ -44,7 +44,7 @@ r.dispose();
 for(const features of [{probe:true},{probe:true,bridge:true},{probe:true,ultra:true},{probe:true,photo:true,photoSteps:1024}]){
  const source=createFragment(features);
  assert(source.includes('vec3 probeEmissionRay('));
- assert(source.includes('probeEmissionSegment(previous,p)'));
+ if(!features.bridge)assert(source.includes('probeEmissionSegment(previous,p)'));
  assert(source.includes('clamp(luminosity,1.0,100000000.0)'),'Extreme emission remains finite and bounded');
  if(features.bridge)assert(source.includes('probeEmissionSegment(previous*throat,p*throat)'),'Bridge optical rays carry the glow too');
 }

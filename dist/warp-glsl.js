@@ -8,16 +8,21 @@ vec2 warpShape(float radius){
  return vec2((a-b)/denom,s*(b*b-a*a)/denom);
 }
 // Gradient projected normal to the ray keeps its direction normalized.
-// kappa=.3*W, capped at3. This optical strength is not v_s/c.
+// Optical strength=.3*W, capped at3. It is not Frenet curvature or v_s/c.
+// f(r) is spherical. Curvature and torsion orient/transport the center worldline;
+// they do not arbitrarily reshape the scalar Alcubierre wall.
 vec3 warpAcceleration(vec3 q,vec3 direction){
  float radius=max(length(q),1e-12);if(radius>2.5)return vec3(0);
  vec3 n=q/radius,axis=unit(uWarpAxis),d=unit(direction);vec2 shape=warpShape(radius);
  float mu=dot(n,axis);
- vec3 radial=n-d*dot(n,d),axial=axis-d*dot(axis,d);
- return uWarpStrength*shape.y*((.24+.12*mu)*radial+.18*axial);
+ vec3 radial=n-d*dot(n,d);
+ // A ray aimed at the ship center must stay radial. The old uniform axial
+ // bias displaced the apparent ship toward the front at high warp even
+ // though the physical bubble center was correctly attached to the craft.
+ return uWarpStrength*shape.y*(.24+.12*mu)*radial;
 }
 vec3 warpFrame(vec3 q){
- vec3 x=unit(uWarpAxis),up=uPrimaryAxis-x*dot(uPrimaryAxis,x);
+ vec3 x=unit(uWarpAxis),reference=dot(uDriveUp,uDriveUp)>.5?uDriveUp:uPrimaryAxis,up=reference-x*dot(reference,x);
  if(length(up)<.01)up=vec3(0,1,0)-x*x.y;
  vec3 y=unit(up),z=unit(cross(x,y));return vec3(dot(q,x),dot(q,y),dot(q,z));
 }
@@ -38,7 +43,7 @@ vec4 warpAppearance(vec3 a,vec3 b,float travel){
  vec3 hue=mix(vec3(1.0,.36,.075),vec3(.075,.62,1.15),smoothstep(-.18,.18,front));
  float shell=exp(-pow((radius-1.0)*max(2.0,uWarpThickness)*1.4,2.0));
  vec3 color=vec3(0);float opacity=0.0;
- if(uWarpFlags.y>.5){
+ if(uWarpFlags.y>.5&&uSpectrum!=5){
   float latitude=asin(clamp(oriented.y/max(radius,.001),-1.0,1.0)),longitude=atan(oriented.z,oriented.x);
   float meridians=pow(1.0-abs(sin(longitude*10.0)),16.0),parallels=pow(1.0-abs(sin(latitude*12.0)),18.0);
   float silk=.006+.012*max(meridians,parallels);
@@ -102,6 +107,7 @@ vec4 warpGridSegment(vec3 start,vec3 end,float travelled){
 }
 vec4 warpGridExterior(vec3 camera,vec3 direction,float minimum,float maximum,float travelled){
  if(uFlags.x<.5||uWarpFlags.w>.5)return vec4(0);
+
  vec3 ro=warpFrame(camera),rd=warpFrame(direction);
  if(abs(rd.y)<.00001)return vec4(0);
  float t=(-.35-ro.y)/rd.y;
@@ -127,7 +133,7 @@ export const WARP_TRACE_GLSL = `
 void warpLocalTrace(vec3 original,out vec3 direction,out vec3 emission,out float transmission,out bool hitShip){
  direction=original;emission=vec3(0);transmission=1.0;hitShip=false;
  if(!localWarpPass())return;
- vec3 q=uWarpObserver;
+ vec3 q=uWarpObserver,metricColor=vec3(0);
  float forward=-dot(q,direction),impact2=dot(cross(q,direction),cross(q,direction));
  float extent=2.5;
  if(impact2>extent*extent){vec4 grid=warpGridExterior(q,direction,0.0,1e20,0.0);emission=grid.rgb;transmission=1.0-grid.a;return;}
@@ -155,21 +161,23 @@ void warpLocalTrace(vec3 original,out vec3 direction,out vec3 emission,out float
   float nearest=clamp(-dot(previous,ray),0.0,segment);
   vec4 objectColor=vec4(0);
   if(body.w>1e-20&&uHideObjectIndex!=uWarpObjectIndex&&length(previous+ray*nearest)<bodyRadius){
-   vec3 ro=craftFrame(previous,heading)*conversion,rd=craftFrame(ray,heading);
+   vec3 ro=(uWarpObjectIndex==uDriveIndex?vec3(dot(previous,uDriveRight),dot(previous,uDriveUp),dot(previous,uDriveForward)):craftFrame(previous,heading))*conversion,rd=uWarpObjectIndex==uDriveIndex?vec3(dot(ray,uDriveRight),dot(ray,uDriveUp),dot(ray,uDriveForward)):craftFrame(ray,heading);
    CraftSurface surface=craftHit(ro,rd,segment*conversion,tint.a);
    if(surface.t<=segment*conversion){
     float fraction=surface.t/(segment*conversion);q=mix(previous,q,clamp(fraction,0.0,1.0));dt*=fraction;
     vec3 hit=ro+rd*surface.t,light=unit(vec3(-.4,.85,.65));
     vec3 reflection=craftWorld(reflect(rd,surface.normal),heading);
     objectColor=vec4(surfaceSpectrum(shadeCraft(surface,hit,rd,light,sky(reflection)),max(dot(surface.normal,light),0.0),surface.material>19.5?.72:.35,(surface.material>4.5&&surface.material<5.5)?.98:.5),1);hitShip=true;
+    if(uSpectrum==5)objectColor.rgb=vec3(.52,.88,1.35)*(1.0-smoothstep(.13,.32,abs(dot(surface.normal,rd))));
    }
   }
   vec4 appearance=warpAppearance(previous,q,dt);emission+=transmission*appearance.rgb;transmission*=1.0-appearance.a;
   vec4 grid=warpGridSegment(previous,q,travelled);emission+=transmission*grid.rgb;transmission*=1.0-grid.a;
+  metricColor=max(metricColor,transmission*diagnosticSegment(uWarpCenter+previous*uWarpRadius,uWarpCenter+q*uWarpRadius,travelled*uWarpRadius,.83/uResolution.y));
   travelled+=dt;
-  if(hitShip){emission+=transmission*objectColor.rgb;transmission=0.0;return;}
+  if(hitShip){emission+=transmission*objectColor.rgb+metricColor;transmission=0.0;return;}
  }
- vec4 grid=warpGridExterior(q,direction,0.0,1e20,travelled);emission+=transmission*grid.rgb;transmission*=1.0-grid.a;
+ vec4 grid=warpGridExterior(q,direction,0.0,1e20,travelled);emission+=transmission*grid.rgb+metricColor;transmission*=1.0-grid.a;
 }
 `;
 

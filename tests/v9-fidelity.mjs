@@ -11,14 +11,17 @@ assert(live.includes('i<768'),'The live Ultra integration budget remains separat
 assert(picture.includes('i<3072')&&picture.includes('uniform float uPhotoDetail;'));
 assert(picture.includes('emit*=')&&picture.includes('photoPlasma('),'Still detail must affect emission, not just export pixel dimensions');
 assert(picture.includes('footprint*frequency'),'Unresolved detail must fade rather than alias into a moiré');
-for(const preset of PHOTO_PRESETS){
+for(const preset of PHOTO_PRESETS.filter(p=>p.id!=='quick')){
  assert(preset.steps>768&&preset.steps<=3072);
  assert(createFragment({ultra:true,photo:true,photoSteps:preset.steps}).includes(`i<${preset.steps}`),'Each picture compiles only its own integration ceiling');
  assert(PHOTO_TILE_SIZE**2*preset.steps*photoBatchSize(preset)<=26*1024*1024,'Higher detail cannot silently queue a larger GPU batch');
 }
-assert.deepEqual(PHOTO_PRESETS.map(p=>[p.steps,p.detail,p.samples]),[[1024,1,4],[1536,2,8],[3072,3,16]]);
+assert.deepEqual(PHOTO_PRESETS.map(p=>[p.steps,p.detail,p.samples]),[[0,0,1],[1024,1,4],[3072,3,16]]);
 assert(!createFragment({craft:true,craftMask:8}).includes('vec4 shuttleCockpit('),'Unrelated ships do not compile the interior');
-assert(createFragment({craft:true,craftMask:2}).includes('if(uCockpitMode==1)'),'Shuttle interior is available through the ordinary renderer');
+const shuttle=createFragment({craft:true,craftMask:2});
+assert(shuttle.includes('uniform int uCockpitMode;'),'The ordinary renderer exposes the cockpit mode flag');
+assert(!shuttle.includes('if(uCockpitMode==1'),'No cabin branch remains in observing spectra');
+assert(!shuttle.includes('vec4 cabin=shuttleCockpit'),'No cockpit overlay is generated');
 {
  const f=fixture(),r=new BlackHoleRenderer(f.canvas);r.loadScene('bridge');
  for(let i=0;i<8;i++)f.step(r,1000+i*17);
@@ -31,7 +34,7 @@ assert(createFragment({craft:true,craftMask:2}).includes('if(uCockpitMode==1)'),
  assert.deepEqual(f.uniforms.get('uBridgeSkyParams').args,[3,2.4,.7,Math.PI/2]);
  assert.deepEqual(f.uniforms.get('uBridgeSkyColor').args[0],[63/255,170/255,94/255]);
  const source=f.activeSources.find(s=>s.type===35632).source;
- assert(source.includes('skyWithNebula(d,parameters,hue)'),'Both sides use the full nebula morphology renderer');
+ assert(source.includes('skyWithEnvironment(d,parameters,hue,other?uBridgeStars.y:uBridgeStars.x,other?uSkyParams.z:uSkyParams.x,other?uSkyParams.w:uSkyParams.y)'),'Both sides use the full nebula morphology renderer');
  r.dispose();
 }
 console.log('PASS: independent bridge skies, shuttle-only cabin compilation, photo-only procedural emission and filtered spatial detail, distinct integration budgets, and bounded GPU work at every picture preset.');

@@ -58,7 +58,7 @@ $('quality').value='ultra';$('quality').dispatch('change');assert.equal($('gpuLa
 const css=await readFile(new URL('../dist/style.css',import.meta.url),'utf8');assert(css.includes('grid-template-columns:5px 61px 44px 48px'));assert(css.includes('font-variant-numeric:tabular-nums'));assert(css.includes('grid-template-columns:48px 36px 40px;column-gap:4px;font-size:8px'));assert(css.includes('grid-template-columns:52px 38px 42px;column-gap:5px;font-size:8px'));assert(css.includes('.scene.render-failed #universe{visibility:hidden}'));
 const credits=document.querySelector('.author-credits');assert(credits.textContent.includes('Author Dr. Luke A. Wendt'));assert(credits.textContent.includes('Co-author Astra Ultra'));
 assert.deepEqual(credits.querySelectorAll('a').map(link=>link.getAttribute('href')),['https://github.com/Luke-A-Wendt','https://openai.com/index/gpt-6-astra/']);
-assert.deepEqual(document.querySelectorAll('[data-spectrum]').map(button=>button.dataset.spectrum),['visible','xray','infrared','radio','gamma']);
+assert.deepEqual(document.querySelectorAll('[data-spectrum]').map(button=>button.dataset.spectrum),['visible','xray','infrared','radio','gamma','geometry']);
 for(const spectrum of ['radio','gamma']){document.querySelector(`[data-spectrum="${spectrum}"]`).click();assert.equal(host.state.spectrum,spectrum);assert($('spectrumNote').textContent.includes('false color'));}
 
 $('viewportScenes').click();assert.equal($('atlasDialog').open,true);
@@ -93,4 +93,4 @@ host.throwOnPrepare=true;document.querySelector('[data-scene="empty-space"]').cl
 // A deferred loader can be promoted immediately, with no stale timer hiding it.
 const element=document.createElement('div'),reason=document.createElement('span');element.hidden=true;
 const indicator=createLoadingIndicator(element,reason,clock);indicator.update(true,'Deferred');advance(50);assert.equal(element.hidden,true);indicator.update(true,'Scene tap',true);assert.equal(element.hidden,false);assert.equal(reason.textContent,'Scene tap');advance(200);assert.equal(element.hidden,false);indicator.update(false);advance(50);indicator.update(true,'A newer request',true);advance(500);assert.equal(element.hidden,false);indicator.update(false);advance(500);assert.equal(element.hidden,true);indicator.dispose();
-console.log('PASS: scene tap first-paint ordering, last-choice cancellation, revision-guarded readiness, failure/retry recovery, CPU retry preservation, stable noninteractive quality/FPS, five spectral controls, exact linked credits, and immediate loader promotion. DOM lifecycle fixture; real S9/GPU/browser behavior is not emulated.');
+console.log('PASS: scene tap first-paint ordering, last-choice cancellation, revision-guarded readiness, failure/retry recovery, CPU retry preservation, stable noninteractive quality/FPS, six light / geometry controls, exact linked credits, and immediate loader promotion. DOM lifecycle fixture; real S9/GPU/browser behavior is not emulated.');
