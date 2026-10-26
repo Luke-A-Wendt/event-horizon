@@ -7,12 +7,6 @@ An interactive spacetime observatory that runs entirely on your own device. Fly 
 <img width="3840" height="2158" alt="image" src="https://github.com/user-attachments/assets/2a2e9208-f0bb-4257-8e0f-0df1fb2f8c6b" />
 <img width="1920" height="1079" alt="image" src="https://github.com/user-attachments/assets/2ce9ad45-2b71-455c-bf9f-292cea929ecf" />
 
-
-[Event Horizon](https://luke-a-wendt.github.io/event-horizon/)
-
-<img width="3840" height="2158" alt="image" src="https://github.com/user-attachments/assets/2a2e9208-f0bb-4257-8e0f-0df1fb2f8c6b" />
-<img width="1920" height="1079" alt="image" src="https://github.com/user-attachments/assets/2ce9ad45-2b71-455c-bf9f-292cea929ecf" />
-
 ## Explore
 
 The page opens directly in **The edge of infinity**, a warm accretion-disc observatory. **Math** opens from the header, and **Scenes** opens from the viewing panel. The Scenes gallery has 44 presets, illustrated with high-resolution screenshots and grouped as Black holes, Warp drive, Wormholes, Solar systems, Spacecraft, and Geometry; Math opens the Black holes, Warp, and Wormholes notebooks. Every scene opens **paused**; press Play to begin. Geometry scenes enable labels and the coordinate grid, with shaded gray spheres for stars and planets and the usual optical appearance for black and white holes. Other scenes begin with labels off. Each group progresses from introductory views to more involved or extreme comparisons.
