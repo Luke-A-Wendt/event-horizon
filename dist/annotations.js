@@ -18,10 +18,10 @@ export function captureAnnotationFrame(renderer){
  // GPU packing intentionally drops subpixel bodies. Logical positions remain
  // available for tiny locators and picks without cloning the full scene graph.
  const source=renderer.objectFrames||[],weak=hasWeakOpticalField(optics),straight=weak||!optics.lensing||optics.cpu||optics.interior,defer=!s.annotations&&!straight;
- if(weak){const packed=new Map(optics.bodies.map(b=>[b.id,b]));optics.occluders=source.filter(b=>!['ring','belt','disk','jets'].includes(b.type)).map(b=>({...packed.get(b.id),id:b.id,index:b.index,center:b.position.map((v,i)=>v-optics.origin[i]),radius:b.radius}));}
+ if(weak){const packed=new Map(optics.bodies.map(b=>[b.id,b]));optics.occluders=source.filter(b=>!['ring','belt','disk','jets','anomaly'].includes(b.type)).map(b=>({...packed.get(b.id),id:b.id,index:b.index,center:b.position.map((v,i)=>v-optics.origin[i]),radius:b.radius}));}
  const candidates=[];
  for(const body of source){
-  if(['ring','belt','disk','jets'].includes(body.type)||body.id===renderer.focusId&&renderer.focusMode==='onboard')continue;
+  if(['ring','belt','disk','jets','anomaly'].includes(body.type)||body.id===renderer.focusId&&renderer.focusMode==='onboard')continue;
   const p=directProjection(body.position,frame,aspect,fov);if(!p)continue;
   const radius=body.radius/Math.max(p.z,1e-30)/fov,margin=straight?.035:.35;
   if(Math.abs(p.x)>aspect*(.5+margin)+radius||Math.abs(p.y)>.5+margin+radius)continue;
@@ -31,7 +31,7 @@ export function captureAnnotationFrame(renderer){
  const bodies=(straight||defer?candidates:candidates.slice(0,6)).map(({body,priority,sizeClass})=>({id:body.id,index:body.index,type:body.type,name:bodyLabel(body),position:vector(body.position),radius:body.radius,collapsed:!!body.collapsed,horizonRadius:body.horizonRadius||0,innerHorizonRadius:body.innerHorizonRadius||0,singularityRadius:body.singularityRadius||0,priority,sizeClass}));
  const holes=[];if(s.blackHole)for(let j=0;j<(s.binary?2:1);j++){const mass=renderer.holeData[j*4+3],spin=j?s.secondarySpin:s.spin;if(!(mass>0))continue;holes.push({id:j?'secondary':'primary',name:holeDisplayName(s,j,sceneNames.get(renderer.sceneId)),type:'hole',position:Array.from(renderer.holeData.slice(j*4,j*4+3)),radius:renderer.configCache.horizon[j],horizonRadius:renderer.configCache.horizon[j],innerHorizonRadius:mass*(1-Math.sqrt(Math.max(0,1-spin*spin))),singularityRadius:Math.abs(spin)*mass,collapsed:true,priority:9e5,sizeClass:100});}
  const entities=[...holes,...bodies].sort((a,b)=>b.priority-a.priority||String(a.id).localeCompare(String(b.id)));
- const poseKey=JSON.stringify([optics.observer,optics.forward,optics.right,optics.up,optics.origin,optics.holes,optics.bodies,optics.gravityCount,optics.steps,optics.warp,optics.bridge,optics.interior,optics.lensing,optics.cpuLensing,optics.inspectIndex,optics.hideIndex,aspect,fov,width,height,entities.map(b=>[b.id,b.position,b.radius])]);
+ const poseKey=JSON.stringify([optics.observer,optics.forward,optics.right,optics.up,optics.origin,optics.holes,optics.bodies,optics.gravityCount,optics.steps,optics.warp,optics.anomalies,optics.anomalies?.length?optics.anomalyTime:0,optics.bridge,optics.interior,optics.lensing,optics.cpuLensing,optics.inspectIndex,optics.hideIndex,aspect,fov,width,height,entities.map(b=>[b.id,b.position,b.radius])]);
  const saved=renderer.annotationSolvedPose,cache=renderer.annotationProjectionSeeds||(renderer.annotationProjectionSeeds=new Map());
  const same=saved?.key===poseKey?new Map(saved.values.map(b=>[b.id,b])):null;
  if(!same&&!defer&&straight&&optics.occluders.length>32&&entities.length*optics.occluders.length>=4096)prepareDirectOcclusion(optics);

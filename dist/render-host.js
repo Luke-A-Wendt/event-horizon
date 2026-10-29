@@ -10,7 +10,7 @@ import { snapshotRenderer, restoreRenderer, renderSignature, LatestStateMailbox,
 
 const nextPaint=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 const hostMethods=new Set(['startup','getState','captureImage','renderPicture','getVRSupport','enterVR','exitVR','dispose','restartRendering','workerMode','requestSceneLoad','prepareMutation','finishMutation','getDiagnostics','didRestoreSnapshot','loadScene','loadSnapshot','loadWarpScenario','setPresentationPaused','noteInteraction']);
-const interactionMethods=new Set(['update','updateStellar','setFlightInput','setFlightPower','nudgeFlightTurn','resetFlight','brakeFlight','reverseFlight','updateObject','updateTreeObject','addObject','addChildObject','removeObject','removeTreeObject','reparentObject','clearObjects','setObjectWarp','setBridgeTraveler','exploreWarp','setFreeDrive','freeRoamRelative','setQuality','setViewMode','setCameraPreset','setDistanceRg','setDistanceMeters','setOrbitRadiusMeters','focusTarget','focusObject','releaseFocus','resetCamera','resetSceneView','look','rotate','zoom','moveForward','resetAll']);
+const interactionMethods=new Set(['update','updateStellar','setFlightInput','setFlightPower','setFlightMode','setFlightHeading','nudgeFlightTurn','resetFlight','brakeFlight','reverseFlight','updateObject','updateTreeObject','addObject','addChildObject','removeObject','removeTreeObject','reparentObject','clearObjects','setObjectWarp','setBridgeTraveler','exploreWarp','setFreeDrive','freeRoamRelative','setQuality','setViewMode','setCameraPreset','setDistanceRg','setDistanceMeters','setOrbitRadiusMeters','focusTarget','focusObject','releaseFocus','resetCamera','resetSceneView','look','rotate','zoom','moveForward','resetAll']);
 const hostFrameKey=renderer=>JSON.stringify([renderer.controlRevision,renderer.geometryRevision,renderer.sceneRevision,renderer.sceneId,renderer.quality,renderer.state,renderer.camera,renderer.target,renderer.focusId,renderer.focusMode,renderer.selectedId,renderer.driveId,renderer.objects.find(o=>o.driveReturn)?.driveReturn.elapsed,renderer.state.viewMode==='free'?renderer.freePosition:null,renderer.freeTarget,renderer.freeBasis,renderer.time,renderer.objects.length]);
 const viewport=canvas=>{const r=canvas.getBoundingClientRect();return {width:Math.max(2,r.width),height:Math.max(2,r.height),dpr:Math.min(3,window.devicePixelRatio||1),cssWidth:window.innerWidth||r.width,cssHeight:window.innerHeight||r.height};};
 const workerAvailable=()=>typeof Worker==='function'&&typeof Blob==='function'&&typeof URL?.createObjectURL==='function';
@@ -21,8 +21,8 @@ export function workerRenderingSupported(canvas){return workerAvailable()&&typeo
 export class RenderHost extends BlackHoleRenderer {
  constructor(canvas,callbacks={},options={}){
   super(canvas,{...callbacks,autoStart:false});
-  this.callbacks=callbacks;this.cpu=!!options.cpu;this.cpuMode=this.cpu;this.isCPU=this.cpu;this.workerMode=false;this.worker=null;this.delegate=null;this.pendingRequests=new Map();this.requestId=0;this.workerStats={};this.workerReady=false;this.lastWorkerAt=0;this.lastFrameAt=0;this.frameSeen=false;this.lastUiStats=0;this.hostDisposed=false;this.photoRunning=false;this.gpuUnavailable=false;this.awaitingBackendChoice=false;this.commandPlayer=null;this.commandMode=false;this.cpuProducer=null;this.lastHostFrame=0;this.lastStatsNotice=0;
-  if(this.cpu){this.gl=null;this.quality='cpu';}
+  this.callbacks=callbacks;this.cpu=!!options.cpu;this.presentationPaused=!!options.presentationPaused;this.cpuMode=this.cpu;this.isCPU=this.cpu;this.workerMode=false;this.worker=null;this.delegate=null;this.pendingRequests=new Map();this.requestId=0;this.workerStats={};this.workerReady=false;this.lastWorkerAt=0;this.lastFrameAt=0;this.frameSeen=false;this.lastUiStats=0;this.hostDisposed=false;this.photoRunning=false;this.gpuUnavailable=false;this.awaitingBackendChoice=false;this.commandPlayer=null;this.commandMode=false;this.cpuProducer=null;this.lastHostFrame=0;this.lastStatsNotice=0;
+  if(this.cpu)this.gl=null;
   this.sceneLoad=new SceneLoadLifecycle({cpu:this.cpu,now:()=>this.now()});this.sceneRevision=this.sceneLoad.revision;
   this.monitorAt=this.now();this.uiLagMs=0;this.loadReason='Starting local renderer';
   this.controlRevision=0;
@@ -58,7 +58,7 @@ export class RenderHost extends BlackHoleRenderer {
  loadSnapshot(snapshot){
   if(!this.preparedSceneLoad)this.requestSceneLoad();
   const revision=this.sceneRevision,source=this.delegate||this;
-  const saved={...snapshot,sceneRevision:revision,state:{...snapshot.state,paused:true},quality:this.cpu?'cpu':snapshot.quality==='cpu'?'adaptive':snapshot.quality};
+  const saved={...snapshot,sceneRevision:revision,state:{...snapshot.state,paused:true},quality:snapshot.quality==='cpu'?'adaptive':snapshot.quality};
   this.restoringScene=true;
   try{
    restoreRenderer(source,saved);this.sceneRevision=source.sceneRevision=revision;
@@ -92,7 +92,9 @@ export class RenderHost extends BlackHoleRenderer {
  frame(now){
   this.raf=0;if(this.hostDisposed||this.delegate||document.hidden||this.presentationPaused||this.photoRunning){this.lastTime=0;return;}
   this.raf=requestAnimationFrame(this.frame);if(this.cpu&&now-this.lastHostFrame<1000/30-1)return;this.lastHostFrame=now;try{this.advanceSimulation(now);const key=hostFrameKey(this);if(key!==this.preparedFrameKey){this.fillHoles();this.protectObserver();this.fillObjects();this.updateCameraFrame();this.preparedFrameKey=key;}}catch(error){this.workerFailed('Scene preparation failed: '+(error?.message||error),{allowFallback:false});return;}
-  if(this.workerReady&&this.lastWorkerAt&&this.now()-this.lastWorkerAt>this.sceneLoad.timeout){this.workerFailed('The graphics renderer stopped responding. Retry to restart it; your controls remain available.');return;}
+  // SceneLoadLifecycle is the sole stall clock: its completed-frame deadline
+  // excludes time spent in dialogs, hidden tabs, XR and Picture studio. A raw
+  // worker-message age would kill a healthy paused worker immediately on resume.
   if(this.cpuProducer){if(this.commandPlayer?.busy&&this.commandSignature!==renderSignature(this))this.commandPlayer.cancelFrame();this.produceCpuFrame(now);}else this.queueSnapshot();
   this.emitHostStats();
  }
@@ -100,7 +102,7 @@ export class RenderHost extends BlackHoleRenderer {
   const now=this.now(),source=this.delegate||this,backend=this.cpu?(this.cpuProducer?'cooperative-main':this.commandMode?'worker-commands':'worker-canvas'):this.delegate?'main-gpu':'worker-gpu',failed=this.sceneLoad?.state==='failed';
   const phase=failed?'failed':this.awaitingBackendChoice?'waiting-choice':this.preparedSceneLoad?'preparing':!(this.workerReady||this.cpuProducer||this.delegate)?'starting':this.commandPlayer?.busy?'presenting':(source.pendingProgram||this.workerStats.shaderCompiling)?'compiling':this.sceneLoad?.state==='loading'?'drawing':'ready';
   const detail=backend==='main-gpu'?'Graphics runs on the page because worker WebGL is unavailable. Driver compilation may pause this browser.':backend==='cooperative-main'?'Workers are unavailable. CPU work yields in short batches; a browser task can still overrun.':backend==='worker-commands'?'Geometry runs in a local worker; complete frames are painted in short batches.':'Rendering runs in a local worker, separate from page controls.';
-  return {backend,phase,mainThread:backend==='main-gpu'||backend==='cooperative-main',frameAgeMs:this.frameSeen?Math.max(0,now-this.lastFrameAt):null,loadElapsedMs:this.sceneLoad?.elapsed||0,deadlineMs:this.sceneLoad?.timeout||0,workerAgeMs:this.lastWorkerAt?Math.max(0,now-this.lastWorkerAt):null,queuedStates:this.mailbox?.inflight?1:0,presentationBusy:!!this.commandPlayer?.busy,uiLagMs:this.uiLagMs||0,detail,error:this.sceneLoad?.error||''};
+  return {backend,phase,mainThread:backend==='main-gpu'||backend==='cooperative-main',frameAgeMs:this.frameSeen?Math.max(0,now-this.lastFrameAt):null,loadElapsedMs:this.sceneLoad?.elapsed||0,deadlineMs:this.sceneLoad?.timeout||0,workerAgeMs:this.lastWorkerAt?Math.max(0,now-this.lastWorkerAt):null,queuedStates:this.mailbox?.inflight?1:0,presentationBusy:!!this.commandPlayer?.busy,uiLagMs:this.uiLagMs||0,detail:detail+(source.textureError||this.workerStats.surfaceWarning||(!this.cpu&&source.shaderFeatures().planetary&&PLANET_TEXTURE_DATA.error)?' '+(source.textureError||this.workerStats.surfaceWarning||PLANET_TEXTURE_DATA.error):''),error:this.sceneLoad?.error||''};
  }
  getState(){
   const source=this.delegate||this,base=this.delegate?this.delegate.getState():super.getState();
@@ -110,40 +112,43 @@ export class RenderHost extends BlackHoleRenderer {
   const failed=this.sceneLoad?.state==='failed'||this.gpuUnavailable;
   const waiting=!!(!matching||stale||this.workerStats.contextLost||this.sceneLoad?.state==='loading');
   const backend=this.cpu?(this.cpuProducer?'cooperative-main':this.commandMode?'worker-commands':'worker-canvas'):this.delegate?'main-gpu':'worker-gpu';
-  return {...base,...(this.delegate?{}:this.workerStats),objects:base.objects,sceneTargets:base.sceneTargets,cpu:this.cpu?true:base.cpu,quality:source.quality,workerMode:this.workerMode,renderBackend:backend,cpuBackend:this.cpu?backend:undefined,renderReady:matching&&!failed,renderBusy:waiting&&!failed&&!this.awaitingBackendChoice,awaitingBackendChoice:this.awaitingBackendChoice,renderFailed:failed,loadingReason:failed?'Scene failed to load':!(this.workerReady||this.cpuProducer||this.delegate)?'Starting local renderer':waiting?this.loadReason||'Preparing this view':'',diagnostics:this.getDiagnostics(),fps:stale?0:(this.delegate?base.fps:this.workerStats.fps||0),shaderCompiling:waiting&&!failed&&!this.awaitingBackendChoice,photoActive:this.photoRunning||base.photoActive,...this.sceneLoad?.stats};
+  return {...base,...(this.delegate?{}:this.workerStats),objects:base.objects,sceneTargets:base.sceneTargets,cpu:this.cpu?true:base.cpu,quality:source.quality,workerMode:this.workerMode,renderBackend:backend,cpuBackend:this.cpu?backend:undefined,renderReady:matching&&!failed,renderBusy:waiting&&!failed&&!this.awaitingBackendChoice,awaitingBackendChoice:this.awaitingBackendChoice,renderFailed:failed,loadingReason:failed?'Scene failed to load':!(this.workerReady||this.cpuProducer||this.delegate)?'Starting local renderer':waiting?this.loadReason||'Preparing this view':'',diagnostics:this.getDiagnostics(),fps:stale?0:(this.delegate?base.fps:this.workerStats.fps||0),shaderCompiling:waiting&&!failed&&!this.awaitingBackendChoice,surfaceWarning:base.surfaceWarning||this.workerStats.surfaceWarning||(!this.cpu&&source.shaderFeatures().planetary?PLANET_TEXTURE_DATA.error||'':''),photoActive:this.photoRunning||base.photoActive,...this.sceneLoad?.stats};
  }
  emitHostStats(force=false){const now=this.now();if(!force&&now-this.lastStatsNotice<(this.cpu?250:200))return;this.lastStatsNotice=now;this.onStats(this.getState());}
  queueSnapshot(){
+  if(!this.cpu&&!PLANET_TEXTURE_DATA.atlas&&this.shaderFeatures().planetary)globalThis.__EVENT_HORIZON_LOAD_PLANETS?.();
   if(!this.mailbox||this.hostDisposed||this.delegate||!this.workerReady||this.photoRunning||this.preparedSceneLoad)return;
   // Do not repeatedly clone a scene while its worker is busy. The next ACK
   // takes a fresh snapshot, retaining only the latest user intent.
   if(this.mailbox.inflight){this.snapshotDirty=true;return;}this.snapshotDirty=false;
-  const stateKey=hostFrameKey(this);if(this.lastSnapshotKey===stateKey&&!this.resizeSnapshotPending)return;this.lastSnapshotKey=stateKey;this.resizeSnapshotPending=false;
+  const assetsPending=!this.cpu&&!this.workerAssetsSent&&!!PLANET_TEXTURE_DATA.atlas&&this.shaderFeatures().planetary;
+  const stateKey=hostFrameKey(this);if(this.lastSnapshotKey===stateKey&&!this.resizeSnapshotPending&&!assetsPending)return;this.lastSnapshotKey=stateKey;this.resizeSnapshotPending=false;
   const signature=renderSignature(this);if(this.commandPlayer?.busy&&this.commandSignature!==signature)this.commandPlayer.cancelFrame();
   // Orbital time and camera changes do not mutate the catalog. Transfer its
   // 515+ records only after a model edit; the worker retains the prior copy.
   const dynamicObjects=!!this.driveId||this.objects.some(o=>o.driveReturn);
   const includeObjects=this.lastSnapshotObjects!==this.objects||this.lastSnapshotGeometry!==this.geometryRevision||dynamicObjects||this.lastSnapshotDynamic;
-  this.mailbox.push({snapshot:snapshotRenderer(this,{includeObjects}),viewport:this.hostViewport||(this.hostViewport=viewport(this.canvas)),signature,presentationPaused:this.presentationPaused||document.hidden});
+  this.mailbox.push({snapshot:snapshotRenderer(this,{includeObjects}),viewport:this.hostViewport||(this.hostViewport=viewport(this.canvas)),signature,presentationPaused:this.presentationPaused||document.hidden,...(assetsPending?{assets:PLANET_TEXTURE_DATA}:{})});
+  if(assetsPending)this.workerAssetsSent=true;
   this.lastSnapshotObjects=this.objects;this.lastSnapshotGeometry=this.geometryRevision;this.lastSnapshotDynamic=dynamicObjects;
  }
  async startBackend(){
   if(workerAvailable()&&(this.cpu||workerRenderingSupported(this.canvas))){
    let url;
    try{
-    url=URL.createObjectURL(new Blob([RENDER_WORKER_SOURCE],{type:'text/javascript'}));
+    url=URL.createObjectURL(new Blob([RENDER_WORKER_SOURCE],{type:'text/javascript'}));this.workerSourceUrl=url;this.workerAssetsSent=false;
     const worker=new Worker(url,{name:'event-horizon-renderer'});this.worker=worker;this.workerMode=true;this.lastSnapshotKey=null;this.lastSnapshotObjects=null;this.lastSnapshotGeometry=null;this.lastSnapshotDynamic=false;
     worker.addEventListener('message',event=>{if(this.worker===worker)this.handleWorker(event.data);});worker.addEventListener('error',event=>{if(this.worker===worker)this.workerFailed(event.message||'The render worker stopped.');});
     this.mailbox=new LatestStateMailbox(message=>worker.postMessage(message));
     this.commandMode=!!(this.cpu&&(this.forceCpuCommands||!workerRenderingSupported(this.canvas)));
     if(this.commandMode)this.commandPlayer=new CpuCommandPlayer(this.canvas);
     const offscreen=this.commandMode?null:this.canvas.transferControlToOffscreen();this.transferred=!!offscreen;
-    worker.postMessage({type:'init',canvas:offscreen,commandMode:this.commandMode,cpu:this.cpu,viewport:viewport(this.canvas),snapshot:snapshotRenderer(this),signature:renderSignature(this),...(!this.cpu?{assets:PLANET_TEXTURE_DATA}:{})},offscreen?[offscreen]:[]);
+    worker.postMessage({type:'init',canvas:offscreen,commandMode:this.commandMode,cpu:this.cpu,viewport:viewport(this.canvas),snapshot:snapshotRenderer(this),signature:renderSignature(this),presentationPaused:this.presentationPaused||document.hidden},offscreen?[offscreen]:[]);
     this.startupTimer=setTimeout(()=>{if(this.worker===worker)this.workerFailed('The renderer is taking too long to start. Try again or choose a simpler scene.',{allowFallback:false});},this.cpu?CPU_SCENE_TIMEOUT_MS:GPU_SCENE_LOAD_TIMEOUT_MS);
     return;
    }catch(error){this.worker?.terminate();this.worker=null;this.mailbox?.close();this.workerMode=false;
     if(this.transferred)this.replaceCanvas();
-   }finally{if(url)URL.revokeObjectURL(url);}
+   }finally{if(!this.worker)this.releaseWorkerSource();}
   }
   // Unsupported older browsers retain a limited main-thread renderer. Paint the
   // loading state first; a browser cannot promise isolation without Workers.
@@ -179,8 +184,8 @@ export class RenderHost extends BlackHoleRenderer {
    this.commandSignature=signature;this.commandPlayer.present(surface.takeFrame(),({costMs,cancelled,error})=>{
     if(error){producer.ready=false;this.workerFailed('CPU presentation stopped: '+error.message+'. Retry graphics to continue.',{allowFallback:false});return;}const previousFrameAt=this.lastFrameAt;if(cancelled||!this.completedFrame(signature,revision))return;
     this.presentAnnotations(annotationFrame,signature,revision);
-    const now=this.now(),gap=previousFrameAt?now-previousFrameAt:1000/30;producer.noteCpuCost(costMs,now);this.cpuProductionAfter=frameStarted+Math.min(1000/15,Math.max(1000/30,producer.cpuDrawCost*1.15));
-    this.workerStats={fps:1000/Math.max(1,gap),effectiveQuality:'cpu',webgl:0,cpu:true,width:surface.width,height:surface.height,scale:producer.renderScale,steps:0,renderedSignature:signature,frameReady:true};this.emitHostStats(true);
+    const now=this.now(),gap=previousFrameAt?now-previousFrameAt:1000/30;producer.noteCpuCost(Math.max(costMs,now-frameStarted),now,'frame');this.cpuProductionAfter=frameStarted+Math.min(1000/15,Math.max(1000/30,producer.cpuDrawCost*1.15));
+    this.workerStats={fps:1000/Math.max(1,gap),effectiveQuality:producer.cpuBudget?.level||'low',quality:producer.quality,adaptiveReason:producer.cpuBudget?.reason||'',webgl:0,cpu:true,width:surface.width,height:surface.height,scale:producer.renderScale,steps:0,renderedSignature:signature,frameReady:true};this.emitHostStats(true);
    });
   };
   this.cpuTask=this.cpuTasks.post(pump);
@@ -188,7 +193,7 @@ export class RenderHost extends BlackHoleRenderer {
  handleWorker(message){
   if(this.hostDisposed)return;this.lastWorkerAt=this.now();
   if(message.type==='ready'){
-   clearTimeout(this.startupTimer);this.workerReady=!!message.available;this.gpuUnavailable=!message.available;
+   this.releaseWorkerSource();clearTimeout(this.startupTimer);this.workerReady=!!message.available;this.gpuUnavailable=!message.available;
    if(!message.available){
     // Some browsers support OffscreenCanvas 2D but not worker WebGL. Probe the
     // ordinary GPU backend before deciding that graphics are unavailable.
@@ -239,8 +244,9 @@ export class RenderHost extends BlackHoleRenderer {
    else if(message.type==='error'&&(!message.signature||message.signature===this.currentSignature()))this.workerFailed(message.message,{allowFallback:false});
   }
  }
+ releaseWorkerSource(){if(this.workerSourceUrl){URL.revokeObjectURL(this.workerSourceUrl);this.workerSourceUrl=null;}}
  workerFailed(message,{allowFallback=true}={}){
-  if(this.hostDisposed)return;
+  if(this.hostDisposed)return;this.releaseWorkerSource();
   this.noteInteraction();
   // A blocked Blob/CSP or unsupported worker context must not strand a browser
   // that can use ordinary WebGL. Attempt this only before its first worker ready.
@@ -334,7 +340,7 @@ export class RenderHost extends BlackHoleRenderer {
    gpuAvailable(now){const fence=this.gpuFence,available=super.gpuAvailable(now);if(fence&&available&&!this.gpuFence)host.completedFrame(fence.renderedSignature,fence.sceneRevision);return available;}
    render(...args){if(host.preparedSceneLoad)return false;const signature=renderSignature(this),revision=this.sceneRevision;let drawn;try{drawn=super.render(...args);}catch(error){host.workerFailed('This scene could not render: '+(error?.message||error),{allowFallback:false});return false;}if(drawn){const annotationFrame=captureAnnotationFrame(this);if(this.gpuFence){this.gpuFence.renderedSignature=signature;this.gpuFence.sceneRevision=revision;this.gpuFence.annotationFrame=annotationFrame;}host.presentAnnotations(annotationFrame,signature,revision);if(!this.gpuFence)host.completedFrame(signature,revision);}return drawn;}
   };
-  this.delegate=new Direct(this.canvas,{...this.callbacks,onStats:()=>this.emitHostStats(),onError:message=>{if(message&&this.delegate)this.workerFailed(message,{allowFallback:false});else this.onError(message);}});restoreRenderer(this.delegate,saved);this.delegate.setPresentationPaused(this.presentationPaused);this.workerMode=false;
+  this.delegate=new Direct(this.canvas,{...this.callbacks,deferProgram:true,onStats:()=>this.emitHostStats(),onError:message=>{if(message&&this.delegate)this.workerFailed(message,{allowFallback:false});else this.onError(message);}});restoreRenderer(this.delegate,saved);this.delegate.setPresentationPaused(this.presentationPaused);this.workerMode=false;
   return this.delegate;
  }
  async enterVR(){
@@ -355,9 +361,9 @@ export class RenderHost extends BlackHoleRenderer {
   this.replaceCanvas();restoreRenderer(this,saved);this.presentationPaused=paused;this.workerStats={};this.frameSeen=false;this.workerReady=false;this.gpuUnavailable=false;this.initGL();this.bindControls();
   this.startBackend();if(!paused&&!document.hidden&&!this.raf)this.raf=requestAnimationFrame(this.frame);
  }
- restartRendering(){this.noteInteraction();for(const request of this.pendingRequests.values()){clearTimeout(request.timeout);request.cleanup?.();request.reject(Object.assign(new Error('Rendering restarted.'),{name:'AbortError'}));}this.pendingRequests.clear();this.lastSnapshotKey=null;this.awaitingBackendChoice=false;if(this.delegate){const saved=snapshotRenderer(this.delegate);this.delegate.dispose();this.delegate=null;restoreRenderer(this,saved);this.presentationPaused=false;}if(this.sceneLoad.state==='failed'){this.sceneRevision=this.sceneLoad.begin();}this.cancelCpuWork();this.cpuProducer?.dispose();this.cpuProducer=null;this.cpuTasks?.dispose();this.worker?.terminate();this.worker=null;this.mailbox?.close();this.unbind();this.replaceCanvas();this.workerStats={};this.frameSeen=false;this.workerReady=false;this.gpuUnavailable=false;this.initGL();this.bindControls();this.startBackend();if(!document.hidden&&!this.presentationPaused&&!this.raf)this.raf=requestAnimationFrame(this.frame);}
+ restartRendering(){this.releaseWorkerSource();this.noteInteraction();for(const request of this.pendingRequests.values()){clearTimeout(request.timeout);request.cleanup?.();request.reject(Object.assign(new Error('Rendering restarted.'),{name:'AbortError'}));}this.pendingRequests.clear();this.lastSnapshotKey=null;this.awaitingBackendChoice=false;if(this.delegate){const saved=snapshotRenderer(this.delegate);this.delegate.dispose();this.delegate=null;restoreRenderer(this,saved);this.presentationPaused=false;}if(this.sceneLoad.state==='failed'){this.sceneRevision=this.sceneLoad.begin();}this.cancelCpuWork();this.cpuProducer?.dispose();this.cpuProducer=null;this.cpuTasks?.dispose();this.worker?.terminate();this.worker=null;this.mailbox?.close();this.unbind();this.replaceCanvas();this.workerStats={};this.frameSeen=false;this.workerReady=false;this.gpuUnavailable=false;this.initGL();this.bindControls();this.startBackend();if(!document.hidden&&!this.presentationPaused&&!this.raf)this.raf=requestAnimationFrame(this.frame);}
  dispose(){
-  if(this.hostDisposed)return;this.noteInteraction();this.hostDisposed=true;this.disposed=true;clearInterval(this.loadMonitor);clearTimeout(this.startupTimer);cancelAnimationFrame(this.raf);this.unbind();this.worker?.terminate();this.worker=null;this.mailbox?.close();this.delegate?.dispose();this.framePresenter?.dispose();this.commandPlayer?.dispose();this.cpuProducer?.dispose();this.cpuTasks?.cancel(this.cpuTask);this.cpuTasks?.dispose();
+  if(this.hostDisposed)return;this.releaseWorkerSource();this.noteInteraction();this.hostDisposed=true;this.disposed=true;clearInterval(this.loadMonitor);clearTimeout(this.startupTimer);cancelAnimationFrame(this.raf);this.unbind();this.worker?.terminate();this.worker=null;this.mailbox?.close();this.delegate?.dispose();this.framePresenter?.dispose();this.commandPlayer?.dispose();this.cpuProducer?.dispose();this.cpuTasks?.cancel(this.cpuTask);this.cpuTasks?.dispose();
   for(const request of this.pendingRequests.values()){clearTimeout(request.timeout);request.cleanup?.();request.reject(new Error('The renderer was closed.'));}this.pendingRequests.clear();this.ready=false;
  }
 }

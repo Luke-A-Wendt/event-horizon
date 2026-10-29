@@ -4,7 +4,7 @@ import {SCENE_PRESETS,SCENE_PROGRESSIONS,DEFAULTS,makePreset} from '../dist/conf
 import {stellarInfo,SOLAR_RG_METERS} from '../dist/stellar-physics.js';
 
 const ids=SCENE_PRESETS.map(scene=>scene.id),planned=Object.values(SCENE_PROGRESSIONS).flat();
-assert.equal(ids.length,45);
+assert.equal(ids.length,47);
 assert.equal(new Set(ids).size,ids.length);
 assert.deepEqual(ids,planned,'Every scene has one deliberate place in its category progression');
 assert.equal(ids[0],'disk');

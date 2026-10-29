@@ -29,9 +29,9 @@ const clock=structuredClone(shuttle.clock);r.resetFlight();pilot.update();assert
 $('pilotStop').click();assert.deepEqual(shuttle.clock,clock);assert(!$('pilotTelemetry').hidden);assert(pilot.start(shuttle.id));assert.equal($('pilotDilation').textContent,'1.2 ns');
 r.loadScene('warp-cruise');const enterprise=r.objects.find(o=>o.type==='enterprise');assert(pilot.start(enterprise.id));assert($('pilotDilationRow').hidden,'No fictitious SR time-dilation readout for warp motion');assert.equal($('pilotBrakeSpeed').getAttribute('data-short-label'),'■');assert.equal($('pilotBrakeSpeed').getAttribute('aria-label'),'Stop motion');
 const css=readFileSync(new URL('../dist/style.css',import.meta.url),'utf8');
-assert.deepEqual([...new Set([...css.matchAll(/--flight-strip:(\d+)px/g)].map(m=>Number(m[1])))].sort((a,b)=>a-b),[0,52]);
+assert.deepEqual([...new Set([...css.matchAll(/--flight-strip:(\d+)px/g)].map(m=>Number(m[1])))].sort((a,b)=>a-b),[0,76]);
 assert(!/pilot-(?:clocks|clock-note|nominal)/.test(css));assert.match(css,/\.pilot-telemetry>div\[hidden\]\{display:none\}/);
-assert.match(css,/grid-template-columns:32px minmax\(0,1fr\) 32px;grid-template-rows:minmax\(0,1fr\)/,'Phone flight controls share one row');
+assert.equal($('pilotControls').querySelectorAll('[data-pilot-key]').length,0);assert.equal($('pilotHeading'),null);assert($('pilotLeft')&&$('pilotRight'));assert.match(css,/\.pilot-console\{grid-template-columns:44px minmax\(0,1fr\) 44px/,'Corner steering surrounds the compact engine controls');
 assert.match(css,/@media\(max-height:420px\) and \(orientation:landscape\)\{\.scene\.has-flight-controls \.viewport-dock\{visibility:hidden\}\}/,'Short-landscape Drive moves the dock out of the vehicle view; leaving Drive restores it');
 pilot.dispose();r.dispose();
-console.log('PASS: cumulative lifetime dilation alongside speed/turn, adaptive units, reset/coast continuity, Enterprise hidden row, removed nominal/paired clocks, single52px control strip and accessible compact actions. DOM/style contracts; no browser layout emulation.');
+console.log('PASS: cumulative lifetime dilation alongside speed/turn, adaptive units, reset/coast continuity, Enterprise hidden row, removed nominal/paired clocks, 76px control strip and accessible compact actions. DOM/style contracts; no browser layout emulation.');

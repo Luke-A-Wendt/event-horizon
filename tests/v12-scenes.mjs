@@ -6,8 +6,8 @@ import {REFERENCE_RG_METERS} from '../dist/objects.js';
 import {fixture} from './render-fixture.mjs';
 
 const scene=id=>SCENE_PRESETS.find(s=>s.id===id);
-assert.equal(SCENE_PRESETS.length,45);
-assert.equal(new Set(SCENE_PRESETS.map(s=>s.id)).size,45);
+assert.equal(SCENE_PRESETS.length,47);
+assert.equal(new Set(SCENE_PRESETS.map(s=>s.id)).size,47);
 assert.equal(DEFAULTS.paused,true);
 for(const s of SCENE_PRESETS){
  assert.equal(makePreset(s.id).paused,true,`${s.id} begins paused`);

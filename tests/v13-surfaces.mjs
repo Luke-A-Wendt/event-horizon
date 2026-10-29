@@ -41,7 +41,7 @@ let closed=0;
 globalThis.createImageBitmap=async(source,options)=>({width:options?.resizeWidth||4096,height:options?.resizeHeight||2048,close(){closed++;}});delete globalThis.Image;
 const gl=glFixture(),cache=new PlanetTextureCache(gl);assert(cache.atlas,'Even the unsupported/decoding path has a valid neutral texture');await cache.ensure(1);assert(cache.ready(1));assert.equal(cache.focusId,1);assert.equal(cache.focusSize,2048);assert(gl.uploads.every(([w])=>w<=2048));
 await cache.ensure(2,{high:true});assert.equal(cache.focusSize,2048,'Hardware texture limit wins over requested 4K');
-const locations={uPlanetAtlas:'atlas',uPlanetFocus:'focus',uPlanetAtlasReady:'ready',uPlanetFocusId:'id'};cache.bind(locations);assert.equal(gl.uniforms.get('ready'),1);assert.equal(gl.uniforms.get('id'),2);cache.dispose();assert.equal(gl.deleted.length,2);assert(closed>=4);
+const locations={uPlanetAtlas:'atlas',uPlanetFocus:'focus',uPlanetAtlasReady:'ready',uPlanetFocusId:'id'};cache.bind(locations);assert.equal(gl.uniforms.get('ready'),1);assert.equal(gl.uniforms.get('id'),2);cache.dispose();assert.equal(gl.deleted.length,2);assert(closed>=3,'Bounded decode produces one bitmap per image, without a full-resolution intermediate');
 // A high-detail request arriving during a smaller decode must really upgrade.
 const highGl=glFixture(4096),high=new PlanetTextureCache(highGl);const a=high.ensure(1),b=high.ensure(1,{high:true});await Promise.all([a,b]);assert.equal(high.focusSize,4096);high.dispose();
 // Main-window Image fallback resizes before upload on old browsers.

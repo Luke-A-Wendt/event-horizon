@@ -8,8 +8,8 @@ import {composeEyeFrame} from '../dist/xr-view.js';
 import {REFERENCE_RG_METERS,objectRadiusMeters} from '../dist/objects.js';
 
 const bands=['visible','infrared','xray','radio','gamma'];
-assert.equal(SCENE_PRESETS.length,45);
-assert.equal(new Set(SCENE_PRESETS.map(scene=>scene.id)).size,45);
+assert.equal(SCENE_PRESETS.length,47);
+assert.equal(new Set(SCENE_PRESETS.map(scene=>scene.id)).size,47);
 for(const [id,band] of [['radio-observatory','radio'],['gamma-engine','gamma']]){
  const scene=SCENE_PRESETS.find(scene=>scene.id===id);
  assert.equal(scene.patch.spectrum,band);assert.equal(scene.patch.jets,true);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {CLOCK_LIGHT_SPEED as c,CLOCK_SOLAR_GM as mu,supportsObjectClock,createObjectClock,clockRate,advanceObjectClock,objectClockReading,formatClockDuration} from '../dist/object-clocks.js';
+import {CLOCK_LIGHT_SPEED as c,CLOCK_SOLAR_GM as mu,supportsObjectClock,createObjectClock,clockRate,advanceObjectClock,objectClockReading,formatClockDuration,formatClockRate} from '../dist/object-clocks.js';
 const near=(a,b,tolerance=1e-12)=>assert(Math.abs(a-b)<=tolerance,`${a} ≠ ${b}`);
 for(const type of ['astronaut','shuttle','iss'])assert(supportsObjectClock(type));
 for(const type of ['enterprise','planet','star','dyson'])assert(!supportsObjectClock(type));
@@ -29,3 +29,9 @@ const noTime={...clock};for(const dt of [0,-1,NaN,Infinity])advanceObjectClock(c
 const tinyClock=createObjectClock();for(let i=0;i<10000;i++)advanceObjectClock(tinyClock,.001,tiny);near(tinyClock.coordinateSeconds,10);near(tinyClock.lagSeconds,10*tiny.lossRate,1e-33);
 for(const [seconds,wanted]of [[0,'0 ns'],[1e-9,'1.0 ns'],[1.234e-9,'1.2 ns'],[999e-9,'1.0 μs'],[1.234e-6,'1.2 μs'],[.1234,'120 ms'],[1.234,'1.2 s'],[60,'1.0 min'],[3600,'1.0 h'],[86400,'1.0 d'],[31557600,'1.0 yr'],[1e20,'3.2 × 10¹² yr'],[-1,'—'],[Infinity,'—']])assert.equal(formatClockDuration(seconds),wanted);
 console.log('PASS: finite lifetime clock totals, compensated small GR/SR lag, combined gravity and speed, horizon-rate divergence, immune types and two-significant-figure units.');
+
+// The single current-rate display grows steeply in the exterior limit while
+// accumulated loss per reference second remains correctly bounded by one.
+let previous=1;
+for(const gap of [1,.1,.001,.000001]){const rate=clockRate({positionMeters:[rs*(1+gap),0,0],sources:[hole]});assert(rate.rateFactor>previous);assert(rate.lossRate<1);previous=rate.rateFactor;}
+assert(previous>999);assert.equal(formatClockRate(Infinity),'∞');assert.equal(formatClockRate(1),'1.0×');assert.equal(formatClockRate(1234),'1200×');assert.equal(formatClockRate(1e6),'1.0 × 10⁶×');assert.equal(formatClockRate(NaN),'—');

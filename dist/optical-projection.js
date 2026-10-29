@@ -1,3 +1,4 @@
+import {anomalyGradient} from './anomaly.js';
 // Bounded inverse projection through the same optical approximation as shaders.js.
 // A previous solution is only a Newton seed: it never smooths a displayed anchor.
 // Nonconvergent or occulted images fail closed instead of drawing a false locator.
@@ -42,7 +43,7 @@ function rayBody(a,axis,length,body){
 // Below a quarter pixel even the maximal grazing-ray deflection is invisible.
 // Ordinary Solar System bodies take this inexpensive path regardless of which
 // few bodies fit in the GPU uniforms; compact objects still use the ray solver.
-export function hasWeakOpticalField(c){return !c.bridge&&!c.holes.length&&!c.warp?.enabled&&c.bodies.every(b=>!b.collapsed&&(!activeGravity(c,b)||4*b.mass/Math.max(b.radius,1e-30)*c.height/c.fov<.25));}
+export function hasWeakOpticalField(c){return !c.bridge&&!c.anomalies?.length&&!c.holes.length&&!c.warp?.enabled&&c.bodies.every(b=>!b.collapsed&&(!activeGravity(c,b)||4*b.mass/Math.max(b.radius,1e-30)*c.height/c.fov<.25));}
 // A conservative screen-space broadphase for a single immutable optical pose.
 // It only rejects rays outside a body's enclosing sphere; the original exact
 // sphere/ellipsoid/water-cap test still decides every possible occultation.
@@ -79,13 +80,14 @@ export function projectDirectVisible(c,worldPoint,id=null){
 export function createOpticalContext(renderer){
  const s=renderer.state,k=renderer.configCache||{},o=renderer.annotationOptics;
  const frame=renderer.cameraFrame,rect=renderer.canvas?.getBoundingClientRect?.()||{width:900,height:650},aspect=rect.width/Math.max(1,rect.height),fov=Math.max(.83*Math.max(1,1.35/aspect),renderer.focusMode==='onboard'&&renderer.getFocusFrame?.()?.type==='shuttle'?1.25:0);
- const origin=o?.origin||[0,0,0],observer=o?.observer||sub(frame.observer,origin),bodies=(renderer.renderObjects?.length?renderer.renderObjects:renderer.objectFrames||[]).filter(b=>!['ring','belt','disk','jets'].includes(b.type)).map(b=>({id:b.id,index:b.index,type:b.type,center:o&&b.index>=0?o.objects.slice(b.index*4,b.index*4+3):sub(b.position,origin),radius:o&&b.index>=0?o.objects[b.index*4+3]:b.radius,mass:(o&&b.index>=0?o.bodyMasses?.[b.index]??b.massSolar??0:b.massSolar||0)/4300000,opacity:s.spectrum==='geometry'||b.collapsed||['blackhole','whitehole'].includes(b.type)?1:clamp(o&&b.index>=0?o.bodyOpacity?.[b.index]??b.opacity??1:b.opacity??1,0,1),cutaway:b.starStyle==='tzo'&&!b.collapsed&&s.spectrum!=='geometry'&&(b.opacity??1)<.999,collapsed:!!b.collapsed,spin:b.spinParameter||0,axis:b.spinAxis||b.frame?.[1]||[0,1,0],...shapeFrame(b,renderer)}));
+ const origin=o?.origin||[0,0,0],observer=o?.observer||sub(frame.observer,origin),bodies=(renderer.renderObjects?.length?renderer.renderObjects:renderer.objectFrames||[]).filter(b=>!['ring','belt','disk','jets','anomaly'].includes(b.type)).map(b=>({id:b.id,index:b.index,type:b.type,center:o&&b.index>=0?o.objects.slice(b.index*4,b.index*4+3):sub(b.position,origin),radius:o&&b.index>=0?o.objects[b.index*4+3]:b.radius,mass:(o&&b.index>=0?o.bodyMasses?.[b.index]??b.massSolar??0:b.massSolar||0)/4300000,opacity:s.spectrum==='geometry'||b.collapsed||['blackhole','whitehole'].includes(b.type)?1:clamp(o&&b.index>=0?o.bodyOpacity?.[b.index]??b.opacity??1:b.opacity??1,0,1),cutaway:b.starStyle==='tzo'&&!b.collapsed&&s.spectrum!=='geometry'&&(b.opacity??1)<.999,collapsed:!!b.collapsed,spin:b.spinParameter||0,axis:b.spinAxis||b.frame?.[1]||[0,1,0],...shapeFrame(b,renderer)}));
  const holes=[],holeData=o?.holes||Array.from(renderer.holeData||[]);if(s.blackHole)for(let j=0;j<(s.binary?2:1);j++){const mass=holeData[j*4+3];if(!(mass>0))continue;holes.push({id:j?'secondary':'primary',center:holeData.slice(j*4,j*4+3).map((v,i)=>o?v:v-origin[i]),mass,radius:k.horizon?.[j]||0,spin:j?s.secondarySpin:s.spin,axis:j?k.secondaryAxis:k.primaryAxis});}
- return {geometry:s.spectrum==='geometry',transparent:!!(o?.transparentBodies??renderer.transparentBodyCount),origin,observer,forward:o?.forward||frame.forward,right:o?.right||frame.right,up:o?.up||frame.up,aspect,fov,width:rect.width,height:rect.height,steps:Math.min(768,Math.max(24,o?.steps||renderer.steps||144)),bounds:o?.bounds||k.bounds||100,mass:renderer.massScale||1,bodies,gravityCount:o?.gravityCount??renderer.gravityCount,holes,lensing:!!s.lensing&&!renderer.cpu,interior:!!s.interiorView&&s.spectrum==='geometry',bridge:!!s.bridge&&!renderer.cpu,bridgeRadius:k.bridgeRadius||1,crossed:s.bridgeMode==='crossed',warp:o?.warp||null,inspectIndex:o?.inspectIndex??frame.inspectIndex,hideIndex:o?.hideIndex??frame.hideIndex??-1,cpu:!!renderer.cpu,cpuLensing:!!s.lensing,budget:{rays:0,iterations:0,maxRays:256,maxIterations:12000,deadline:Infinity,limited:false},occluders:[...holes,...bodies],warpBudget:renderer.quality==='ultra'?192:96};
+ return {anomalyTime:o?.anomalyTime??renderer.time??0,anomalies:o?.anomalies||(renderer.anomalyFrames||[]).map(a=>({position:sub(a.position,origin),radius:a.radius,anomalyStrength:a.anomalyStrength,anomalyScale:a.anomalyScale,anomalyMotion:a.anomalyMotion})),geometry:s.spectrum==='geometry',transparent:!!(o?.transparentBodies??renderer.transparentBodyCount),origin,observer,forward:o?.forward||frame.forward,right:o?.right||frame.right,up:o?.up||frame.up,aspect,fov,width:rect.width,height:rect.height,steps:Math.min(768,Math.max(24,o?.steps||renderer.steps||144)),bounds:o?.bounds||k.bounds||100,mass:renderer.massScale||1,bodies,gravityCount:o?.gravityCount??renderer.gravityCount,holes,lensing:!!s.lensing&&!renderer.cpu,interior:!!s.interiorView&&s.spectrum==='geometry',bridge:!!s.bridge&&!renderer.cpu,bridgeRadius:k.bridgeRadius||1,crossed:s.bridgeMode==='crossed',warp:o?.warp||null,inspectIndex:o?.inspectIndex??frame.inspectIndex,hideIndex:o?.hideIndex??frame.hideIndex??-1,cpu:!!renderer.cpu,cpuLensing:!!s.lensing,budget:{rays:0,iterations:0,maxRays:256,maxIterations:12000,deadline:Infinity,limited:false},occluders:[...holes,...bodies],warpBudget:renderer.quality==='ultra'?192:96};
 }
 function warpForce(c,p,v,local=false){const w=c.warp;if(!w?.enabled||w.local&&!local||w.radius<=1e-20||!w.strength)return [0,0,0];const q=mul(sub(p,w.center),1/w.radius),r=Math.hypot(...q);if(r>2.5||r<1e-12)return [0,0,0];const n=mul(q,1/r),d=unit(v),axis=unit(w.axis),s=Math.max(1,w.thickness),a=Math.tanh(clamp(s*(r+1),-12,12)),b=Math.tanh(clamp(s*(r-1),-12,12)),shape=s*(b*b-a*a)/(2*Math.tanh(s)),mu=dot(n,axis);return mul(sub(n,mul(d,dot(n,d))),w.strength*shape*(.24+.12*mu)/w.radius);}
 export function opticalForce(c,p,v){
  if(!c.lensing||c.interior)return [0,0,0];let total=warpForce(c,p,v);
+ for(const region of c.anomalies||[]){const g=mul(anomalyGradient(p,region,c.anomalyTime),1/region.radius);total=add(total,mul(sub(g,mul(v,dot(g,v))),-2));}
  for(const b of c.bodies){if(!activeGravity(c,b)||!['star','planet','moon','blackhole','whitehole'].includes(b.type)||b.mass<=0)continue;const q=sub(p,b.center),rr=Math.max(dot(q,q),b.radius*b.radius),r=Math.sqrt(Math.max(rr,1e-30)),angular=cross(q,v);total=add(total,mul(q,-3*b.mass*dot(angular,angular)/Math.max(rr*rr*r,1e-30)));}
  for(const h of c.holes){if(!(h.mass>0))continue;const q=sub(p,h.center),rr=Math.max(dot(q,q),h.mass*h.mass*.05),r=Math.sqrt(rr),angular=cross(q,v);total=add(total,add(mul(q,-3*h.mass*dot(angular,angular)/(rr*rr*r)),mul(cross(h.axis,v),(h.spin||0)*.23*h.mass*h.mass/(rr*r))));}return total;
 }
@@ -109,7 +111,7 @@ export function traceProjection(c,xy,target,ignoreId=null,{capture=false,skipOcc
     p=next;v=nextV;
    }
   }}
-  if(!c.holes.length){const den=dot(v,c.forward),t=(plane-dot(sub(p,c.observer),c.forward))/den;return t>0?{point:add(p,mul(v,t)),blocked:null,ray:v}:null;}
+  if(!c.holes.length&&!c.anomalies?.length){const den=dot(v,c.forward),t=(plane-dot(sub(p,c.observer),c.forward))/den;return t>0?{point:add(p,mul(v,t)),blocked:null,ray:v}:null;}
   // The world pass starts from the original observer with the exiting local
   // direction, exactly as the compact precision pass in the scene shader.
   p=[...c.observer];
@@ -122,6 +124,7 @@ export function traceProjection(c,xy,target,ignoreId=null,{capture=false,skipOcc
   else for(const h of c.holes){if(!(h.mass>0))continue;const r=Math.hypot(...sub(p,h.center));if(r<h.radius&&!c.interior){if(capture)return {captureId:h.id,point:p,blocked};return null;}let step=Math.max(r*.065,.045*h.mass)*320/c.steps;step=Math.min(step,Math.max(.018*h.mass,Math.abs(r-h.radius)*.35));if(c.interior)step=Math.max(step,h.mass*.065);dt=Math.min(dt,step);}
   for(const b of c.bodies)if(activeGravity(c,b)&&b.mass>0){const distance=Math.hypot(...sub(p,b.center));dt=Math.min(dt,Math.max(b.radius*(c.bridge?.03:.02),distance*.08)*288/c.steps);}
   const w=c.warp;if(w?.enabled&&!w.local&&w.radius>0){const r=Math.hypot(...sub(p,w.center))/w.radius;if(r<2.8)dt=Math.min(dt,w.radius*clamp(.022+Math.abs(r-1)*.12,.022,.18)*288/c.steps);}
+  for(const region of c.anomalies||[]){const distance=Math.hypot(...sub(p,region.position));dt=Math.min(dt,Math.max(region.radius*.055,Math.abs(distance-region.radius*2.5)*.3));}
   if(!(dt>0&&Number.isFinite(dt)))return null;
   const force=(p,v)=>c.bridge?mul(bridgeForce(c,mul(p,1/c.bridgeRadius),v),1/c.bridgeRadius):opticalForce(c,p,v);
   const a=force(p,v),midV=c.bridge?unit(add(v,mul(a,dt*.5))):add(v,mul(a,dt*.5)),midP=add(p,mul(v,dt*.5)),nextV=c.bridge?unit(add(v,mul(force(midP,midV),dt))):add(v,mul(force(midP,midV),dt)),next=add(p,mul(midV,dt));

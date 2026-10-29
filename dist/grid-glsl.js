@@ -32,7 +32,7 @@ export function gridSpinAngularRate(radius, spin) {
   return 2 * spin / (1 + Math.pow(Math.max(radius, 0), 3));
 }
 
-export function coordinateGridGLSL({ warp = false } = {}) {
+export function coordinateGridGLSL({ warp = false, anomaly = false } = {}) {
   return `
 // A single, continuous sheet. The binary orbit lies in the world XZ plane;
 // using its plane rather than the primary spin plane keeps BOTH centers on it.
@@ -58,6 +58,7 @@ float gridRadialDelta(float radius,float flow){
 
 vec3 coordinateGridCoordinates(vec3 p,float weakFlowTime){
  vec3 displaced=p;float stretch=1.0;
+ ${anomaly?'displaced+=anomalyGridOffset(p);stretch=max(stretch,4.0);':''}
  for(int k=0;k<2;k++){
   if(uWarpFlags.w<.5)break;
   if(k==1&&uBinary==0)break;

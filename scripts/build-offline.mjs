@@ -1,10 +1,12 @@
-/** Build a portable HTML file using Node's standard library only. No network calls. */
-import { readFile, writeFile } from 'node:fs/promises';
+/** Build cacheable entries and a portable HTML file using Node only. */
+import { readFile, writeFile, readdir, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = path.join(root, 'dist');
+const digest=value=>createHash('sha256').update(value).digest('hex').slice(0,16);
 const modules = new Map();
 const order = [];
 const imports = /^import\s+\{([^}]+)\}\s+from\s+['"]\.\/([^'"]+)['"];?\s*$/gm;
@@ -31,7 +33,7 @@ async function visit(name) {
 await visit('render-worker.js');
 let workerJavascript=`'use strict';\n(() => {\nconst __modules=Object.create(null);\n`;
 for(const name of order){
- // The page sends included texture data once in the GPU worker's init message.
+ // The page sends included texture data once when a GPU scene needs maps.
  // Keeping the worker's asset container empty avoids embedding every map twice
  // in the standalone page, and CPU workers never receive those large strings.
  let code=name==='planet-texture-data.js'?'export const PLANET_TEXTURE_DATA={atlas:"",maps:{},meta:{}};':modules.get(name);
@@ -61,6 +63,8 @@ const config = await import('../dist/config.js');
 const atlas = Object.fromEntries(await Promise.all(config.SCENE_PRESETS.map(async scene => [scene.id,
   'data:image/webp;base64,' + (await readFile(path.join(source, `assets/atlas-${scene.id}.webp`))).toString('base64')
 ])));
+const webAtlas=Object.fromEntries(Object.entries(atlas).map(([id,uri])=>[id,`assets/atlas-${id}.webp?v=${digest(uri)}`]));
+let webJavascript=`'use strict';\n(() => {\nconst __modules=Object.create(null);\nconst __atlasImages=Object.fromEntries(Object.entries(${JSON.stringify(webAtlas)}).map(([id,url])=>[id,(globalThis.__EVENT_HORIZON_ASSET_BASE||'')+url]));\n`;
 let javascript = `'use strict';\n(() => {\nconst __modules = Object.create(null);\nconst __atlasImages = ${JSON.stringify(atlas)};\n`;
 for (const name of order) {
   let code = modules.get(name);
@@ -75,9 +79,15 @@ for (const name of order) {
   }
   if (/^\s*(?:import|export)\s/m.test(code)) throw new Error(`Unsupported module syntax in ${name}`);
   javascript += `\n// Module: ${name}\n__modules[${JSON.stringify(name)}] = (() => {\n${code}\nreturn {${names.join(',')}};\n})();\n`;
+  const webCode=name==='planet-texture-data.js'?'const PLANET_TEXTURE_DATA=globalThis.__EVENT_HORIZON_PLANET_DATA||(globalThis.__EVENT_HORIZON_PLANET_DATA={atlas:"",maps:{},meta:{}});':code;
+  webJavascript+=`\n// Module: ${name}\n__modules[${JSON.stringify(name)}]=(()=>{\n${webCode}\nreturn {${names.join(',')}};\n})();\n`;
 }
-javascript += '})();\n';
+javascript += '})();\n';webJavascript+='})();\n';
 let html = await readFile(path.join(source, 'index.html'), 'utf8');
+// The editable shell remains in dist/. Normalize its previous generated entry
+// before rebuilding, so repeated builds are stable and never nest bundles.
+html=html.replace(/<link rel="stylesheet" href="assets\/entry-style-[a-f0-9]+\.css">/,'<link rel="stylesheet" href="style.css">').replace(/<!-- Hosted entry start -->[\s\S]*?<!-- Hosted entry end -->/,'<script type="module" src="app.js"></script>');
+const webShell=html;
 const css = await readFile(path.join(source, 'style.css'), 'utf8');
 const favicon = 'data:image/svg+xml;base64,' + (await readFile(path.join(source, 'favicon.svg'))).toString('base64');
 const loadingAssets = {
@@ -94,5 +104,28 @@ html = html.replace('href="favicon.svg"', `href="${favicon}"`)
   .replace('class="brand" href="./"', 'class="brand" href="#scene"')
   .replace('<script type="module" src="app.js"></script>', `<script>\n${javascript.replace(/<\/script/gi, '<\\/script')}\n</script>`);
 if (html.includes('type="module"') || html.includes('href="style.css"')) throw new Error('Offline embedding incomplete');
-await writeFile(path.join(root, 'index.html'), html);
-console.log(`Built standalone index.html: ${(Buffer.byteLength(html)/1024).toFixed(0)} KiB, ${order.length} modules, ${Object.keys(atlas).length} embedded atlas images.`);
+await writeFile(path.join(root, 'offline.html'), html);
+// One hashed controller bundle contains the exact worker sources for its release.
+// Large immutable planetary bytes have a separate hash and remain cacheable
+// across releases. Source modules stay readable; the hosted entry loads no
+// unversioned module graph that could mix old and new implementation files.
+const dataJavascript=`Object.assign(globalThis.__EVENT_HORIZON_PLANET_DATA||(globalThis.__EVENT_HORIZON_PLANET_DATA={atlas:"",maps:{},meta:{}}),${modules.get('planet-texture-data.js').replace(/export\s+const\s+PLANET_TEXTURE_DATA\s*=/,'').trim().replace(/;$/,'')});delete globalThis.__EVENT_HORIZON_PLANET_DATA.error;`;
+const appName=`entry-app-${digest(webJavascript)}.js`,dataName=`entry-data-${digest(dataJavascript)}.js`,styleName=`entry-style-${digest(css)}.css`;
+const current=[appName,dataName,styleName],manifestPath=path.join(source,'assets/entry-manifest.json');
+let prior=null;try{prior=JSON.parse(await readFile(manifestPath,'utf8'));}catch{}
+const unchanged=prior&&JSON.stringify(prior.current)===JSON.stringify(current),previous=unchanged?prior.previous||[]:prior?.current||[];
+await Promise.all([writeFile(path.join(source,'assets',appName),webJavascript),writeFile(path.join(source,'assets',dataName),dataJavascript),writeFile(path.join(source,'assets',styleName),css)]);
+const retained=new Set([...current,...previous]);for(const name of await readdir(path.join(source,'assets')))if(/^entry-(?:app|data|style)-[a-f0-9]+\.(?:js|css)$/.test(name)&&!retained.has(name))await unlink(path.join(source,'assets',name));
+await writeFile(manifestPath,JSON.stringify({current,previous},null,2)+'\n');
+const recovery=`<script>function eventHorizonEntryFailed(){if(location.protocol==='http:'||location.protocol==='https:'){var u=new URL(location.href);if(u.searchParams.get('eh-refresh')!=='${digest(webJavascript)}'){u.searchParams.set('eh-refresh','${digest(webJavascript)}');location.replace(u.href);return;}}var p=document.createElement('p');p.setAttribute('role','alert');p.textContent='The application files could not load. Refresh to retry.';p.style.cssText='position:fixed;inset:30% 12%;z-index:9999;background:#081321;color:#e4f5ff;padding:24px;text-align:center';document.body.append(p);}</script>`;
+const planetLoader=`<script>globalThis.__EVENT_HORIZON_LOAD_PLANETS=function(){if(globalThis.__EVENT_HORIZON_PLANETS_REQUESTED)return;globalThis.__EVENT_HORIZON_PLANETS_REQUESTED=true;var s=document.createElement('script');s.src=(globalThis.__EVENT_HORIZON_ASSET_BASE||'')+'assets/${dataName}';s.onerror=function(){(globalThis.__EVENT_HORIZON_PLANET_DATA||(globalThis.__EVENT_HORIZON_PLANET_DATA={atlas:'',maps:{},meta:{}})).error='Included surface detail unavailable; using procedural surfaces.';};document.head.append(s);};</script>`;
+const entry=`<!-- Hosted entry start -->${recovery}${planetLoader}<script defer src="assets/${appName}" onerror="eventHorizonEntryFailed()"></script><!-- Hosted entry end -->`;
+const hosted=webShell.replace('<link rel="stylesheet" href="style.css">',`<link rel="stylesheet" href="assets/${styleName}">`).replace('<script type="module" src="app.js"></script>',entry);
+await writeFile(path.join(source,'index.html'),hosted);
+// GitHub Pages at repository root uses the same immutable local assets as
+// dist/. Classic scripts also work from an extracted file:// directory.
+// Rewrite explicit resource paths only: no base element can change SVG #uses.
+const rootEntry=hosted.replace(/\b(src|href)="(assets\/[^"]+|favicon\.svg)"/g,(_,attribute,url)=>`${attribute}="dist/${url}"`).replace('<!-- Hosted entry start -->','<!-- Hosted entry start --><script>globalThis.__EVENT_HORIZON_ASSET_BASE="dist/";</script>');
+await writeFile(path.join(root,'index.html'),rootEntry);
+console.log(`Hosted entry: ${appName}, shared ${dataName}; one previous release retained.`);
+console.log(`Built standalone offline.html: ${(Buffer.byteLength(html)/1024).toFixed(0)} KiB, ${order.length} modules, ${Object.keys(atlas).length} embedded atlas images.`);

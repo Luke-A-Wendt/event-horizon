@@ -25,7 +25,7 @@ r.removeTreeObject(planet.id);assert.equal(r.objects.length,1);assert.equal(r.ob
 const companion=r.addChildObject(star.id,'star',{massSolar:.5,orbitMeters:1e11});assert(companion);assert.equal(r.addChildObject(star.id,'star'),false);assert.equal(r.addChildObject(companion.id,'star'),false);
 r.time=0;r.fillObjects();const pa=r.getFocusFrame(star.id).position,pb=r.getFocusFrame(companion.id).position;pa.forEach((v,i)=>near(v+pb[i]*.5,0));
 r.removeTreeObject(star.id);assert.equal(r.objects.length,0);
-r.addChildObject('space','blackhole');r.addChildObject('primary','blackhole');assert.equal(r.addChildObject('secondary','blackhole'),false);
+r.addChildObject('space','blackhole');r.addChildObject('primary','blackhole');assert(r.addChildObject('secondary','blackhole'));assert.equal(r.addChildObject('secondary','blackhole',{massSolar:r.state.mass*1e6*r.state.binaryRatio}),false);
 const childStar=r.addChildObject('secondary','star',{radius:6});const childPlanet=r.addChildObject(childStar.id,'planet',{orbitMeters:1e10});assert(childPlanet);
 r.fillHoles();r.fillObjects();const bh=r.getFocusFrame('secondary'),st=r.getFocusFrame(childStar.id);near(Math.hypot(...st.position.map((v,i)=>v-bh.position[i]))/r.massScale,Math.hypot(6,.1));
 r.update({disk:true,jets:true,secondaryDisk:true,secondaryJets:true});r.removeTreeObject('disk');assert.equal(r.state.disk,false);assert.equal(r.state.secondaryDisk,true);r.updateTreeObject('secondary-disk',{diskColor:'#ff22aa',diskDensity:2});assert.equal(r.state.secondaryDiskColor,'#ff22aa');assert.equal(r.state.secondaryDiskDensity,2);assert(r.getObjectTree().some(n=>n.id==='secondary-disk'&&n.parentId==='secondary'));assert(r.focusTarget('secondary-disk','track'));assert(!r.focusTarget('secondary-disk','onboard'));

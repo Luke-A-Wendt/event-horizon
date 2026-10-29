@@ -39,7 +39,7 @@ for(const Renderer of [BlackHoleRenderer,CpuRenderer]){
  const f=fixture({width:360,height:520}),canvas=Renderer===CpuRenderer?new CpuCommandCanvas():f.canvas;
  if(Renderer===CpuRenderer)canvas.getBoundingClientRect=f.canvas.getBoundingClientRect;
  const r=new Renderer(canvas,{autoStart:false,bindControls:false});r.loadScene('bridge-planets');
- assert.equal(r.focusMode,'chase');assert.equal(r.getFocusFrame().type,'enterprise');
+ assert.equal(r.focusMode,'chase');assert.equal(r.getFocusFrame().type,'heighliner');
  assert(r.bridgeTime===0);assert(r.getFocusFrame().position[2]>r.configCache.bridgeRadius/2,'Starts on Caladan side');
  for(const time of [0,Math.PI/2/.12,Math.PI/.12,Math.PI*2/.12])for(const spectrum of ['visible','infrared','xray','radio','gamma','geometry']){
   r.time=time;r.update({spectrum});r.fillObjects();r.updateCameraFrame();assert(r.validateFrameGeometry());

@@ -1,3 +1,4 @@
+import { installAnomalyControls } from './anomaly-ui.js';
 import { installPilotControls } from './pilot-ui.js';
 import { installStellarControls } from './stellar-ui.js';
 import { installAnnotations } from './annotations.js';
@@ -7,6 +8,7 @@ import { snapshotRenderer, restoreRenderer } from './render-state.js';
 import { createLoadingIndicator } from './loading-indicator.js';
 import { installViewportUI } from './viewport-ui.js';
 import { renderMathGuide, renderWormholeGuide } from './math.js';
+import { renderRelativityGuide } from './relativity-math.js';
 import { renderWarpGuide } from './warp-math.js';
 import { DEFAULTS, SCENE_PRESETS, makePreset, horizonRg, iscoRg, REFERENCE_MASS } from './config.js';
 import { OBJECT_TYPES } from './objects.js';
@@ -14,7 +16,7 @@ import { OBJECT_TYPES } from './objects.js';
 const $=id=>document.getElementById(id);
 const reducedMotion=()=>matchMedia('(prefers-reduced-motion:reduce)').matches;
 const icon=name=>`<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
-let state={...DEFAULTS},renderer,lastStats,toastTimer,activePreset='disk',custom=false,lastRendererError='',viewportUI=null,pilotUI=null,stellarUI=null;
+let state={...DEFAULTS},renderer,lastStats,toastTimer,activePreset='disk',custom=false,lastRendererError='',viewportUI=null,pilotUI=null,stellarUI=null,anomalyUI=null;
 const openers=new Map();
 const loadingIndicator=createLoadingIndicator($('loading'),$('loadingReason'));
 let rendererGeneration=0,lastStatsAt=0,lastStatsPaint=-Infinity,lastStatsSignal='';
@@ -22,6 +24,9 @@ let sceneRequestSerial=0,pendingScene=null,latestSceneRevision=0,annotationsUI=n
 loadingIndicator.update(true,'Preparing your universe…',true);
 let activeTab='scene',activeComponent='disk',selectedObjectId=null,rosterSignature='';
 const objectSilhouettes={
+ heighliner:'<path d="M25 24h65v32H25M42 24v32m7-32v32M26 31h56M26 49h56"/><ellipse cx="90" cy="40" rx="12" ry="16"/><ellipse cx="90" cy="40" rx="7" ry="11"/><path d="M25 24c-12 0-12 32 0 32"/>',
+ anomaly:'<path d="M18 25c18-24 25 35 43 6s23-18 41-9M15 40c24-30 33 31 48 0s27-6 42-5M18 57c19-23 27 17 42-3s24-10 42 7"/>',
+
  dyson:'<path d="M79 16a29 29 0 1 0 0 48M79 16v48"/><ellipse cx="79" cy="40" rx="9" ry="24"/><path d="M33 40h37M44 18q-12 22 0 44M56 12q-12 28 0 56"/><circle cx="59" cy="40" r="5"/>',
  planet:'<circle cx="60" cy="40" r="23"/><path d="M44 23c12 9 2 17 15 20s8 10 16 13M41 49l10-5-2-12M66 19l-5 11 12 5"/>',
  star:'<circle cx="60" cy="40" r="15"/><path d="M60 10v9m0 42v9M30 40h9m42 0h9M39 19l6 6m30 30 6 6M39 61l6-6m30-30 6-6"/>',
@@ -65,7 +70,7 @@ $('componentControls').innerHTML=[
  panel('planet','Planet','An editable orbiting world','●',range('planetMass','Mass',.1,318,.1,' M⊕',1)+range('planetRadius','Radius',.3,8,.1,' R⊕',1)+range('planetDistance','Orbital distance',8,60,.5,' r_g',1)+color('planetColor','Surface color')+'<div class="property-grid"><div><span>MEAN DENSITY</span><strong id="planetDensity">—</strong></div><div><span>SURFACE GRAVITY</span><strong id="planetGravity">—</strong></div></div><p class="control-note">The radius sets its actual dimensions. Mass and radius set these physical diagnostics; its gravity is negligible beside a million-solar-mass hole.</p>'),
  panel('tidalStar','Disrupting star','A star feeding the darkness','☀',range('starRadius','Stellar size',.25,3,.05,'×',2)+range('starDistance','Encounter radius',7,25,.5,' r_g',1)+range('disruptionStrength','Disruption strength',.1,2,.05,'×',2)+color('starColor','Star & debris color')+'<p class="control-note">A star at its physical reference size, with a repeating prescribed tidal stream. The strength slider changes how rapidly it unravels.</p>'),
  panel('binary','Second black hole','A coupled orbital system',icon('blackhole'),toggle('secondaryWhiteHole','White-hole companion · reverse flow')+select('binaryMotion','MOTION',[['orbit','Orbit'],['merger','Illustrative merger']])+range('mergerDuration','Merger duration',10,120,1,' s',0)+range('binaryRatio','Secondary / primary mass',.1,2,.05,'',2)+range('binarySeparation','Separation',12,60,.5,' r_g',1)+range('secondarySpin','Secondary spin a*',0,.998,.001,'',3)+'<span class="sub-label">SECONDARY SPIN ORIENTATION</span>'+range('secondaryTilt','Tilt from orbital axis',0,180,1,'°',0)+range('secondaryAzimuth','Axis direction',0,360,1,'°',0)+'<p class="control-note">Circular barycentric orbits use the mass ratio and separation. Each disc and jet follows its own spin axis. Close discs are tidally limited; this is an approximate binary spacetime.</p>'),
- panel('bridge','Einstein–Rosen bridge','Ellis comparison model',icon('warp'),'<label class="field-label" for="bridgeTravelerType">TRAVELER</label><select id="bridgeTravelerType"><option value="enterprise">Starship Enterprise</option><option value="shuttle">NASA Shuttle</option><option value="astronaut">Astronaut</option><option value="blackhole">Black hole · speculative</option><option value="whitehole">White hole · speculative</option></select>'+select('bridgeMode','BRIDGE GEOMETRY',[['single','Single throat'],['crossed','Perpendicular throats · illustrative']])+range('bridgeRadius','Throat radius',3,30,.5,' traveler radii',1)+toggle('bridgeTravel','Animate traversal')+'<span class="sub-label">OTHER SIDE OF THE BRIDGE</span>'+toggle('bridgeSurfaces','Planetary endpoints')+toggle('bridgeOtherStars','Far-side stars')+range('bridgeOtherStarDensity','Star density',0,2,.05,'×',2)+range('bridgeOtherStarBrightness','Star brightness',.1,3,.05,'×',2)+range('bridgeOtherStarVariety','Color & size variety',0,2,.05,'×',2)+toggle('bridgeOtherNebula','Far-side nebula')+color('bridgeOtherColor','Far-side nebula color')+select('bridgeOtherShape','FAR-SIDE STRUCTURE',[['cloud','Turbulent cloud'],['shell','Expanding shell'],['filaments','Woven filaments'],['spiral','Spiral cloud']])+range('bridgeOtherScale','Structure scale',.2,4,.1,'×',1)+range('bridgeOtherIntensity','Brightness',0,4,.1,'×',1)+range('bridgeOtherRotation','Sky rotation',-360,360,1,'°',0)+'<p class="control-note">Near side: use Starfield and Nebula properties. Far side: toggle and shape its nebula here. The default starts in plain stars and arrives among purple clouds.</p>'+'<p class="control-note">Traversal uses an Ellis wormhole model. A classical Einstein–Rosen bridge is not traversable.</p>'),
+ panel('bridge','Einstein–Rosen bridge','Ellis comparison model',icon('warp'),'<label class="field-label" for="bridgeTravelerType">TRAVELER</label><select id="bridgeTravelerType"><option value="enterprise">Starship Enterprise</option><option value="shuttle">NASA Shuttle</option><option value="heighliner">Guild Heighliner</option><option value="astronaut">Astronaut</option><option value="blackhole">Black hole · speculative</option><option value="whitehole">White hole · speculative</option></select>'+select('bridgeMode','BRIDGE GEOMETRY',[['single','Single throat'],['crossed','Two crossed charts · illustrative']])+select('bridgeGridOrientation','GRID PLANE',[['perpendicular','Perpendicular to flight'],['parallel','Along the flight plane']])+select('bridgeLifecycle','PORTAL SEQUENCE',[['steady','Always open'],['open-transit-close','Open · cross · close']])+range('bridgeRadius','Throat radius',.61,30,.01,' traveler radii',2)+toggle('bridgeTravel','Animate traversal')+toggle('warpField','Enterprise warp envelope · comparison').replace('id="warpField"','id="bridgeWarpEnvelope"')+'<p class="control-note" id="bridgePhaseNote"></p>'+'<span class="sub-label">OTHER SIDE OF THE BRIDGE</span>'+toggle('bridgeSurfaces','Planetary endpoints')+select('bridgeWorlds','ENDPOINT WORLDS',[['caladan','Caladan & Arakas'],['earth-proxima','Earth & Proxima Centauri']])+toggle('bridgeOtherStars','Far-side stars')+range('bridgeOtherStarDensity','Star density',0,2,.05,'×',2)+range('bridgeOtherStarBrightness','Star brightness',.1,3,.05,'×',2)+range('bridgeOtherStarVariety','Color & size variety',0,2,.05,'×',2)+toggle('bridgeOtherNebula','Far-side nebula')+color('bridgeOtherColor','Far-side nebula color')+select('bridgeOtherShape','FAR-SIDE STRUCTURE',[['cloud','Turbulent cloud'],['shell','Expanding shell'],['filaments','Woven filaments'],['spiral','Spiral cloud']])+range('bridgeOtherScale','Structure scale',.2,4,.1,'×',1)+range('bridgeOtherIntensity','Brightness',0,4,.1,'×',1)+range('bridgeOtherRotation','Sky rotation',-360,360,1,'°',0)+'<p class="control-note">Near side: use Starfield and Nebula properties. Far side: toggle and shape its nebula here. The default starts in plain stars and arrives among purple clouds.</p>'+'<p class="control-note">Traversal uses an Ellis wormhole model. A classical Einstein–Rosen bridge is not traversable.</p>'),
  panel('jets','Polar jets','Outflows along each spin axis','↟',select('jetStructure','PLASMA STRUCTURE',[['steady','Continuous outflow'],['knots','Bright knots'],['helix','Helical filaments']])+color('jetColor','Jet color')+range('jetSpread','Opening spread',.25,3,.05,'×',2)+range('jetLength','Length',.3,3,.1,'×',1)+range('jetIntensity','Brightness',.1,3,.1,'×',1)+'<p class="control-note">The two outflows follow the local spin axis. Jets are an illustrative plasma model, not matter escaping the horizon.</p>'),
  panel('secondaryDisk','Companion accretion disc','Material around the second black hole',icon('blackhole'),select('secondaryDiskStyle','APPEARANCE',[['thermal','Thermal plasma'],['hydrogen','Hydrogen-rich glow'],['helium','Helium-rich glow'],['dust','Cool dust'],['nebula','Nebulous gas'],['radiant','Radiant plasma'],['ribbons','Flowing ribbons']])+select('secondaryDiskPalette','COLOR MODEL',[['physical','Physical emission palette'],['artistic','Artistic · use chosen color'],['rainbow','Rainbow · artistic']])+color('secondaryDiskColor','Disc color')+range('secondaryDiskOuter','Outer radius',7,40,.5,' r_g',1)+range('secondaryDiskThickness','Thickness',.2,4,.1,'×',1)+range('secondaryDiskDensity','Optical density',.1,2,.05,'×',2)),
  panel('secondaryJets','Companion polar jets','Aligned with the companion spin',icon('arrow'),select('secondaryJetStructure','PLASMA STRUCTURE',[['steady','Continuous outflow'],['knots','Bright knots'],['helix','Helical filaments']])+color('secondaryJetColor','Jet color')+range('secondaryJetSpread','Opening spread',.25,3,.05,'×',2)+range('secondaryJetLength','Length',.3,3,.1,'×',1)+range('secondaryJetIntensity','Brightness',.1,3,.1,'×',1))
@@ -190,18 +195,19 @@ function exploreWarp(){
  selectedObjectId=object.id;syncRendererState();markCustom();renderObjectManager();viewportUI?.select(object.id);toast('Enterprise ready. Its warp drive, size, placement, and viewpoints are in this panel.');
 }
 let parentEligibilityCache={key:'',options:[]};
+function setObjectFieldHidden(id,hidden){const input=$(id),label=document.querySelector(`label[for="${id}"]`);if(input)input.hidden=hidden;if(label)label.hidden=hidden;}
 function renderObjectManager(snapshot=renderer?.getState?.()||{}){
  const items=snapshot.objects||objects(),context=refreshObjectContext();
  if(snapshot.warp!==undefined&&state.warp!==snapshot.warp){state.warp=snapshot.warp;updateMetrics();}
  if(snapshot.selectedId!==undefined&&snapshot.selectedId!==null)selectedObjectId=snapshot.selectedId;
  if(!items.some(o=>String(o.id)===String(selectedObjectId)))selectedObjectId=items[0]?.id??null;
- const selected=items.find(o=>String(o.id)===String(selectedObjectId));
+ const selected=items.find(o=>String(o.id)===String(selectedObjectId));anomalyUI?.update(selected);
  const rosterItems=viewportUI?items.filter((o,i)=>i<12||String(o.id)===String(selectedObjectId)):items;
  const signature=JSON.stringify(rosterItems.map(o=>[o.id,o.type,o.scale,String(o.id)===String(selectedObjectId),o.focused]));
  if(signature!==rosterSignature){rosterSignature=signature;$('objectRoster').innerHTML=rosterItems.map((o,i)=>`<div class="object-roster-row ${String(o.id)===String(selectedObjectId)?'selected':''}"><button data-select-object="${o.id}" aria-pressed="${String(o.id)===String(selectedObjectId)}"><span class="roster-icon"><svg viewBox="0 0 120 80" aria-hidden="true">${objectSilhouettes[o.type]||objectSilhouettes.probe}</svg></span><span><strong>${escapeHtml(o.label||o.type)}</strong><small>${String(i+1).padStart(2,'0')} · ${o.focused?'Following':`${Number(o.scale).toFixed(2)}× size`}</small></span><b>›</b></button><button class="roster-delete" data-remove-object="${o.id}" aria-label="Delete ${escapeHtml(o.label||o.type)}" title="Delete this object">×</button></div>`).join('');}
  $('objectCount').textContent=items.length;$('objectEmpty').hidden=items.length>0;$('objectEditor').hidden=!selected;$('addObject').disabled=items.length>=(snapshot.maxObjects||10)&&context.kind!=='bridge';$('clearObjects').disabled=!items.length;
  if(selected){
-  const opacitySupported=['star','planet','moon','probe','enterprise','shuttle','iss','astronaut','dyson'].includes(selected.type)&&!renderer?.getStellarInfo?.(selected.id)?.collapsed,geometry=state.spectrum==='geometry',tzo=selected.type==='star'&&selected.starStyle==='tzo';
+  const opacitySupported=['star','planet','moon','probe','enterprise','shuttle','iss','astronaut','heighliner','dyson'].includes(selected.type)&&!renderer?.getStellarInfo?.(selected.id)?.collapsed,geometry=state.spectrum==='geometry',tzo=selected.type==='star'&&selected.starStyle==='tzo';
   $('dysonProperties').hidden=selected.type!=='dyson';
   if(selected.type==='dyson'){const radius=selected.renderRadiusMeters||149597870700;if(document.activeElement!==$('dysonRadius'))$('dysonRadius').value=Math.log10(radius/149597870700);if(document.activeElement!==$('dysonRadiusMeters'))$('dysonRadiusMeters').value=radius;$('dysonRadiusValue').textContent=(radius/149597870700).toLocaleString(undefined,{maximumSignificantDigits:3})+' AU';if(document.activeElement!==$('dysonCutaway'))$('dysonCutaway').value=selected.dysonCutaway??0;$('dysonCutawayValue').textContent=Math.round((selected.dysonCutaway??0)*100)+'%';rangeFill($('dysonRadius'));rangeFill($('dysonCutaway'));}
   $('objectOpacity').hidden=!opacitySupported;$('editOpacity').disabled=geometry;
@@ -217,15 +223,19 @@ function renderObjectManager(snapshot=renderer?.getState?.()||{}){
   if(document.activeElement!==$('editNestedPhase')){$('editNestedPhase').value=((selected.phase*180/Math.PI)%360+360)%360;$('editNestedPhaseValue').textContent=Math.round(Number($('editNestedPhase').value))+'°';rangeFill($('editNestedPhase'));}
   $('editBodyColorLabel').textContent=selected.surfaceId>0?'Tint · white is neutral':'Color';
   $('surfaceProfileField').hidden=!['planet','moon'].includes(selected.type);$('editBodyStyle').disabled=!!selected.surfaceId;
-  $('bodyAppearance').hidden=!['star','planet','moon','ring','belt'].includes(selected.type);$('editBodyStyle').hidden=!['star','planet','moon'].includes(selected.type);$('stellarAppearance').hidden=selected.type!=='star';$('ringAppearance').hidden=!['ring','belt'].includes(selected.type);$('physicalOrbitProperties').hidden=selected.type==='dyson'||['space','primary','secondary'].includes(selected.parentId||'space')||!!selected.bridgeTraveler;
+  const compact=['blackhole','whitehole'].includes(selected.type),physicalOrbit=Number.isFinite(selected.orbitMeters)&&selected.orbitMeters>0&&selected.parentId!=='space';
+  $('bodyAppearance').hidden=!['star','planet','moon','ring','belt','blackhole','whitehole'].includes(selected.type);setObjectFieldHidden('editBodyStyle',!['star','planet','moon'].includes(selected.type));setObjectFieldHidden('editRadiusMeters',compact);setObjectFieldHidden('editRotation',compact);setObjectFieldHidden('editMassSolar',false);$('editBodyColor').closest('label').hidden=compact;$('stellarAppearance').hidden=selected.type!=='star';$('ringAppearance').hidden=!['ring','belt'].includes(selected.type);$('physicalOrbitProperties').hidden=selected.type==='dyson'||(!physicalOrbit&&['space','primary','secondary'].includes(selected.parentId||'space'))||!!selected.bridgeTraveler;
+  $('editScale').hidden=compact;const scaleHeader=document.querySelector('label[for="editScale"]')?.closest('.range-header');if(scaleHeader)scaleHeader.hidden=compact;
   $('freeDriveObject').hidden=!['enterprise','shuttle'].includes(selected.type)||!!selected.bridgeTraveler;$('freeDriveNote').hidden=$('freeDriveObject').hidden;$('freeDriveObject').textContent=selected.freeDrive?'Return to orbit':'Drive';
 
-  const length=Number(selected.lengthMeters);$('objectDimensions').textContent=`Physical length / span: ${formatMeters(length)}`;
+  const length=Number(selected.lengthMeters);$('objectDimensions').textContent=compact?`Event-horizon radius: ${formatMeters(selected.renderRadiusMeters||length/2)} · set by mass`:`Physical length / span: ${formatMeters(length)}`;
+  const radiusFloor=renderer?.minimumObjectRadiusRg?.(selected)??2.2;$('editRadius').min=String(radiusFloor);$('editRadius').step='any';
   const fields=[['editScale',selected.scale,`${Number(selected.scale).toFixed(2)}×`],['editRadius',selected.radius,`${Number(selected.radius).toFixed(2)} r_g`],['editHeight',selected.height??0,`${Number(selected.height??0).toFixed(2)} r_g`],['editPhase',((selected.phase*180/Math.PI)%360+360)%360,`${(((selected.phase*180/Math.PI)%360+360)%360).toFixed(0)}°`]];
   for(const [id,value,label] of fields){if(document.activeElement!==$(id)){$(id).value=value;$(`${id}Value`).textContent=label;rangeFill($(id));}}
   $('trackObject').setAttribute('aria-pressed',String(String(snapshot.focusId)===String(selected.id)&&snapshot.focusMode==='track'));$('onboardObject').setAttribute('aria-pressed',String(String(snapshot.focusId)===String(selected.id)&&snapshot.focusMode==='onboard'));
   const bridgeShip=selected.bridgeTraveler||(state.bridge&&String(snapshot.bridgeObjectId)===String(selected.id)),local=selected.placement==='local'&&(!selected.parentId||selected.parentId==='space');
   $('orbitalPlacement').hidden=selected.type==='dyson'||local||bridgeShip||!['primary','secondary'].includes(selected.parentId||'primary');$('localPlacement').hidden=!local;$('bridgeTravelerProperties').hidden=!bridgeShip;
+  for(const id of ['editRadius','editPhase']){const header=document.querySelector(`label[for="${id}"]`)?.closest('.range-header');$(id).hidden=physicalOrbit;if(header)header.hidden=physicalOrbit;}$('editPhaseNote').hidden=physicalOrbit;
   $('localPlacementContext').textContent=`Position relative to ${selected.referenceLabel||context.referenceLabel||'the scene origin'}`;
   for(const key of ['x','y','z']){const input=$('edit'+key.toUpperCase());if(document.activeElement!==input)input.value=Number(selected[key]||0).toFixed(2);}
   if(document.activeElement!==$('editHeading')){$('editHeading').value=selected.headingDegrees??((selected.phase||0)*180/Math.PI+360)%360;$('editHeadingValue').textContent=Math.round(Number($('editHeading').value))+'°';rangeFill($('editHeading'));}
@@ -236,10 +246,12 @@ function renderObjectManager(snapshot=renderer?.getState?.()||{}){
   const traveler=items.find(o=>o.bridgeTraveler||String(o.id)===String(snapshot.bridgeObjectId));if(traveler&&document.activeElement!==$('bridgeTravelerType'))$('bridgeTravelerType').value=traveler.type;
   const isWarpShip=state.warp&&String(snapshot.warpObjectId)===String(selected.id),guided=isWarpShip&&state.warpScenario==='excursion',isolated=isWarpShip&&state.warpScenario==='isolated';
   const motion=selected.motion||'orbit';if(document.activeElement!==$('editMotion'))$('editMotion').value=motion;$('editMotion').disabled=isWarpShip||bridgeShip;$('editMotionNote').textContent=selected.motionDescription||(motion==='infall'?'An illustrative slow approach that ends outside the horizon.':motion==='horizon'?'A fixed viewpoint just outside the horizon; this is not a physical hover solution.':'A prescribed circular orbit.');$('editRadiusLabel').textContent=motion==='infall'?'Starting distance from black hole':'Distance from black hole';
+  if(state.blackHole&&!local&&!bridgeShip){$('editMotionNote').textContent+=' Distance includes radius and height. Near-horizon paths are prescribed; circular motion there is not a stable orbit.';}
   $('editRadius').disabled=guided||isolated||bridgeShip||motion==='horizon';$('editHeight').disabled=guided||isolated||bridgeShip||motion==='horizon';$('editPhase').disabled=guided||bridgeShip;$('editPhaseLabel').textContent=isolated?'Heading':'Current orbital phase';$('editPhaseNote').textContent=bridgeShip?'Bridge properties control the traveler and the crossing. Turn Animate traversal off to pause its path.':isolated?'Heading turns the ship and its direction of travel. Pause time for precise placement.':guided?'This route sets the direction and timing of the encounter. Choose an orbital route to edit its phase.':'Phase moves the object around its orbit immediately. Pause time for precise placement.';
   $('objectCameraNote').textContent=selected.type==='dyson'?'Explore interior enters the hollow habitat. Drag to look around; the cutaway opens toward one side, and setting it to zero closes the shell.':selected.type==='shuttle'?'Ride looks around from the shuttle; Chase follows from behind. Zoom out to track without changing your heading.':bridgeShip?'This traveler follows the bridge’s route. Physical size and cameras remain editable; Bridge properties let you change the traveler.':isolated?'The ship travels with its field. Size and heading remain editable; choose an orbital route to change its distance from a black hole.':guided?'This ship follows the approach-and-return path. Size and cameras remain editable; choose Orbit a black hole to edit its orbit.':'Track to orbit around this object. On board lets you look in every direction while it moves.';
  }
  stellarUI?.update(selected?.id);
+ if(['blackhole','whitehole'].includes(selected?.type))for(const id of ['editRadiusMeters','editRotation','editBodyStyle'])setObjectFieldHidden(id,true);
  if(renderer){renderObserver(snapshot);if(snapshot.viewMode&&snapshot.viewMode!==state.viewMode)syncViewMode(snapshot.viewMode);}viewportUI?.refresh(snapshot);
  pilotUI?.update();
 }
@@ -294,7 +306,7 @@ async function initRenderer(cpu=false){
   const previous=renderer,preserved=previous?snapshotRenderer(previous):null;previous?.dispose();handleError(null);$('cpuFallbackPrompt').hidden=true;loadingIndicator.update(true,cpu?'Preparing the CPU preview…':'Preparing graphics…',true);
   // Each backend needs its own canvas; a transferred OffscreenCanvas cannot be reused.
   if(previous){const fresh=$('universe').cloneNode(false);$('universe').replaceWith(fresh);}
-  renderer=createRenderHost($('universe'),{onStats:stats=>{if(generation===rendererGeneration)handleStats(stats);},onFrame:frame=>{if(generation===rendererGeneration)annotationsUI?.update(frame);},onError:error=>{if(generation===rendererGeneration)handleError(error);},onCanvasChanged:()=>viewportUI?.rendererChanged()},{cpu});
+  renderer=createRenderHost($('universe'),{onStats:stats=>{if(generation===rendererGeneration)handleStats(stats);},onFrame:frame=>{if(generation===rendererGeneration)annotationsUI?.update(frame);},onError:error=>{if(generation===rendererGeneration)handleError(error);},onCanvasChanged:()=>viewportUI?.rendererChanged()},{cpu,presentationPaused:!!document.querySelector('dialog[open]')});
   if(preserved){
    // Retry and explicit CPU opt-in keep the latest scene, camera, and objects,
    // including edits made while the previous backend was still starting.
@@ -302,7 +314,7 @@ async function initRenderer(cpu=false){
    for(const key of Object.keys(DEFAULTS))if(key in preserved.state)state[key]=preserved.state[key];
    selectedObjectId=preserved.selectedId??selectedObjectId;
   }else{renderer.loadScene(activePreset);renderer.update(state);}
-  if(!cpu)renderer.setQuality($('quality').value);$('quality').disabled=cpu;
+  renderer.setQuality($('quality').value);$('quality').disabled=false;
   renderer.setPresentationPaused(!!document.querySelector('dialog[open]'));
   $('cpuQualityNotice')&&($('cpuQualityNotice').hidden=!cpu);viewportUI?.rendererChanged();handleStats(renderer.getState());
   window.observatory={get renderer(){return renderer;},get state(){return {...state};}};
@@ -368,21 +380,27 @@ $('distanceForm').addEventListener('submit',e=>{e.preventDefault();const value=N
 const qualityNotes={low:'Fixed Low quality. Select Adaptive to let the mode change with frame rate.',medium:'Fixed Medium quality. Select Adaptive to let the mode change with frame rate.',high:'Fixed High quality. Select Adaptive to let the mode change with frame rate.',ultra:'Maximum detail, even at low FPS. Pause to compose a shot, then Save image.',adaptive:'Selects Low, Medium, or High to stay at 30 FPS or above.'};
 const qualityName=value=>({low:'Low',medium:'Medium',high:'High',ultra:'Ultra'}[value]||'Low');
 function updateQualityStatus(stats={}){
+ if($('bridgePhaseNote'))$('bridgePhaseNote').textContent=stats.bridge?stats.bridgePhase||'':'';
  const fps=Number.isFinite(stats.fps)?`${Math.round(stats.fps)} FPS`:'— FPS';$('fpsCorner').textContent=fps;$('fps').textContent=fps;
- if(stats.cpu){$('effectiveQuality').textContent='CPU preview';$('gpuLabel').textContent='CPU';$('qualityTier').textContent='PREVIEW';$('renderStatus').setAttribute('aria-label',`CPU preview, ${fps}`);$('qualityNote').textContent='Simplified local preview. GPU graphics provide much better image quality.';if(Number.isFinite(stats.fps))$('fps').textContent=`${Math.round(stats.fps)} FPS`;$('quality').disabled=true;return;}
+ const backend=stats.cpu||stats.gpuUnavailable?'GPU OFF':'GPU ON';$('backendStatus').textContent=backend;$('backendStatus').classList.toggle('is-cpu',!!stats.cpu);$('quality').disabled=false;
  const selected=$('quality').value,effective=qualityName(stats.effectiveQuality||(selected==='adaptive'?'low':selected));
  const mode=selected==='adaptive'?`Adaptive · ${effective}`:`Manual · ${effective}`;
  if($('effectiveQuality').textContent!==mode)$('effectiveQuality').textContent=mode;
  if(Number.isFinite(stats.fps))$('fps').textContent=`${Math.round(stats.fps)} FPS`;
  $('performanceControls').classList.toggle('is-adjusting',selected==='adaptive'&&stats.adaptiveStatus==='limited');
  $('gpuLabel').textContent=selected==='adaptive'?'ADAPTIVE':'MANUAL';$('qualityTier').textContent=effective.toUpperCase();
- $('renderStatus').setAttribute('aria-label',`${mode}, ${fps}`);
+ $('renderStatus').setAttribute('aria-label',`${mode}, ${fps}, ${backend}`);
  let message=qualityNotes[selected];
+ if(stats.cpu){
+  message=selected==='adaptive'?`CPU preview · ${effective}. Simplifies geometry to target 15–30 FPS, and checks higher modes when there is room.`:`CPU preview · ${effective}. Resolution and scene detail use a separate CPU budget. GPU graphics provide much better image quality.`;
+  if($('qualityNote').textContent!==message)$('qualityNote').textContent=message;return;
+ }
  if(stats.shaderCompiling)message='Preparing the selected graphics. Your current view stays in place.';
  else if(selected==='adaptive'){
   const messages={warming:'Measuring frame rate, then checking higher modes.',probing:`Trying ${effective}. Adaptive keeps it if it stays at 30 FPS or above.`,stable:effective==='High'?'Highest automatic mode. Adaptive steps down if FPS stays below 30.':`Using ${effective}. Higher modes are checked again while motion stays smooth.`,limited:effective==='Low'?'Low is the minimum. Adaptive will check higher modes again.':`Using ${effective} after a drop below 30 FPS. Higher modes will be checked again.`};
   message=messages[stats.adaptiveStatus]||qualityNotes.adaptive;
  }
+ if(stats.surfaceWarning)message+=' Surface maps are unavailable; procedural surfaces remain active.';else if(stats.surfaceRefining)message+=' Refining nearby surfaces.';
  if($('qualityNote').textContent!==message)$('qualityNote').textContent=message;
 }
 $('quality').addEventListener('change',e=>{renderer?.setQuality(e.target.value);updateQualityStatus(renderer?.getState());});
@@ -409,10 +427,12 @@ $('clearObjects').addEventListener('click',()=>{renderer?.clearObjects();selecte
 $('resetAll').addEventListener('click',()=>{applyPreset('disk');$('quality').value='adaptive';renderer?.setQuality('adaptive');updateQualityStatus(renderer?.getState());$('orbitRadius').value='12';$('orbitPhase').value='0';$('objectType').value='planet';$('objectScale').value='1';updateObjectPreview();updateObjectScale();$('radiusValue').textContent='12 r_g';$('phaseValue').textContent='0°';rangeFill($('orbitRadius'));rangeFill($('orbitPhase'));$('objectCount').textContent='0';$('addObject').disabled=false;$('addObjectPanel').open=true;setFeature('scene');toast('Original starfield and accretion disc restored.');});
 
 function pauseCoveredView(paused){renderer?.setPresentationPaused(paused);}
-function openDialog(id,button){openers.set(id,button);$(id).showModal();pauseCoveredView(true);}
+function openDialog(id,button){openers.set(id,button);if(!$(id).open)$(id).showModal();pauseCoveredView(true);}
 function setupDialog(id,closeId){$(closeId).addEventListener('click',()=>$(id).close());$(id).addEventListener('close',()=>{pauseCoveredView(!!document.querySelector('dialog[open]'));openers.get(id)?.focus();});$(id).addEventListener('click',e=>{const r=$(id).getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$(id).close();});}
 document.querySelectorAll('[data-open-atlas]').forEach(button=>button.addEventListener('click',()=>openDialog('atlasDialog',button)));setupDialog('atlasDialog','closeAtlas');
-let mathGuideReady=false,warpGuideReady=false,bridgeGuideReady=false;
+let mathGuideReady=false,warpGuideReady=false,bridgeGuideReady=false,relativityGuideReady=false;
+document.querySelectorAll('[data-open-relativity]').forEach(button=>button.addEventListener('click',()=>{openDialog('relativityDialog',button);if(!relativityGuideReady){renderRelativityGuide($('relativityContent'));relativityGuideReady=true;}}));setupDialog('relativityDialog','closeRelativity');
+$('relativityContent').addEventListener('click',event=>{const sectionButton=event.target.closest?.('[data-relativity-section]');if(sectionButton){const target=$(sectionButton.dataset.relativitySection);if(target){target.open=true;requestAnimationFrame(()=>target.scrollIntoView({block:'start',behavior:reducedMotion()?'instant':'smooth'}));}return;}const jump=event.target.closest?.('[data-relativity-target]');if(!jump)return;const selectors={blackholes:'[data-open-math]',warp:'[data-open-warp]',wormholes:'[data-open-bridge]'},selector=selectors[jump.dataset.relativityTarget],button=selector&&$('mathHubDialog').querySelector(selector);if(button){$('relativityDialog').close();button.click();}});
 document.querySelectorAll('[data-open-bridge]').forEach(button=>button.addEventListener('click',()=>{openDialog('bridgeDialog',button);if(!bridgeGuideReady){renderWormholeGuide($('bridgeMathContent'));bridgeGuideReady=true;}}));setupDialog('bridgeDialog','closeBridge');
 document.querySelectorAll('[data-open-math]').forEach(button=>button.addEventListener('click',()=>{openDialog('mathDialog',button);if(!mathGuideReady){renderMathGuide($('mathContent'));mathGuideReady=true;}const section=button.dataset.section;if(!section)return;const target=$(section);if(target){target.open=true;requestAnimationFrame(()=>target.scrollIntoView({block:'start'}));}}));setupDialog('mathDialog','closeMath');
 document.querySelectorAll('[data-open-warp]').forEach(button=>button.addEventListener('click',()=>{openDialog('warpDialog',button);if(!warpGuideReady){renderWarpGuide($('warpMathContent'));warpGuideReady=true;}}));setupDialog('warpDialog','closeWarp');
@@ -433,9 +453,30 @@ if(reducedMotion())state.paused=true;syncControls();updateObjectPreview();update
 viewportUI=installViewportUI({renderer:()=>renderer,state:()=>state,objects,selectObject,startDrive:id=>pilotUI?.start(id),setFeature,stageMutation,syncRendererState,markCustom,selectComponent,updateParameter,setPaused,syncViewMode,toast,activePreset:()=>activePreset,refresh:()=>{lastStats=renderer?.getState();if(lastStats){syncViewMode(lastStats.viewMode);renderObjectManager(lastStats);}},openDialog,openScenes:button=>openDialog('atlasDialog',button),openHelp:button=>openDialog('helpDialog',button),onDialogClose:id=>{pauseCoveredView(!!document.querySelector('dialog[open]'));openers.get(id)?.focus();}});
 if(typeof installPilotControls==='function')pilotUI=installPilotControls({mount:$('pilotControls'),closePanels:()=>viewportUI?.close(),renderer:()=>renderer,state:()=>state,objects,setPaused,updateParameter,refresh:()=>{syncRendererState();renderObjectManager();viewportUI?.close();}});
 if(typeof installStellarControls==='function')stellarUI=installStellarControls({container:$('objectEditor'),renderer:()=>renderer,changed:()=>{syncRendererState();markCustom();renderObjectManager();}});
+if(typeof installAnomalyControls==='function')anomalyUI=installAnomalyControls({container:$('objectEditor'),renderer:()=>renderer,changed:()=>{syncRendererState();markCustom();renderObjectManager();}});
 $('objectEditor').prepend($('objectOpacity'));
 if(typeof installAnnotations==='function')annotationsUI=installAnnotations($('scene'),()=>renderer,{onSelect:id=>viewportUI?.select(id),onTrack:id=>viewportUI?.track(id)});
 if(typeof installSceneFiles==='function')sceneFilesUI=installSceneFiles({saveButton:$('sceneSave'),loadButton:$('sceneLoad'),fileInput:$('sceneFileInput'),status:$('sceneFileStatus'),renderer:()=>renderer,context:()=>sceneRequestSerial,load:loadSceneSnapshot,onMessage:message=>toast(message)});
+function showVisitEntrance(){
+ $('quality').value='adaptive';
+ if($('scene').classList.contains('pseudo-fullscreen')){$('scene').classList.remove('pseudo-fullscreen');$('fullscreen').setAttribute('aria-label','Expand observatory');renderer?.resize();}
+ viewportUI?.resetDiscovery();
+ document.querySelectorAll('[data-scene-filter]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.sceneFilter==='All')));
+ document.querySelectorAll('[data-scene-category]').forEach(card=>card.hidden=false);
+ if(window.history){window.history.scrollRestoration='manual';if(window.location?.hash)window.history.replaceState(null,'',window.location.pathname+window.location.search);}
+ window.scrollTo?.({top:0,left:0,behavior:'instant'});
+ openDialog('atlasDialog',$('viewportScenes'));$('atlasDialog').scrollTop=0;const content=$('atlasDialog').querySelector('.dialog-content');if(content)content.scrollTop=0;
+}
+function restartVisit(){
+ document.querySelectorAll('dialog[open]').forEach(dialog=>dialog.close());viewportUI?.close();
+ $('quality').value='adaptive';renderer?.setQuality('adaptive');
+ // applyPreset clears the previous scene before yielding; the gallery remains
+ // visible throughout preparation, and opening it never counts as discovery.
+ const loading=applyPreset('disk');showVisitEntrance();return loading;
+}
+document.querySelector('.brand').addEventListener('click',event=>{if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();void restartVisit();});
+window.addEventListener('pageshow',event=>{if(event.persisted)void restartVisit();});
+showVisitEntrance();
 initRenderer();renderObjectManager();
 const statsWatchdog=setInterval(()=>{if(lastStatsAt&&performance.now()-lastStatsAt>2200&&!document.hidden&&!document.querySelector('dialog[open]')){$('fpsCorner').textContent='0 FPS';if(lastRendererError||!$('cpuFallbackPrompt').hidden)return;loadingIndicator.update(true,pendingScene?`Opening ${SCENE_PRESETS.find(p=>p.id===pendingScene.id)?.title||'scene'}…`:'Waiting for the next frame…');}},750);
 window.addEventListener('pagehide',event=>{if(!event.persisted){clearInterval(statsWatchdog);loadingIndicator.dispose();sceneFilesUI?.dispose();pilotUI?.dispose();stellarUI?.dispose();annotationsUI?.dispose();viewportUI?.dispose();renderer?.dispose();}});

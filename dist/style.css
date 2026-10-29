@@ -473,7 +473,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 
 /* Flight, navigation, and scene overlays share explicit vertical zones. */
 .scene.has-viewport-ui{--flight-strip:0px;--dock-height:60px;--dock-bottom:max(15px,env(safe-area-inset-bottom));--overlay-bottom:calc(var(--dock-bottom) + var(--dock-height) + 14px)}
-.scene.has-flight-controls{--flight-strip:52px;--dock-bottom:calc(var(--flight-strip) + 8px)}
+.scene.has-flight-controls{--flight-strip:76px;--dock-bottom:calc(var(--flight-strip) + 8px)}
 .scene.has-flight-controls #universe,.scene.has-flight-controls .scene-presented-frame{height:calc(100% - var(--flight-strip))!important;bottom:auto!important}
 .scene.has-flight-controls .scene-annotations{height:calc(100% - var(--flight-strip))!important;bottom:auto}
 .scene.has-viewport-ui .viewport-dock{bottom:var(--dock-bottom);height:var(--dock-height)}
@@ -484,7 +484,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .scene.has-viewport-ui .viewport-inspector{top:74px;bottom:var(--overlay-bottom);max-height:none}
 .scene.viewport-panel-open .scene-tools,.scene.viewport-panel-open .scene-bottom,.scene.viewport-panel-open .quick-drive,.scene.pilot-camera-open .scene-tools{visibility:hidden}
 .scene.has-flight-controls .cpu-quality-notice{bottom:calc(var(--overlay-bottom) + 80px)}
-.pilot-console{position:absolute;inset:auto 0 0;height:var(--flight-strip,52px);width:100%;z-index:12;display:grid;grid-template-columns:40px minmax(0,1fr) 40px;grid-template-rows:minmax(0,1fr);gap:12px;align-items:center;padding:9px 16px;background:#081320;border-top:1px solid #284156;color:#c9e4f5;box-sizing:border-box}
+.pilot-console{position:absolute;inset:auto 0 0;height:var(--flight-strip,76px);width:100%;z-index:12;display:grid;grid-template-columns:40px minmax(0,1fr) 40px;grid-template-rows:minmax(0,1fr);gap:12px;align-items:center;padding:9px 16px;background:#081320;border-top:1px solid #284156;color:#c9e4f5;box-sizing:border-box}
 .pilot-console[hidden]{display:none}
 .pilot-console button{min-height:30px;border:1px solid #36536b;border-radius:6px;background:#10283b;color:#d1ebfc;cursor:pointer;padding:4px 9px;touch-action:manipulation}
 .pilot-console #pilotBrakeSpeed{font-size:10px;white-space:nowrap}
@@ -511,7 +511,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
  .pilot-console #pilotBrakeSpeed{width:30px;min-height:32px;padding:0;font-size:0}
  .pilot-console #pilotBrakeSpeed::after{content:attr(data-short-label);font:11px ui-monospace,monospace}
  .pilot-actions{gap:4px}.pilot-actions button{width:28px;min-height:32px;height:32px;padding:3px}
- .pilot-power{grid-template-columns:minmax(0,1fr) 32px;gap:4px;font-size:10px}.pilot-power>span:first-child{display:none}.pilot-power output{font-size:10px}
+ .pilot-power{grid-template-columns:minmax(0,1fr) 32px;gap:4px;font-size:10px}.pilot-power output{font-size:10px}
  .scene.has-flight-controls .scene-bottom{right:60px;max-width:calc(100% - 77px);gap:7px}.pilot-telemetry{gap:4px}.pilot-telemetry>div{gap:12px}.pilot-telemetry output{font-size:10px}
  .scene.has-flight-controls .scene-heading{max-width:calc(100% - 78px)}
  .site-header #mathNav{font-size:16px}
@@ -557,12 +557,18 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 /* Single-row flight controls leave the rendered view unobstructed. */
 .site-header #mathNav{font-size:17px;font-weight:800;letter-spacing:.5px}
 @media(max-width:600px){.site-header #mathNav{font-size:16px}}
-.pilot-shuttle .pilot-power input{appearance:none;-webkit-appearance:none;height:28px;border-radius:8px;background:transparent}
-.pilot-shuttle .pilot-power input::-webkit-slider-runnable-track{height:5px;border:0;border-radius:8px;background:linear-gradient(to right,#78b9df 0%,#78b9df 40%,#a74b59 40%,#a74b59 100%)}
-.pilot-shuttle .pilot-power input::-moz-range-track{height:5px;border:0;border-radius:8px;background:linear-gradient(to right,#78b9df 0%,#78b9df 40%,#a74b59 40%,#a74b59 100%)}
-.pilot-shuttle .pilot-power input::-moz-range-progress{height:5px;background:transparent}
-.pilot-shuttle .pilot-power input::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:15px;height:15px;border-radius:50%;border:2px solid #d4eaff;background:#80b8db;margin-top:-5px;box-shadow:0 0 0 2px #071623}
-.pilot-shuttle .pilot-power input::-moz-range-thumb{width:12px;height:12px;border-radius:50%;border:2px solid #d4eaff;background:#80b8db;box-shadow:0 0 0 2px #071623}
+/* Both vehicles use the same power track and thumb. Color marks fixed
+   operating ranges, never a progress fill. */
+.pilot-console{--pilot-risk-start:80%}
+.pilot-console.pilot-shuttle{--pilot-risk-start:40%}
+.pilot-sliders input[type=range]{appearance:none;-webkit-appearance:none;height:28px;border:0;border-radius:8px;background:transparent;box-shadow:none;outline-offset:2px}
+.pilot-sliders input[type=range]::-webkit-slider-runnable-track{height:5px;border:0;border-radius:8px;background:#607b90}
+.pilot-sliders input[type=range]::-moz-range-track{height:5px;border:0;border-radius:8px;background:#607b90}
+.pilot-sliders .pilot-power input::-webkit-slider-runnable-track{background:linear-gradient(to right,#78b9df 0%,#78b9df var(--pilot-risk-start),#b95261 var(--pilot-risk-start),#b95261 100%)}
+.pilot-sliders .pilot-power input::-moz-range-track{background:linear-gradient(to right,#78b9df 0%,#78b9df var(--pilot-risk-start),#b95261 var(--pilot-risk-start),#b95261 100%)}
+.pilot-sliders input[type=range]::-moz-range-progress{height:5px;background:transparent}
+.pilot-sliders input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:15px;height:15px;border-radius:50%;border:2px solid #d4eaff;background:#80b8db;margin-top:-5px;box-shadow:0 0 0 2px #071623}
+.pilot-sliders input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;border:2px solid #d4eaff;background:#80b8db;box-shadow:0 0 0 2px #071623}
 /* While piloting on a phone, navigation moves above the view; the lower HUD
    can then sit directly above the reserved flight strip without stacking over
    the centered craft. Closing Drive restores the ordinary scene layout. */
@@ -586,10 +592,8 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 /* Persistent object clocks: a stable numeral column, separate from flight UI. */
 .pilot-telemetry #pilotDilation{display:block;min-width:10ch;text-align:right;font:700 16px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums;color:#e6f4ff;white-space:nowrap}
 .pilot-telemetry #pilotDilationRow{align-items:baseline;gap:14px}
-.pilot-telemetry #pilotClockRateRow{align-items:baseline;gap:14px;color:#9bd2f5}
-.pilot-telemetry #pilotClockRate{min-width:10ch;text-align:right;font-size:16px;font-weight:700}
 .scene.has-object-clock:not(.has-flight-controls) .pilot-telemetry{align-self:flex-end;margin-left:auto}
-@media(max-width:600px){.pilot-telemetry #pilotDilation{font-size:14px}.pilot-telemetry #pilotClockRate{font-size:14px}.scene.has-object-clock .pilot-telemetry>div{gap:9px}}
+@media(max-width:600px){.pilot-telemetry #pilotDilation{font-size:14px}.scene.has-object-clock .pilot-telemetry>div{gap:9px}}
 /* Keep a focused body's clock available on short phones, even when the rest
    of the distance readout is hidden to make room for the flight controls. */
 @media(max-height:360px) and (orientation:landscape){
@@ -608,3 +612,45 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 
 .pilot-telemetry #pilotDilationRateRow{align-items:baseline;gap:14px;color:#9bd2f5}
 .pilot-telemetry #pilotDilationRate{min-width:12ch;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pilot-telemetry #pilotDilationRow small{display:inline;font:inherit;color:#728da4;white-space:nowrap}
+.pilot-telemetry .pilot-clock-relation{margin:0;text-align:right;font:8px/1.4 ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#9bb8cc;white-space:nowrap}
+.pilot-telemetry .pilot-clock-relation[hidden]{display:none}
+
+/* Corner heading buttons and power fit inside the reserved strip, leaving
+   the centered vehicle clear on desktop and mobile. */
+.pilot-console{grid-template-columns:44px minmax(0,1fr) 44px;gap:12px;padding:7px 16px}
+.pilot-main{grid-column:2;grid-row:1}
+.pilot-console .pilot-turn{height:44px;min-height:44px;font-size:34px;user-select:none;-webkit-user-select:none}
+.pilot-console .pilot-turn:disabled{opacity:.4;cursor:default}
+.pilot-sliders{display:grid;gap:2px;min-width:0}
+.pilot-info-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;min-width:0;font-size:11px;color:#c9e4f5}
+.pilot-heading-readout{margin-left:auto;display:flex;align-items:baseline;gap:5px;white-space:nowrap;color:#8da9bd;font-size:9px}
+.pilot-heading-readout output{display:block;min-width:5ch;text-align:right;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#d2eafa}
+.pilot-sliders .pilot-power{display:grid;grid-template-columns:minmax(0,1fr) 55px;gap:8px;align-items:center;font-size:11px;margin:0;min-width:0}
+.pilot-sliders .pilot-power input{width:100%;height:28px;margin:0;accent-color:#9ed5f7;touch-action:none}
+@media(max-width:600px){.pilot-console{grid-template-columns:36px minmax(0,1fr) 36px;gap:5px;padding:7px}.pilot-console .pilot-turn{height:44px;min-height:44px;font-size:31px}.pilot-info-row{gap:4px;font-size:10px}.pilot-heading-readout{gap:3px}.pilot-heading-readout output{font-size:9px;min-width:4ch}.pilot-sliders .pilot-power{grid-template-columns:minmax(0,1fr) 44px;gap:4px;font-size:9px}.pilot-telemetry .pilot-clock-relation{font-size:7px}}
+
+/* Fixed columns keep the selected mode still while quality and FPS change. */
+.scene.has-viewport-ui .scene-top .render-pill{grid-template-columns:5px 61px 44px 48px 50px;column-gap:7px;white-space:nowrap}
+.render-pill .backend-status{white-space:nowrap;text-align:right;color:#a9d4ea;font-variant-numeric:tabular-nums;letter-spacing:0}
+.render-pill .backend-status.is-cpu{color:#aab7ca}
+@media(max-width:760px){.scene.has-viewport-ui .scene-top .render-pill{grid-template-columns:52px 35px 38px 41px;column-gap:4px;padding:8px 6px;font-size:7.5px;letter-spacing:0}.scene-top .render-pill>i{display:none}}
+@media(max-width:400px){.scene.has-viewport-ui .scene-top .render-pill{grid-template-columns:46px 30px 34px 38px;column-gap:3px;padding:8px 5px;font-size:7px}.scene.has-viewport-ui .scene-top{right:9px;gap:4px}.render-pill .corner-fps{padding-left:3px}}
+
+/* Relativity notebook: a readable path with local MathML and diagrams. */
+.math-hub-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+.math-hub-foundations{background:#102132;border-color:#74a5c9}
+.relativity-lead{font-size:15px;color:#d2e6f5;line-height:1.85}
+.relativity-roadmap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:19px 0}
+.relativity-roadmap button{display:flex;gap:9px;align-items:center;padding:10px 12px;text-align:left;border:1px solid #36516a;background:#0d1b28;border-radius:5px;color:#cfe6f7;font:inherit;font-size:12px;min-height:43px}
+.relativity-roadmap button span{color:#79a7c9;font:10px ui-monospace,monospace}
+.relativity-roadmap button:hover,.relativity-roadmap button:focus-visible{border-color:#9fd6f8;background:#163048;outline:1px solid transparent}
+.relativity-guide .math-section{scroll-margin-top:100px}
+.relativity-guide .math-section-body{line-height:1.9}
+.relativity-guide .math-section-body>p{margin:15px 0}
+.relativity-guide .relativity-figure{overflow-x:auto;padding:0 0 5px;scrollbar-color:#476c89 #07111a}
+.relativity-diagram{display:block;width:100%;height:auto;min-width:640px;border:1px solid #263e52;border-radius:8px;box-sizing:border-box}
+.relativity-figure figcaption{font-size:11px;color:#8ca8bf;line-height:1.7;margin:10px 0 0}
+.relativity-reading{border-top:1px solid #2b4358;margin-top:25px;padding-top:10px}
+.relativity-guide .outline-button{margin:5px 0 7px;font-size:12px}
+@media(max-width:600px){.math-hub-cards{grid-template-columns:1fr}.relativity-lead{font-size:13px}.relativity-roadmap{grid-template-columns:repeat(2,minmax(0,1fr))}.relativity-roadmap button{font-size:11px;padding:9px}.relativity-figure figcaption{font-size:10px}.relativity-guide .math-section-body{line-height:1.85}}

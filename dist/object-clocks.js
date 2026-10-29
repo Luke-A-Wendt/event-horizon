@@ -6,6 +6,9 @@
 // use the surface potential approximation.
 export const CLOCK_LIGHT_SPEED=299792458;
 export const CLOCK_SOLAR_GM=1.32712440018e20;
+// A finite exterior experiment: preserve body clearance as well as precision.
+export const CLOCK_HORIZON_EPSILON=1e-6;
+export const compactExteriorRadius=(horizon,bodyRadius=0)=>horizon*(1+CLOCK_HORIZON_EPSILON)+2*Math.max(0,bodyRadius);
 export const CLOCK_TYPES=Object.freeze(['astronaut','shuttle','iss']);
 export const supportsObjectClock=type=>CLOCK_TYPES.includes(type);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -13,17 +16,24 @@ const finiteVector=v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite);
 export function createObjectClock(){return {coordinateSeconds:0,lagSeconds:0,coordinateCompensation:0,lagCompensation:0};}
 
 export function clockRate({id=null,positionMeters=[0,0,0],velocityMetersPerSecond=[0,0,0],sources=[]}={}){
- let gravityLossRate=0,horizonLimit=false;
+ let gravityLossRate=0,gravityProperRate=1,horizonLimit=false;
  if(finiteVector(positionMeters))for(const source of sources){
   if(source.id===id||!(source.massSolar>0)||!Number.isFinite(source.massSolar)||!finiteVector(source.positionMeters))continue;
   const distance=Math.hypot(...positionMeters.map((v,i)=>v-source.positionMeters[i])),compact=Number.isFinite(source.horizonMeters)&&source.horizonMeters>0;
   const surface=Math.max(0,Number(source.radiusMeters)||0),radius=Math.max(distance,compact?0:surface,1e-30);
-  const schwarzschild=2*CLOCK_SOLAR_GM*source.massSolar/(CLOCK_LIGHT_SPEED*CLOCK_LIGHT_SPEED),horizon=compact?source.horizonMeters:schwarzschild;
-  if(compact&&distance<=horizon*(1+1e-8))horizonLimit=true;
+  const physicalSchwarzschild=2*CLOCK_SOLAR_GM*source.massSolar/(CLOCK_LIGHT_SPEED*CLOCK_LIGHT_SPEED),horizon=compact?source.horizonMeters:physicalSchwarzschild;
+  // Renderer horizon constants are rounded. Keep the nonspinning limit and
+  // loss + proper-rate identity consistent with the same displayed boundary.
+  const schwarzschild=compact?Math.max(physicalSchwarzschild,horizon):physicalSchwarzschild;
+  if(compact&&distance<=horizon)horizonLimit=true;
   // a²=r_+(r_s-r_+); Δ/(r²+a²) vanishes at r_+ while retaining
   // the correct first-order 1-r_s/r behavior far from a spinning hole.
   const a2=compact?Math.max(0,horizon*(schwarzschild-horizon)):0;
-  const u=clamp(schwarzschild/(radius+a2/radius),0,1),root=Math.sqrt(1-u),loss=u/(1+root);
+  const u=clamp(schwarzschild/(radius+a2/radius),0,1);
+  // Factor Δ rather than subtracting almost equal numbers near r_+.
+  const lapse2=compact?clamp((radius-horizon)*(radius-(schwarzschild-horizon))/(radius*radius+a2),0,1):1-u;
+  const root=Math.sqrt(lapse2),loss=u/(1+root);
+  gravityProperRate*=root;
   // 1 - sqrt(1-u), evaluated without subtracting nearly equal numbers.
   gravityLossRate+=loss*(1-gravityLossRate);
  }
@@ -31,7 +41,7 @@ export function clockRate({id=null,positionMeters=[0,0,0],velocityMetersPerSecon
  const beta=Math.min(1-8*Number.EPSILON,speed/CLOCK_LIGHT_SPEED),beta2=beta*beta;
  const kinematicLossRate=beta2/(1+Math.sqrt((1-beta)*(1+beta)));
  const lossRate=horizonLimit?1:clamp(gravityLossRate+kinematicLossRate-gravityLossRate*kinematicLossRate,0,1);
- const properRate=horizonLimit?0:Math.max(0,(1-gravityLossRate)*(1-kinematicLossRate));
+ const properRate=horizonLimit?0:Math.max(0,gravityProperRate*Math.sqrt((1-beta)*(1+beta)));
  return {properRate,lossRate,rateFactor:properRate>0?1/properRate:Infinity,horizonLimit,gravityLossRate,kinematicLossRate};
 }
 
@@ -54,6 +64,14 @@ export function objectClockReading(clock,rate={},metadata={}){
 
 const superscripts={'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
 const durationUnits=[[1e-9,'ns'],[1e-6,'μs'],[1e-3,'ms'],[1,'s'],[60,'min'],[3600,'h'],[86400,'d'],[31557600,'yr']];
+// Reference seconds per local second. Unlike accumulated loss per reference
+// second, this ratio grows without a bound at the exterior horizon limit.
+export function formatClockRate(factor){
+ if(factor===Infinity)return '∞';
+ if(!Number.isFinite(factor)||factor<1)return '—';
+ if(factor>=1e4){const [m,e]=factor.toExponential(1).split('e');return m+' × 10'+String(Number(e)).split('').map(c=>superscripts[c]).join('')+'×';}
+ return Number(factor.toPrecision(2)).toLocaleString(undefined,{minimumSignificantDigits:2,maximumSignificantDigits:2,useGrouping:false})+'×';
+}
 export function formatClockDuration(seconds){
  if(!Number.isFinite(seconds)||seconds<0)return '—';if(seconds===0)return '0 ns';
  let index=0;while(index<durationUnits.length-1&&seconds>=durationUnits[index+1][0])index++;

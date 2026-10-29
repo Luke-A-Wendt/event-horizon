@@ -14,6 +14,7 @@ for(let visit=0;visit<2;visit++){
  let opened=0,ui;
  ui=installViewportUI({renderer:()=>r,objects:()=>r.getObjects(),state:()=>r.state,activePreset:()=>r.sceneId,refresh:()=>ui?.refresh(r.getState()),updateParameter(){},setFeature(){},selectObject(){},selectComponent(){},syncRendererState(){},markCustom(){},setPaused(){},syncViewMode(){},toast(){},openScenes:()=>{opened++;$('atlasDialog').showModal();},openDialog:id=>$(id).showModal(),onDialogClose(){},openHelp(){}});
  await Promise.resolve();await Promise.resolve();ui.refresh(r.getState());
+ $('atlasDialog').showModal();$('atlasDialog').close();r.loadScene('warp-lab');ui.sceneChanged();ui.refresh(r.getState());
  const button=$('viewportScenes');assert(button.classList.contains('scene-discovery'),`Visit ${visit+1} starts with the cue`);
  $('universe').dispatch('pointerdown');r.resetCamera();ui.refresh(r.getState());assert(button.classList.contains('scene-discovery'),'Other interactions do not dismiss the cue');
  button.click();assert.equal(opened,1);assert(!button.classList.contains('scene-discovery'),'The actual Scenes click ends it immediately');$('atlasDialog').close();
@@ -22,4 +23,4 @@ for(let visit=0;visit<2;visit++){
 }
 const source=readFileSync(new URL('../dist/viewport-ui.js',import.meta.url),'utf8'),css=readFileSync(new URL('../dist/style.css',import.meta.url),'utf8');
 assert(!/localStorage|sessionStorage/.test(source));assert.match(css,/scene-discovery-pulse 3\.2s ease-in-out infinite/);assert.match(css,/@media\(prefers-reduced-motion:reduce\)\{\.viewport-scenes\.scene-discovery::after\{animation:none/);assert.match(css,/#mathNav\{font-size:17px;font-weight:800/);
-console.log('PASS: gentle default-scene cue resets each visit, stops on Scenes click, stays off through scene/renderer resets, uses no browser storage, respects reduced motion; bold uppercase MATH.');
+console.log('PASS: opening gallery does not dismiss cue; any-scene cue resets each visit, stops on Scenes click, stays off through scene/renderer resets, uses no browser storage, respects reduced motion; bold uppercase MATH.');

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import vm from 'node:vm';
+import {createHash} from 'node:crypto';
 import { SCENE_PRESETS } from '../dist/config.js';
 import { RENDER_WORKER_SOURCE } from '../dist/render-worker-bundle.js';
 import { SCENE_FILE_WORKER_SOURCE } from '../dist/scene-file-worker-bundle.js';
@@ -11,12 +12,12 @@ import { PLANET_TEXTURE_DATA } from '../dist/planet-texture-data.js';
 // Inspect the shipped artifact, not merely the inputs to the bundler. This is
 // static validation; it does not substitute for a real browser/WebGL test.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const html = await readFile(path.join(root, 'index.html'), 'utf8');
+const html = await readFile(path.join(root, 'offline.html'), 'utf8');
 const scriptTags = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
 assert.equal(scriptTags.length, 1, 'Standalone page must have one inline script');
 assert(!/\bsrc\s*=|\btype\s*=\s*['"]module['"]/i.test(scriptTags[0][1]), 'Script must run without module fetching');
 const javascript = scriptTags[0][2];
-new vm.Script(javascript, { filename: 'standalone-index.html' });
+new vm.Script(javascript, { filename: 'standalone-offline.html' });
 assert(!/\bimport\s*(?:\(|\{|\*|['"])/.test(javascript), 'Executable imports are not allowed in the offline bundle');
 assert(!/^\s*export\s/m.test(javascript), 'All exports must be bundled');
 
@@ -168,3 +169,28 @@ for (const [label, pattern] of credentialPatterns) assert(!pattern.test(html), `
 assert(!/appgprj_|appgdep_|git\.chatgpt-team\.site/.test(html), 'Hosting identity must not enter the portable app');
 
 console.log(`PASS: standalone JS syntax; ${Object.keys(atlas).length} exact embedded atlas images (${imageBytes} bytes), favicon, ${embeddedResourceCount} embedded resource references; ${remoteLiterals.length} optional reference/namespace URLs; no runtime network APIs, executable imports, or credential-pattern hits.`);
+
+// The compact root and dist entries share immutable local resources. Opening
+// either extracted HTML file requires no module loader or external service.
+for(const entry of ['index.html','dist/index.html']){
+ const page=await readFile(path.join(root,entry),'utf8');
+ assert(!page.includes('<base '));assert(!page.includes('type="module"'));
+ for(const resource of page.matchAll(/<(?:script|link|img)\b[^>]*?\b(?:src|href)="([^"]+)"/g)){
+  const url=resource[1];if(url.startsWith('#')||url.startsWith('data:'))continue;
+  assert(!/^(?:https?:)?\/\//.test(url),'Every executable/display resource is shipped locally');
+  await readFile(path.resolve(root,path.dirname(entry),url.split('?')[0]));
+ }
+ const appRef=page.match(/src="([^"]*entry-app-[a-f0-9]+\.js)"/)[1],dataRef=(entry==='index.html'?'dist/':'')+page.match(/assets\/entry-data-[a-f0-9]+\.js/)[0];
+ assert(!/<script[^>]+src="[^"]*entry-data-/.test(page),'Optional planetary data is not loaded until needed');
+ assert(page.includes('__EVENT_HORIZON_LOAD_PLANETS=function()'));
+ const app=await readFile(path.resolve(root,path.dirname(entry),appRef),'utf8');
+ new vm.Script(app);assert(app.includes(JSON.stringify(RENDER_WORKER_SOURCE)),'App and worker are from one release');
+ assert(!/\bimport\s*(?:\(|\{|\*|['"])/.test(app));
+ if(entry==='index.html')assert(page.includes('__EVENT_HORIZON_ASSET_BASE="dist/"'));
+ const data=await readFile(path.resolve(root,path.dirname(entry),dataRef),'utf8'),holder={atlas:'',maps:{},meta:{}},context={__EVENT_HORIZON_PLANET_DATA:holder};
+ vm.runInNewContext(data,context);assert.equal(context.__EVENT_HORIZON_PLANET_DATA,holder);assert.equal(holder.atlas,PLANET_TEXTURE_DATA.atlas);
+}
+const manifest=JSON.parse(await readFile(path.join(root,'dist/assets/entry-manifest.json'),'utf8'));
+for(const name of manifest.current){const data=await readFile(path.join(root,'dist/assets',name));assert(name.includes(createHash('sha256').update(data).digest('hex').slice(0,16)));}
+assert(manifest.previous.length<=3,'At most one previous asset set is retained');
+console.log('PASS: compact root/dist entries, local resource closure, immutable content hashes, atomic embedded workers, optional surface data loads only on demand.');

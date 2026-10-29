@@ -56,7 +56,7 @@ const earth=host.objects.find(o=>o.name==='Earth');host.updateObject(earth.id,{c
 const edited=worker.messages.slice(mark).filter(m=>m.type==='state').at(-1);assert.equal(edited.snapshot.objects.length,517);assert.equal(edited.snapshot.objects.find(o=>o.id===earth.id).color,'#aabbcc');
 host.dispose();
 const c=fixture();c.canvas.transferControlToOffscreen=()=>({});const cpu=new RenderHost(c.canvas,{}, {cpu:true});workers.at(-1).emit({type:'ready',available:true});await cpu.startup;
-saved.quality='ultra';cpu.loadSnapshot(saved);assert.equal(cpu.cpu,true);assert.equal(cpu.quality,'cpu');assert(cpu.state.paused);cpu.dispose();
+saved.quality='ultra';cpu.loadSnapshot(saved);assert.equal(cpu.cpu,true);assert.equal(cpu.quality,'ultra');assert(cpu.state.paused);cpu.dispose();
 
 // Main-thread WebGL fallback has the same completed-frame annotation hook.
 const d=fixture({gpuComplete:false}),directFrames=[];

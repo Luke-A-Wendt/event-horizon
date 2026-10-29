@@ -23,7 +23,7 @@ export function installRenderWorker(scope,dependencies={}){
  }
  const status=(extra={})=>{
   if(!renderer)return;
-  const s=renderer.getState();send({type:'status',stats:{fps:s.fps||0,effectiveQuality:s.effectiveQuality,adaptiveLevel:s.adaptiveLevel,adaptiveStatus:s.adaptiveStatus,adaptiveReason:s.adaptiveReason,probePending:s.probePending,shaderCompiling:s.shaderCompiling,webgl:s.webgl,width:renderer.canvas.width,height:renderer.canvas.height,scale:renderer.renderScale,steps:renderer.steps,cpu:!!renderer.cpu,contextLost:renderer.contextLost,...extra}});
+  const s=renderer.getState();send({type:'status',stats:{fps:s.fps||0,effectiveQuality:s.effectiveQuality,adaptiveLevel:s.adaptiveLevel,adaptiveStatus:s.adaptiveStatus,adaptiveReason:s.adaptiveReason,probePending:s.probePending,shaderCompiling:s.shaderCompiling,webgl:s.webgl,width:renderer.canvas.width,height:renderer.canvas.height,scale:renderer.renderScale,steps:renderer.steps,cpu:!!renderer.cpu,surfaceWarning:s.surfaceWarning||'',surfaceRefining:!!s.surfaceRefining,contextLost:renderer.contextLost,...extra}});
  };
  const makeClass=Base=>class extends Base{
   bindControls(){}
@@ -67,10 +67,11 @@ export function installRenderWorker(scope,dependencies={}){
     // convertToBlob snapshots in this same task, like HTMLCanvas.toBlob.
     if(!canvas.toBlob&&canvas.convertToBlob)canvas.toBlob=(callback,type='image/png')=>canvas.convertToBlob({type}).then(callback,()=>callback(null));
     const Class=makeClass(message.cpu?Cpu:Gpu);
-    renderer=new Class(canvas,{bindControls:false,onError:error=>send({type:'render-error',signature,sceneRevision:renderer?.sceneRevision,message:String(error||'')}),onStats:()=>status()});
+    renderer=new Class(canvas,{bindControls:false,deferProgram:true,onError:error=>send({type:'render-error',signature,sceneRevision:renderer?.sceneRevision,message:String(error||'')}),onStats:()=>status()});
     canvas.addEventListener?.('webglcontextlost',event=>{event.preventDefault?.();renderer.ready=false;renderer.contextLost=true;renderer.gpuFence=null;photoAbort?.abort();renderer.cancelCapture('The GPU context was lost.');frameReported=false;status();send({type:'render-error',message:'Graphics paused while the GPU recovers.'});});
     canvas.addEventListener?.('webglcontextrestored',()=>{renderer.initGL();renderer.resize();frameReported=false;status();});
     if(message.snapshot)apply(message.snapshot);
+    presentationIntent=!!message.presentationPaused;renderer.setPresentationPaused(presentationIntent);
     const available=message.cpu?!!renderer.ready:!!renderer.gl;
     send({type:'ready',available,cpu:!!message.cpu,reason:available?'':'WebGL could not start in this worker.'});
     if(!available){renderer.setPresentationPaused(true);return;}
@@ -82,6 +83,7 @@ export function installRenderWorker(scope,dependencies={}){
     // a bounded tile. Keep the latest state, abort it, and restore only
     // after its GL cleanup; never mutate its captured uniforms mid-picture.
     if(photoAbort||captureAbort){photoAbort?.abort();captureAbort?.abort();deferredState=message;return;}
+    if(message.assets&&!renderer.cpu)Object.assign(PLANET_TEXTURE_DATA,message.assets);
     if(signature!==message.signature){signature=message.signature;frameReported=false;}apply(message.snapshot,message.viewport);
     presentationIntent=!!message.presentationPaused;renderer.setPresentationPaused(presentationIntent||!!document.hidden);
     send({type:'ack',serial:message.serial});return;
@@ -90,7 +92,7 @@ export function installRenderWorker(scope,dependencies={}){
     if(bitmapFrame?.serial===message.serial){const frame=bitmapFrame;bitmapFrame=null;if(!message.cancelled){frameReported=frame.signature===signature;lastReport=renderer.now();status({renderedSignature:frame.signature,sceneRevision:frame.sceneRevision,frameReady:true});}}return;
    }
    if(message.type==='cpu-presented'){
-    if(commandFrame?.serial===message.serial){renderer.noteCpuCost?.(message.costMs||0);if(!message.cancelled)renderer.completed(commandFrame.signature,renderer.now(),commandFrame.sceneRevision);commandFrame=null;}return;
+    if(commandFrame?.serial===message.serial){if(!message.cancelled)renderer.noteCpuCost?.(message.costMs||0,renderer.now(),'presentation');if(!message.cancelled)renderer.completed(commandFrame.signature,renderer.now(),commandFrame.sceneRevision);commandFrame=null;}return;
    }
    if(message.type==='visibility'){
     document.hidden=!!message.hidden;if(message.presentationPaused!==undefined)presentationIntent=!!message.presentationPaused;renderer.setPresentationPaused(!!message.hidden||presentationIntent);

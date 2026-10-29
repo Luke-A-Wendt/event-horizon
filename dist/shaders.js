@@ -1,8 +1,10 @@
+import { ANOMALY_GLSL } from './anomaly-glsl.js';
 import { DYSON_GLSL } from './dyson-glsl.js';
 import { createCraftGLSL } from './craft-glsl.js';
 import { warpFieldGLSL, WARP_TRACE_GLSL } from './warp-glsl.js';
 import { coordinateGridGLSL } from './grid-glsl.js';
 import { bridgeGLSL } from './bridge-glsl.js';
+import { TIDAL_STREAM_GLSL } from './tidal-stream.js';
 
 import { planetMaterialGLSL } from './planet-glsl.js';
 import { METRIC_GLSL } from './metric-glsl.js';
@@ -45,11 +47,11 @@ const NO_GRID_GLSL = `
 vec4 coordinateGridSegment(vec3 start,vec3 end,float travelled,float pixelAngle){return vec4(0);}
 vec4 coordinateGridEscape(vec3 start,vec3 direction,float travelled,float pixelAngle){return vec4(0);}
 `;
-export function createFragment({ultra=false,photo=false,photoSteps=3072,craft=false,craftMask=15,warp=false,grid=false,bridge=false,probe=false,stellar=false,rings=false,bodyGravity=false,planetary=false,attachments=false,dyson=false,diagnostics=false,derivatives=false,derivativeExtension=false,objectSlots=12}={}) {
- const slots=objectSlots===6?6:objectSlots===8?8:12;
+export function createFragment({anomaly=false,ultra=false,photo=false,photoSteps=3072,craft=false,craftMask=15,warp=false,grid=false,bridge=false,probe=false,stellar=false,rings=false,bodyGravity=false,planetary=false,attachments=false,dyson=false,diagnostics=false,derivatives=false,derivativeExtension=false,objectSlots=12}={}) {
+ const slots=[2,4,6,8,12].includes(objectSlots)?objectSlots:12;
  const photoBudget=[1024,1536,3072].includes(photoSteps)?photoSteps:3072;
  craft=craft||warp||bridge;
- craftMask=(Number.isInteger(craftMask)?craftMask:15)&15;
+ craftMask=(Number.isInteger(craftMask)?craftMask:15)&31;
  // A bridge can carry any supported traveler. Only a warp field intrinsically
  // requires Enterprise geometry; do not compile an unused ship for the bridge.
  if(warp)craftMask|=8;
@@ -61,7 +63,8 @@ uniform vec4 uRayViewport,uBridge;
 uniform mat4 uInverseProjection;
 uniform int uProjectionMode;
 uniform float uWhiteHole;
-uniform vec3 uBridgeSkyColor;
+uniform vec3 uBridgeSkyColor,uBridgeGridAxis,uBridgeStage,uBridgeBubbleAxis;
+uniform vec4 uBridgeBubble;
 uniform vec4 uBridgeSkyParams;
 uniform float uBridgeOtherNebula;
 uniform int uCockpitMode;
@@ -92,7 +95,7 @@ uniform vec3 uInspectCamera,uInspectForward,uInspectRight,uInspectUp;
 uniform vec3 uWarpCenter,uWarpAxis,uWarpObserver;
 uniform vec2 uWarpGridOffset,uWarpGridRotation;
 uniform float uWarpRadius,uWarpStrength,uWarpThickness;
-uniform vec4 uWarpFlags;
+uniform vec4 uWarpFlags,uWarpMotion;
 const float PI=3.141592653589793;
 
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
@@ -214,7 +217,31 @@ vec3 photoPlasma(vec3 q,float radius,float orbit,float footprint){
 // A bounded non-trigonometric hash avoids correlated low bits in large sin()
 // arguments on mobile drivers. Independent layers use different sky rotations.
 float starHash(vec3 p){p=fract(p*vec3(.1031,.1030,.0973));p+=dot(p,p.yxz+33.33);return fract((p.x+p.y)*p.z);}
-vec3 skyWithEnvironment(vec3 direction,vec4 nebulaParams,vec3 nebulaColor,float starDensity,float brightness,float variety){
+${warp?`
+// Each original sky layer follows a one-to-one radial angular flow.
+// Layer renewal happens only at zero opacity, staggered across the existing
+// layers. Zero phase is exactly the ordinary sky, with no folded-pole rings.
+vec4 warpStarSampleDirection(vec3 direction,float layer){
+ if(uWarpMotion.w<.5||uBridge.x>.5)return vec4(direction,1);
+ float initial=.25+.25*layer,phase=fract(uWarpMotion.x+initial),shift=(phase-initial)*3.0;
+ float k=exp(-shift),mu=clamp(dot(direction,uDriveForward),-1.0,1.0);
+ float denominator=max(1e-6,1.0+mu+k*k*(1.0-mu));
+ float mapped=(1.0+mu-k*k*(1.0-mu))/denominator;
+ vec3 sampleDirection=uDriveForward*mapped+(direction-uDriveForward*mu)*(2.0*k/denominator);
+ // Wider high-speed renewal fades span several frames even near 15 Hz.
+ float edge=mix(.10,.18,smoothstep(.05,.65,uWarpMotion.y));
+ float visibility=smoothstep(0.0,edge,phase)*(1.0-smoothstep(1.0-edge,1.0,phase));
+ return vec4(unit(sampleDirection),visibility);
+}
+float warpStarElongation(){
+ if(uWarpMotion.w<.5||uBridge.x>.5)return 0.0;
+ // Stretch begins between warp 2 and 3, then grows gently on a logarithmic
+ // scale. The vehicle's actual speed is not altered by this display mapping.
+ float beta=max(0.0,uWarpMotion.z);
+ return smoothstep(10.07937,38.94074,beta)*clamp(log(1.0+beta/38.94074)/8.542,0.0,1.0);
+}
+`:''}
+vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 nebulaColor,float starDensity,float brightness,float variety){
  if(uSpectrum==5)return vec3(0);
  vec3 dir=unit(direction),c=vec3(.0008,.0014,.0025);
  vec2 uv=vec2(atan(dir.z,dir.x)/(2.0*PI)+.5,asin(clamp(dir.y,-1.0,1.0))/PI+.5);
@@ -228,9 +255,10 @@ vec3 skyWithEnvironment(vec3 direction,vec4 nebulaParams,vec3 nebulaColor,float 
   if(uSpectrum==3){milkyWay=mix(vec3(.016,.008,.024),vec3(.035,.021,.008),dust)*band*dust*dust;backgroundBand=.7;}
   if(uSpectrum==4){milkyWay=vec3(.024,.009,.039)*pow(dust,8.0)*band;backgroundBand=.15;}
   c+=milkyWay*backgroundBand;
+  ${warp?'float elongation=warpStarElongation();':''}
   for(int j=0;j<3;j++){
    if(j==2&&uDetail<.5)break;
-   vec3 sd=dir;sd.xz=rot(float(j)*1.934)*sd.xz;sd.xy=rot(float(j)*.791)*sd.xy;
+   ${warp?'vec4 starChart=warpStarSampleDirection(starRay,float(j));vec3 sd=starChart.xyz;float starOpacity=starChart.w;':'vec3 sd=starRay;float starOpacity=1.0;'}sd.xz=rot(float(j)*1.934)*sd.xz;sd.xy=rot(float(j)*.791)*sd.xy;
    vec2 suv=vec2(atan(sd.z,sd.x)/(2.0*PI)+.5,asin(clamp(sd.y,-1.0,1.0))/PI+.5);
    float n=277.0+float(j)*223.7;
    vec2 p=suv*vec2(n*2.0,n),cell=floor(p),q=fract(p);
@@ -240,6 +268,19 @@ vec3 skyWithEnvironment(vec3 direction,vec4 nebulaParams,vec3 nebulaColor,float 
    float rad=.018+.075*pow(starHash(seed+5.9),3.0),pix=max(.014,n/uResolution.y*.35);
    float star=1.0-smoothstep(rad,rad+pix,length(q));
    float halo=exp(-length(q)*22.0)*.10;
+   ${warp?`if(elongation>0.00001){
+    vec3 axis=uDriveForward;axis.xz=rot(float(j)*1.934)*axis.xz;axis.xy=rot(float(j)*.791)*axis.xy;
+    float horizontal=max(length(sd.xz),.025),projection=dot(axis,sd);
+    vec2 flow=vec2((sd.x*axis.z-sd.z*axis.x)/(horizontal*horizontal),(axis.y-projection*sd.y)/horizontal);
+    flow/=max(length(flow),.00001);
+    float across=dot(q,vec2(-flow.y,flow.x)),along=dot(q,flow);
+    float width=max(.018,rad*.6+pix*.75),lengthSigma=width+.25*elongation+.10*smoothstep(.05,.65,uWarpMotion.y);
+    float gaussian=exp(-.5*(across*across/(width*width)+along*along/(lengthSigma*lengthSigma)));
+    // A soft edge window prevents clipped rectangular tails at a seed cell.
+    vec2 edge=min(fract(p),1.0-fract(p));float taper=smoothstep(0.0,.055,edge.x)*smoothstep(0.0,.055,edge.y);
+    float blend=smoothstep(10.07937,38.94074,uWarpMotion.z);
+    star=mix(star,gaussian*taper*1.7,blend);halo=mix(halo,gaussian*.13*taper,blend);
+   }`:''}
    float gate=step(1.0-(.0065+float(j)*.0007)*starDensity*max(.08,sqrt(1.0-sd.y*sd.y)),h);
    vec3 tint=mix(vec3(.42,.64,1),vec3(1,.55,.24),temperature);
    tint=mix(vec3(.85,.9,1),tint,clamp(variety,0.0,1.0));
@@ -248,7 +289,7 @@ vec3 skyWithEnvironment(vec3 direction,vec4 nebulaParams,vec3 nebulaColor,float 
    if(uSpectrum==2){tint=vec3(.32,.65,1.0);bandWeight=starHash(seed+43.0)>.978?1.7:.006;}
    if(uSpectrum==3){tint=mix(vec3(.24,.68,.90),vec3(1,.48,.15),temperature);bandWeight=starHash(seed+43.0)>.987?.9:.002;}
    if(uSpectrum==4){tint=vec3(.70,.48,1);bandWeight=starHash(seed+43.0)>.997?1.4:.0001;}
-   c+=tint*(star+halo)*gate*(.10+pow(starHash(seed+3.8),8.0)*3.2)*bandWeight*brightness;
+   c+=tint*(star+halo)*gate*(.10+pow(starHash(seed+3.8),8.0)*3.2)*bandWeight*brightness*starOpacity;
   }
  }
  if(nebulaParams.z>0.0){
@@ -296,16 +337,28 @@ vec3 skyWithEnvironment(vec3 direction,vec4 nebulaParams,vec3 nebulaColor,float 
  return c;
 }
 
+vec3 skyWithEnvironment(vec3 direction,vec4 parameters,vec3 tint,float density,float brightness,float variety){return skyWithEnvironmentChart(direction,unit(direction),parameters,tint,density,brightness,variety);}
+${warp?`
+vec3 skyForWarpTravel(vec3 direction,vec3 original){
+ // Only the open-space cinematic star chart unfolds toward the camera rays.
+ // This keeps a readable cone inside the bubble. Nebulae, geometry and every
+ // non-isolated scene retain the ordinary traced optical directions.
+ float unfold=uWarpMotion.w>.5&&uBridge.x<.5?smoothstep(10.07937,38.94074,uWarpMotion.z):0.0;
+ vec3 stars=unit(mix(direction,original,unfold));
+ return skyWithEnvironmentChart(direction,stars,vec4(uNebulaParams.xy,uNebulaParams.z*uFlags2.y,uNebulaParams.w),uNebulaColor,uFlags2.x>.5?uStars:0.0,uSkyParams.x,uSkyParams.y);
+}
+`:''}
 vec3 skyWithNebula(vec3 direction,vec4 parameters,vec3 tint){return skyWithEnvironment(direction,parameters,tint,uFlags2.x>.5?uStars:0.0,uSkyParams.x,uSkyParams.y);}
 vec3 sky(vec3 direction){return skyWithNebula(direction,vec4(uNebulaParams.xy,uNebulaParams.z*uFlags2.y,uNebulaParams.w),uNebulaColor);}
 
 ${warp?warpFieldGLSL({grid}):NO_WARP_GLSL}
 
-${grid?coordinateGridGLSL({warp}):NO_GRID_GLSL}
+${anomaly?ANOMALY_GLSL:''}
+${grid?coordinateGridGLSL({warp,anomaly}):NO_GRID_GLSL}
 
 vec3 force(vec3 p,vec3 v){
  if(uFlags.z<.5||uMetricOptions.w>.5)return vec3(0);
- vec3 total=warpWorldForce(p,v);
+ vec3 total=warpWorldForce(p,v)${anomaly?'+anomalyForce(p,v)':''};
  ${bodyGravity?`for(int j=0;j<12;j++){
   if(j>=uGravityCount)break;float type=uColors[j].a;if(type>.5&&!(type>1.5&&type<2.5))continue;
   float mass=uBodyMasses[j]/4300000.0;if(mass<=0.0)continue;
@@ -539,12 +592,17 @@ vec3 whiteHoleEmission(vec3 p,float dt){
  }return sum;
 }
 
+${TIDAL_STREAM_GLSL}
 vec4 debris(vec3 p,float dt){
  if(uSpectrum==5||uFlags2.z<.5||uWarpFlags.w<.5)return vec4(0);
  vec3 q=localPoint(p-uHoles[0].xyz,uPrimaryAxis)/uMass;
  float r=length(q.xz),angle=atan(q.z,q.x),starR=uTidal.x/uMass;
- float lane=exp(-(1.0-cos(angle-uTidal.y+(starR-r)*uSpin.x*.85))*85.0)*exp(-q.y*q.y*8.0/max(uTidal.w,.1));
- float env=smoothstep(2.2,3.5,r)*(1.0-smoothstep(starR,starR+2.0,r));
+ float horizon=horizonFor(0)/uMass,progress=(starR-r)/max(starR-horizon,.1);
+ float bend=tidalStreamBend(progress,uSpin.x);
+ // The encounter advances toward decreasing polar angle: positive near-star
+ // bend is a lagging wake, followed by inward, spin-dependent fallback.
+ float lane=exp(-(1.0-cos(angle-uTidal.y-bend))*85.0)*exp(-q.y*q.y*8.0/max(uTidal.w,.1));
+ float env=smoothstep(horizon,horizon+max(.12,horizon*.12),r)*(1.0-smoothstep(starR,starR+.2,r));
  float pulse=.6+.4*sin(r*9.0+uTime*5.0+angle*5.0);
  float density=lane*env*pulse*dt/uMass*(.55+uTidal.z*.65)*uTidal.w;
  vec3 hue=uStarColor*vec3(2.5,1.6,.8);
@@ -701,7 +759,7 @@ vec3 stellarEmissionSegment(vec3 first,vec3 last){
     float t=clamp(dot(body.xyz-first,direction),0.0,lengthWorld);
     vec3 q=first+direction*t-uHoles[k].xyz;float along=clamp(dot(q,unit(offset)),0.0,separation);
     vec3 radial=offset*(along/max(separation,1e-20));
-    float bend=spinFor(k)*pow(1.0-along/max(separation,1e-20),2.0)*2.4;
+    float bend=-tidalStreamBend((separation-along)/max(separation-horizonFor(k),1e-20),spinFor(k));
     vec3 target=radial*cos(bend)+cross(axis,radial)*sin(bend)+axis*dot(axis,radial)*(1.0-cos(bend));
     float d=length(q-target)/width;float density=exp(-d*d)*strength*smoothstep(horizonFor(k),horizonFor(k)*1.15,along)*(1.0-smoothstep(separation-radius,separation,along));
     float pulse=.65+.35*sin(along/max(width,1e-20)*2.0+uTime*2.0);
@@ -829,7 +887,7 @@ vec4 astronomicalInspector(vec3 worldRay,vec4 focus){
   vec4 obj=uObjects[j],profile=surfaceProfile(uBodyParams[j],uBodyShape[j],uColors[j].a);if(type>1.5&&type<2.5&&uBodyParams[j].z<0.0)obj.w*=max(1.0,-uBodyParams[j].z);float radius=max(obj.w,1e-20);
   vec3 origin=(focus.xyz-obj.xyz+relativeEye)/radius;
   vec3 localOrigin=planetFrame(origin,profile),localRay=planetFrame(worldRay,profile);
-  ${rings?`if(type>6.5){
+  ${rings?`if(type>6.5&&type<8.5){
    vec4 ring=annulusHit(localOrigin,localRay,uColors[j].rgb,type,uBodyParams[j],1e24);
    float distance=ring.w*radius;
    if(ring.w>=0.0&&distance<ringNearest){ringNearest=distance;ringColor=ringPlanetShadow(ring.rgb,uObserver+worldRay*distance,obj);ringFound=true;
@@ -856,7 +914,7 @@ vec4 inspector(vec2 uv,float fov){
  vec3 ro=uInspectCamera,rd=rayFromFrame(uInspectForward,uInspectRight,uInspectUp,uv,fov);
  if(geometryFieldTrace(tint.a))return vec4(0);
  if(tint.a>1.5&&tint.a<2.5&&(properties.z<0.0||2.0*(focusMass/4300000.0)/max(focus.w,1e-20)>.01))return vec4(0);
- if(tint.a<2.5${rings?'||tint.a>6.5':''})return astronomicalInspector(rayFromFrame(uForward,uRight,uUp,uv,fov),focus);
+ if(tint.a<2.5${rings?'||(tint.a>6.5&&tint.a<8.5)':''})return astronomicalInspector(rayFromFrame(uForward,uRight,uUp,uv,fov),focus);
  if(tint.a>2.5){
   CraftSurface surface=craftHit(ro,rd,10000.0,tint.a);
   float normalSize=dot(surface.normal,surface.normal);
@@ -910,7 +968,7 @@ vec4 objectHit(vec3 p,vec3 previous,vec3 tangent,out float fraction,inout float 
  for(int j=0;j<12;j++){
   if(j>=uObjectCount)break;
   if(j==uHideObjectIndex||(j==uInspectIndex${dyson?'&&false':''}&&!sceneTransparent()&&!geometryFieldTrace(uColors[j].a)&&!(uColors[j].a>1.5&&uColors[j].a<2.5&&(uBodyParams[j].z<0.0||2.0*(uBodyMasses[j]/4300000.0)/max(uObjects[j].w,1e-20)>.01)))||(localWarpPass()&&j==uWarpObjectIndex))continue;
-  if(uColors[j].a>8.5${dyson?'&&uColors[j].a<10.5':''})continue;
+  if(uColors[j].a>8.5&&uColors[j].a<10.5||uColors[j].a>12.5${dyson?'':'||uColors[j].a>10.5&&uColors[j].a<11.5'})continue;
   vec4 obj=uObjects[j];if(obj.w<=1e-20)continue;if(uColors[j].a>1.5&&uColors[j].a<2.5&&uBodyParams[j].z<0.0)obj.w*=max(1.0,-uBodyParams[j].z);
   vec3 ro=(previous-obj.xyz)/obj.w,offAxis=cross(ro,rd);
   float b=dot(ro,rd),disc=1.0-dot(offAxis,offAxis);
@@ -918,13 +976,13 @@ vec4 objectHit(vec3 p,vec3 previous,vec3 tangent,out float fraction,inout float 
   float root=sqrt(disc),enter=-b-root,leave=-b+root,maximum=min(segmentLength,nearest)/obj.w;
   if(!(leave>=0.0&&enter<=maximum&&maximum<1e30))continue;
   float type=uColors[j].a,t=max(0.0,enter),alpha=type<6.5||type>10.5?bodyOpacity(j):1.0;vec3 color=uColors[j].rgb,normal;
-  bool cutaway=type>1.5&&type<2.5&&uBodyParams[j].x>6.5&&uBodyParams[j].x<7.5&&uBodyParams[j].z>=0.0&&uSpectrum!=5&&alpha<.999;
+  bool cutaway=${stellar?'type>1.5&&type<2.5&&uBodyParams[j].x>6.5&&uBodyParams[j].x<7.5&&uBodyParams[j].z>=0.0&&uSpectrum!=5&&alpha<.999':'false'};
   if(alpha<=0.0&&!cutaway)continue;
   if(transparentMask>0.0&&mod(floor(transparentMask/exp2(float(j))),2.0)>.5)continue;
-  ${dyson?`if(type>10.5){
+  ${dyson?`if(type>10.5&&type<11.5){
    vec4 hit=dysonSurfaceHit(ro,rd,maximum,uBodyParams[j].x);if(hit.w<0.0)continue;
    t=hit.w;normal=hit.xyz;color=dysonShade(normal,rd,uBodyParams[j],color);
-  }else `:''}${rings?`if(type>6.5){
+  }else `:''}${rings?`if(type>6.5&&type<8.5){
    vec3 localOrigin=planetFrame(ro,surfaceProfile(uBodyParams[j],uBodyShape[j],type)),localDirection=planetFrame(rd,surfaceProfile(uBodyParams[j],uBodyShape[j],type));
    vec4 ring=annulusHit(localOrigin,localDirection,color,type,uBodyParams[j],maximum);
    if(ring.w<0.0)continue;t=ring.w;color=ringPlanetShadow(ring.rgb,previous+rd*t*obj.w,obj);
@@ -949,7 +1007,7 @@ vec4 objectHit(vec3 p,vec3 previous,vec3 tangent,out float fraction,inout float 
    color=surfaceSpectrum(color,max(dot(surface.normal,light),0.0),surface.material>19.5?.72:.35,(surface.material>4.5&&surface.material<5.5)?.98:.5);
    if(uSpectrum==5)color=vec3(.52,.88,1.35)*(1.0-smoothstep(.13,.32,abs(dot(surface.normal,localDirection))));
    normal=j==uDriveIndex?uDriveRight*normal.x+uDriveUp*normal.y+uDriveForward*normal.z:craftWorld(normal,heading);
-  }else{
+  }${bodyGravity||probe?`else{
    vec4 profile=surfaceProfile(uBodyParams[j],uBodyShape[j],type);vec3 shape=max(uBodyShape[j].xyz,vec3(.01));
    float shiftedAlong=max(b,-root-.01),advance=shiftedAlong-b;
    vec3 origin=cross(rd,offAxis)+rd*shiftedAlong;
@@ -960,8 +1018,8 @@ vec4 objectHit(vec3 p,vec3 previous,vec3 tangent,out float fraction,inout float 
    if(type>.5&&type<1.5){color*=1.3+.6*noise(normal*6.0);color=surfaceSpectrum(color,max(dot(normal,unit(uHoles[0].xyz-obj.xyz)),0.0),.35,.6);${probe?'color*=max(1.0,uLuminosities[j]);':''}}
    else color=planetShade(localOrigin+localDirection*hit.w,shape,normal,rd,color,type,uBodyParams[j],profile,bodyLight(obj.xyz));
    if(type>1.5&&type<2.5&&uBodyParams[j].z>=0.0&&uSpectrum!=5)color=stellarObserved(color,uBodyMasses[j],obj.w);
-  }
-  if(type<6.5&&alpha<.999){
+  }`:''}
+  if((type<6.5||type>11.5)&&alpha<.999){
    // Blend the first surface encountered: entry from outside, exit from inside.
    // The per-ray mask prevents repeated blends without discarding inside views.
    if(cutaway){vec4 interior=tzoCutaway(ro,rd,color,alpha);color=interior.rgb;alpha=interior.a;}
@@ -1034,15 +1092,15 @@ ${craft?`
 vec3 thrusterRay(vec3 ro,vec3 rd,float maximum){
  if(uFlightMetrics.w<.5||uSpectrum==5)return vec3(0);
  float thrust=uFlightMetrics.x,steer=uFlightMetrics.y,power=abs(thrust),light=0.0;
- for(int engine=0;engine<5;engine++){
+ for(int engine=0;engine<4;engine++){
   vec3 base,axis;float strength;
   if(engine<3){base=vec3((float(engine)-1.0)*.10,engine==1?.065:-.045,thrust>=0.0?-.79:.76);axis=vec3(0,0,thrust>=0.0?-1.0:1.0);strength=power;}
-  else {base=vec3(steer>=0.0?-.13:.13,.035,engine==3?.59:-.56);axis=vec3((steer>=0.0?-1.0:1.0)*(engine==3?1.0:-1.0),0,0);strength=abs(steer)*.5;}
+  else {base=vec3(steer>=0.0?-.145:.145,.035,.52);axis=vec3(steer>=0.0?-1.0:1.0,0,0);strength=abs(steer)*.65;}
   if(strength<.001)continue;
-  float extent=engine<3?.18+.70*strength:.22;
+  float extent=engine<3?.18+.70*strength:.14+.07*strength;
   vec3 center=base+axis*extent*.45,delta=center-ro;
   float t=clamp(dot(delta,rd),0.0,maximum);vec3 point=ro+rd*t-base;
-  float along=dot(point,axis),width=.025+clamp(along/extent,0.0,1.0)*.10;
+  float along=dot(point,axis),width=(engine<3?.025:.008)+clamp(along/extent,0.0,1.0)*(engine<3?.10:.027);
   float radial=length(point-axis*along);
   float plume=exp(-radial*radial/(width*width))*smoothstep(-.025,.015,along)*(1.0-smoothstep(extent*.25,extent,along));
   light+=plume*strength*(1.8+.18*sin(uFlightMetrics.z*37.0+along*80.0));
@@ -1091,14 +1149,14 @@ void main(){
  if(!object&&localWarp){
   warpLocalTrace(original,v,warpColor,warpTrans,warpObject);
   if(warpObject){color=warpColor;object=true;miss=true;}
-  else if(uWarpFlags.w<.5)miss=true;
+  else if(uWarpFlags.w<.5${anomaly?'&&uAnomalyCount==0':''})miss=true;
  }
  // Only integrate the compact near field. Far observers skip empty space;
  // rays missing it take the sky fast path instead of exhausting ray steps.
  if(!miss&&!object&&length(camera)>uBounds){
   float b=dot(camera,v),c=dot(camera,camera)-uBounds*uBounds,disc=b*b-c;
   if(disc<0.0)miss=true;
-  else{float enter=-b-sqrt(max(0.0,disc));if(enter<0.0)miss=true;else p=camera+v*max(0.0,enter-uMass*.03);}
+  else{float enter=-b-sqrt(max(0.0,disc));if(enter<0.0)miss=true;else p=camera+v*max(0.0,enter-(uWarpFlags.w>.5?uMass*.03:uBounds*.00001));}
  }
  if(!miss&&uFlags.x>.5){
   vec4 entryGrid=coordinateGridSegment(camera,p,0.0,pixelAngle);
@@ -1108,6 +1166,7 @@ void main(){
   for(int i=0;i<${photo?photoBudget:ultra?768:288};i++){
    if(i>=uSteps)break;
    float closest=100000.0,stepLimit=max(.000001,uBounds*.06);
+   ${anomaly?'stepLimit=anomalyStepLimit(p,stepLimit);':''}
    for(int k=0;k<2;k++){
     if(uWarpFlags.w<.5)break;
     if(k==1&&uBinary==0)break;
@@ -1126,7 +1185,9 @@ void main(){
     float distance=length(p-uObjects[j].xyz),radius=max(uObjects[j].w,1e-20);
     stepLimit=min(stepLimit,max(radius*.02,distance*.08)*288.0/float(uSteps));
    }`:''}
-   if(length(p)>uBounds+uMass*.05&&dot(p,v)>0.0)break;
+   // Physical-size scenes cannot use the unused black-hole mass as an escape
+   // margin: it can be millions of times larger than the entire near field.
+   if(length(p)>uBounds+(uWarpFlags.w>.5?uMass*.05:uBounds*.00001)&&dot(p,v)>0.0)break;
    if(uWarpFlags.x>.5&&!localWarp){
     float wr=length(p-uWarpCenter)/max(uWarpRadius,1e-20);
     if(wr<2.8)stepLimit=min(stepLimit,uWarpRadius*clamp(.022+abs(wr-1.0)*.12,.022,.18)*288.0/float(uSteps));
@@ -1134,7 +1195,7 @@ void main(){
    // Weak-field catalogs have straight rays at this pixel footprint. One
    // analytic segment still intersects every selected surface/transparent ring;
    // another segment continues behind a ring. No empty-space marching is needed.
-   if(uGravityCount==0&&uWarpFlags.w<.5&&uWarpFlags.x<.5)stepLimit=max(stepLimit,length(p)+uBounds*2.1);
+   if(uGravityCount==0&&uWarpFlags.w<.5&&uWarpFlags.x<.5${anomaly?'&&uAnomalyCount==0':''})stepLimit=max(stepLimit,length(p)+uBounds*2.1);
    float dt=stepLimit;
    vec3 previous=p,a=force(p,v),midV=v+a*dt*.5,midP=p+v*dt*.5;
    v+=force(midP,midV)*dt;p+=midV*dt;
@@ -1161,8 +1222,8 @@ void main(){
   }
  }
  if(!swallowed&&!object){
-  if(uFlags.x>.5&&!(localWarp&&uWarpFlags.w<.5)){vec4 grid=coordinateGridEscape(p,unit(v),travelled,pixelAngle);color+=trans*grid.rgb;trans*=1.0-grid.a;}
-  color+=sky(unit(v))*trans;
+  if(uFlags.x>.5&&!(localWarp&&uWarpFlags.w<.5${anomaly?'&&uAnomalyCount==0':''})){vec4 grid=coordinateGridEscape(p,unit(v),travelled,pixelAngle);color+=trans*grid.rgb;trans*=1.0-grid.a;}
+  color+=${warp?'skyForWarpTravel(unit(v),original)':'sky(unit(v))'}*trans;
  }
  if(uSpectrum!=5&&!swallowed&&!object&&uFlags.y>.5&&uWarpFlags.w>.5){float glow=exp(-abs(nearRadius-3.05)*2.2)*.045;vec3 glowHue=uSpectrum==2?vec3(.3,.6,1):uSpectrum==1?vec3(.6,.12,.035):uSpectrum==3?vec3(.95,.35,.08):uSpectrum==4?vec3(.06,.015,.09):vec3(1,.56,.22);color+=glowHue*glow;}
  if(!warpObject&&localWarp&&inspected.a<.5)color=warpColor+warpTrans*color;

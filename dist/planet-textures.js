@@ -8,7 +8,9 @@ function dataBlob(uri){
 }
 async function decode(uri,maxSize){
  if(typeof createImageBitmap==='function'){
-  const original=await createImageBitmap(dataBlob(uri));
+  const blob=dataBlob(uri);let original;
+  try{original=await createImageBitmap(blob,{resizeWidth:maxSize,resizeQuality:'high'});}
+  catch{original=await createImageBitmap(blob);} // Older engines may reject resize options.
   if(original.width<=maxSize)return original;
   try{return await createImageBitmap(original,{resizeWidth:maxSize,resizeHeight:Math.max(1,Math.round(original.height*maxSize/original.width)),resizeQuality:'high'});}finally{original.close?.();}
  }
@@ -29,7 +31,7 @@ export class PlanetTextureCache{
   this.unsupported=typeof createImageBitmap!=='function'&&typeof Image==='undefined';
   this.atlas=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,this.atlas);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,1,1,0,gl.RGB,gl.UNSIGNED_BYTE,new Uint8Array([127,127,127]));gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
  }
- ready(id=0){return this.unsupported||(this.atlasReady&&(!PLANET_TEXTURE_DATA.maps[id]||this.focusId===Number(id)));}
+ ready(id=0,size=0){return this.unsupported||(this.atlasReady&&(!PLANET_TEXTURE_DATA.maps[id]||this.focusId===Number(id)&&this.focusSize>=size));}
  upload(image,old){
   const g=this.gl,t=old||g.createTexture();
   try{
@@ -46,8 +48,9 @@ export class PlanetTextureCache{
  }
 
  ensure(id=0,options={}){
-  id=PLANET_TEXTURE_DATA.maps[id]?Number(id):0;if(this.disposed)return Promise.reject(new Error('Planet textures were disposed.'));if(this.unsupported)return Promise.resolve();
-  const size=Math.min(options.high?4096:2048,Number(this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE))||2048);
+  if(!PLANET_TEXTURE_DATA.atlas)globalThis.__EVENT_HORIZON_LOAD_PLANETS?.();
+  id=PLANET_TEXTURE_DATA.maps[id]?Number(id):0;if(this.disposed)return Promise.reject(new Error('Planet textures were disposed.'));if(this.unsupported||!PLANET_TEXTURE_DATA.atlas)return Promise.resolve();
+  const size=Math.min(options.maxSize|| (options.high?4096:2048),Number(this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE))||2048);
   if(this.ready(id)&&(!id||this.focusSize>=size))return Promise.resolve();
   if(!this.atlasPromise)this.atlasPromise=(async()=>{const bitmap=await decode(PLANET_TEXTURE_DATA.atlas,Math.min(1024,size));if(this.disposed){bitmap?.close?.();return;}if(bitmap){this.atlas=this.upload(bitmap,this.atlas);this.atlasReady=true;}})();
   if(this.targetId===id&&this.focusPromise){const active=this.epoch;return this.focusPromise.then(()=>{if(this.targetId===id&&this.epoch===active)return this.ensure(id,options);});}

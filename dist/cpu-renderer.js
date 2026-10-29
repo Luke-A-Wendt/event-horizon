@@ -1,12 +1,16 @@
+import { anomalyGridOffset, anomalySkyDirection } from './anomaly.js';
 import {dysonShellHit,dysonPreviewMaterial} from './dyson.js';
 import { BlackHoleRenderer } from './renderer.js';
 import { REFERENCE_RG_METERS } from './objects.js';
 import { weakGridFlowWindow, weakGridTracerRadius } from './grid-glsl.js';
-import { effectiveWarpRadius } from './warp-physics.js';
+import { effectiveWarpRadius,warpDisplayStrength } from './warp-physics.js';
+import {CPU_QUALITY_PROFILES,CpuQualityBudget} from './cpu-quality.js';
 import {apparentCaptureAngle} from './camera-framing.js';
 import {captureSpans} from './cpu-shadow.js';
 import { predictedFlightPath } from './flight-dynamics.js';
-import { bridgeWorldSphere } from './bridge-glsl.js';
+import { bridgeJourney } from './bridge-math.js';
+import { bridgeWorldSphere, bridgeFlatWorldSphere } from './bridge-glsl.js';
+import { tidalStreamBend } from './tidal-stream.js';
 
 // An explicitly chosen Canvas 2D fallback, never an automatic quality tier.
 // This schematic renderer shares scene state, physical sizes, and camera paths
@@ -20,6 +24,20 @@ const unit=a=>scale(a,1/(Math.hypot(...a)||1));
 const TAU=Math.PI*2;
 const circle=Array.from({length:73},(_,j)=>[Math.cos(j/72*TAU),Math.sin(j/72*TAU)]);
 let starDirections;
+
+// A one-to-one stereographic flow carries the original star positions.
+// Three staggered layers renew only when invisible, avoiding pole caustics.
+export function cpuWarpStarDirection(direction,forward,phase,layer=0){
+ const raw=direction.slice(0,3),initial=.25+.25*layer,cycle=((phase+initial)%1+1)%1,shift=(cycle-initial)*3,k=Math.exp(shift),mu=clamp(dot(raw,forward),-1,1),denominator=Math.max(1e-6,1+mu+k*k*(1-mu)),mapped=(1+mu-k*k*(1-mu))/denominator;
+ return unit(plus(scale(forward,mapped),scale(plus(raw,scale(forward,-mu)),2*k/denominator)));
+}
+export function cpuWarpStarOpacity(phase,layer=0,rate=0){
+ const value=((phase+.25+.25*layer)%1+1)%1,smooth=x=>{const t=clamp(x,0,1);return t*t*(3-2*t);},edge=.1+.08*smooth((rate-.05)/.60);return smooth(value/edge)*(1-smooth((value-1+edge)/edge));
+}
+export function cpuWarpStarElongation(beta){
+ const x=clamp((Math.max(0,beta)-10.07937)/(38.94074-10.07937),0,1);
+ return x*x*(3-2*x)*clamp(Math.log1p(Math.max(0,beta)/38.94074)/8.542,0,1);
+}
 
 export function cpuSpectrum(rgb,band,kind='surface',heat=1){
  if(band==='geometry')return kind==='white-hole'?rgb:[0,0,0];
@@ -83,9 +101,10 @@ export function cpuProject(point,frame,width,height){
 // Whole catalogs stay selectable, while the CPU paints only resolvable bodies.
 // The per-frame limit bounds old-phone command generation independently of the
 // number of named moons in the tree. Focused objects are never budget-culled.
-export function cpuVisibleBodies(bodies,frame,width,height,focusId=null){
+export function cpuVisibleBodies(bodies,frame,width,height,focusId=null,limit=32){
  const candidates=[];
  for(const body of bodies){
+  if(body.type==='anomaly')continue;
   if(body.type==='dyson'){const offset=body.position.map((v,i)=>v-frame.observer[i]),distance=Math.hypot(...offset);if(distance<body.radius*1.05){candidates.push({body,depth:dot(offset,frame.forward),score:1e19});continue;}}
   if(['ring','belt'].includes(body.type)&&body.opacity===0)continue;
   const q=cpuProject(body.position,frame,width,height);if(!q)continue;
@@ -95,7 +114,17 @@ export function cpuVisibleBodies(bodies,frame,width,height,focusId=null){
  }
  candidates.sort((a,b)=>b.score-a.score);
  let rings=0;
- const selected=candidates.filter(x=>!['ring','belt'].includes(x.body.type)||++rings<=4).slice(0,32);
+ let selected;
+ const byId=new Map(bodies.map(body=>[body.id,body])),compactAttachments=bodies.some(body=>['disk','jets'].includes(body.type)&&['blackhole','whitehole'].includes(byId.get(body.parentId)?.type));
+ if(compactAttachments){
+  selected=[];const included=new Set();
+  for(const item of candidates){
+   if(included.has(item.body.id)||['ring','belt'].includes(item.body.type)&&++rings>4)continue;
+   const parent=['disk','jets'].includes(item.body.type)?byId.get(item.body.parentId):null,q=parent&&['blackhole','whitehole'].includes(parent.type)?cpuProject(parent.position,frame,width,height):null;
+   const group=q&&!included.has(parent.id)?[{body:parent,depth:q.depth,score:item.score},item]:[item];
+   if(selected.length+group.length>limit)continue;for(const value of group){included.add(value.body.id);selected.push(value);}
+  }
+ }else selected=candidates.filter(x=>!['ring','belt'].includes(x.body.type)||++rings<=4).slice(0,limit);
  return selected.sort((a,b)=>Math.abs(a.depth-b.depth)<Math.max(a.body.radius,b.body.radius)*1e-8?(Number(['ring','belt'].includes(a.body.type))-Number(['ring','belt'].includes(b.body.type))):b.depth-a.depth).map(x=>x.body);
 }
 export function cpuBodyBasis(body,primaryBasis,time=0){
@@ -127,8 +156,8 @@ function seeded(n){const x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floo
 export class CpuRenderer extends BlackHoleRenderer {
  constructor(canvas,options={}){
   const notify=options.onStats||(()=>{});
-  super(canvas,{...options,onStats:stats=>notify({...stats,cpu:true,webgl:0,effectiveQuality:'cpu'})});
-  this.cpu=true;this.cpuMode=true;this.isCPU=true;this.cpuNextDraw=0;this.cpuDrawCost=0;this.cpuGeometry=1;this.quality='cpu';if(this.ready)this.onError('');
+  super(canvas,{...options,onStats:stats=>notify({...stats,cpu:true,webgl:0})});
+  this.cpu=true;this.cpuMode=true;this.isCPU=true;this.cpuNextDraw=0;this.cpuDrawCost=0;this.cpuBudget=new CpuQualityBudget();this.cpuGeometry=0;this.quality='adaptive';this.resize();if(this.ready)this.onError('');
  }
  initGL(){
   this.gl=null;this.webgl2=false;this.contextLost=false;this.programs=new Map();this.failedPrograms=new Set();this.pendingProgram=null;this.activeProgram=null;this.gpuFence=null;
@@ -136,12 +165,13 @@ export class CpuRenderer extends BlackHoleRenderer {
   if(!this.ready)this.onError('This browser cannot start the simplified preview.');
  }
  resize(){
-  const rect=this.canvas.getBoundingClientRect(),ratio=Math.min(1,640/Math.max(rect.width,1),420/Math.max(rect.height,1));
-  this.canvas.width=Math.max(2,Math.round(rect.width*ratio));this.canvas.height=Math.max(2,Math.round(rect.height*ratio));
+  const rect=this.canvas.getBoundingClientRect(),profile=this.cpuProfile,ratio=Math.min(1,profile.width/Math.max(rect.width,1),profile.height/Math.max(rect.height,1));
+  const width=Math.max(2,Math.round(rect.width*ratio)),height=Math.max(2,Math.round(rect.height*ratio));if(this.canvas.width!==width)this.canvas.width=width;if(this.canvas.height!==height)this.canvas.height=height;
   this.renderScale=ratio;this.resizePending=false;this.resizeMeasurePending=false;
  }
- setQuality(){this.quality='cpu';}
- getState(){return {...super.getState(),cpu:true,webgl:0,quality:'cpu',effectiveQuality:'cpu',shaderCompiling:false,gpuWaiting:false};}
+ get cpuProfile(){return this.cpuBudget?.profile||CPU_QUALITY_PROFILES.low;}
+ setQuality(value='adaptive'){this.cpuBudget??=new CpuQualityBudget();const changed=this.cpuBudget.select(value);this.quality=this.cpuBudget.mode;this.cpuGeometry=this.cpuBudget.level==='low'?0:1;if(changed)this.resize();return this.getState();}
+ getState(){return {...super.getState(),cpu:true,webgl:0,quality:this.quality,effectiveQuality:this.cpuBudget?.level||'low',adaptiveLevel:['low','medium','high','ultra'].indexOf(this.cpuBudget?.level||'low'),adaptiveStatus:this.cpuBudget?.reason||'Starting CPU preview',adaptiveReason:this.cpuBudget?.reason||'',probePending:false,shaderCompiling:false,gpuWaiting:false};}
  async getVRSupport(){return {supported:false,reason:'VR needs the GPU renderer and a compatible headset browser.'};}
  async enterVR(){throw new Error('VR needs the GPU renderer.');}
  async exitVR(){}
@@ -156,12 +186,12 @@ export class CpuRenderer extends BlackHoleRenderer {
   ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
  }
  sky(){
-  const ctx=this.context2d,w=this.canvas.width,h=this.canvas.height,s=this.state,f=this.cameraFrame;
+  const ctx=this.context2d,w=this.canvas.width,h=this.canvas.height,s=this.displayState(),f=this.cameraFrame,openSpace=this.isDriveOpenSpace();
   const other=s.bridge&&Math.hypot(...f.observer)<this.configCache.bridgeRadius/2;
   const nebula=other?{color:s.bridgeOtherColor,shape:s.bridgeOtherShape,rotation:s.bridgeOtherRotation,scale:s.bridgeOtherScale,intensity:s.bridgeOtherIntensity}:{color:s.nebulaColor,shape:s.nebulaShape,rotation:s.nebulaRotation,scale:s.nebulaScale,intensity:s.nebulaIntensity};
   ctx.fillStyle=s.spectrum==='geometry'?'#000':'#02050b';ctx.fillRect(0,0,w,h);if(s.spectrum==='geometry')return;
   if(other?s.bridgeOtherNebula!==false:s.nebula){
-   const n=nebula.shape==='filaments'?7:nebula.shape==='shell'?5:4;
+   const n=Math.min(this.cpuGeometry===0?2:4,nebula.shape==='filaments'?7:nebula.shape==='shell'?5:4);
    for(let k=0;k<n;k++){
     const a=(k*.93+nebula.rotation*Math.PI/180),direction=unit([Math.sin(a),Math.cos(a*1.3)*.55,Math.cos(a)]),q=cpuProject(plus(f.observer,scale(direction,100)),f,w,h);if(!q)continue;
     const radius=w*.36*nebula.scale,g=ctx.createRadialGradient(q.x,q.y,0,q.x,q.y,Math.max(1,radius));
@@ -172,24 +202,37 @@ export class CpuRenderer extends BlackHoleRenderer {
 
   if(!starDirections)starDirections=Array.from({length:1600},(_,k)=>{const z=seeded(k*3+1)*2-1,a=seeded(k*3+2)*TAU,r=Math.sqrt(1-z*z);return [r*Math.cos(a),z,r*Math.sin(a),Math.floor(seeded(k*3+3)*15),seeded(k+7)>.96?1.4:.8,seeded(k+8043)];});
   if(this.cpuStarBand!==s.spectrum+variety){this.cpuStarBand=s.spectrum+variety;this.cpuStarColors=Array.from({length:16},(_,i)=>{const palette=['#90b9ff','#c8defa','#fff1cb','#ffbd7d'],tint=variety>.1?palette[i%4]:'#c8defa';return cpuColor(tint,s.spectrum,'star',.25+i/20);});this.cpuSourceColors=Array.from({length:16},(_,i)=>cpuColor('#c8defa',s.spectrum,'source',.25+i/20));}
-  const count=Math.min(starDirections.length,Math.floor(280*starDensity*(showStars?1:0))),pixels=h/(.83*Math.max(1,1.35/(w/h)));
+  const count=Math.min(starDirections.length,Math.floor(this.cpuProfile.stars*starDensity*(showStars?1:0))),pixels=h/(.83*Math.max(1,1.35/(w/h)));
   ctx.globalAlpha=clamp(brightness,0,1);
+  const motion=this.warpMotionState(),pilot=motion.active?this.frameById.get(this.driveId):null,stretch=pilot?cpuWarpStarElongation(motion.beta):0,phase=motion.phase||0;
   for(let k=0;k<count;k++){
-   const d=starDirections[k],depth=dot(d,f.forward);if(depth<=0)continue;const x=w/2+dot(d,f.right)*pixels/depth,y=h/2-dot(d,f.up)*pixels/depth;if(x<0||y<0||x>w||y>h)continue;
-   const source=d[5]>(s.spectrum==='gamma'?.997:s.spectrum==='radio'?.987:s.spectrum==='xray'?.978:1);
-   ctx.fillStyle=(source?this.cpuSourceColors:this.cpuStarColors)[d[3]];ctx.fillRect(x,y,d[4]*Math.sqrt(Math.max(.1,brightness)),d[4]*Math.sqrt(Math.max(.1,brightness)));
+   const raw=starDirections[k],base=pilot?cpuWarpStarDirection(raw,pilot.frame[2],phase,k%3):raw;
+   const d=s.lensing&&!openSpace&&this.anomalyFrames?.length?anomalySkyDirection(base,f.observer,this.anomalyFrames,this.time):base,depth=dot(d,f.forward);if(depth<=0)continue;const x=w/2+dot(d,f.right)*pixels/depth,y=h/2-dot(d,f.up)*pixels/depth;if(x<0||y<0||x>w||y>h)continue;
+   const source=raw[5]>(s.spectrum==='gamma'?.997:s.spectrum==='radio'?.987:s.spectrum==='xray'?.978:1),color=(source?this.cpuSourceColors:this.cpuStarColors)[raw[3]],size=raw[4]*Math.sqrt(Math.max(.1,brightness));
+   const opacity=pilot?cpuWarpStarOpacity(phase,k%3,motion.rate):1;ctx.globalAlpha=clamp(brightness,0,1)*opacity;ctx.fillStyle=color;
+   if(stretch>.0001){
+    // Three nested ellipses approximate a Gaussian with a strict constant
+    // command budget. Their long axes follow each original star's motion.
+    const next=cpuWarpStarDirection(raw,pilot.frame[2],phase+.0001,k%3),nd=dot(next,f.forward),nx=nd>0?w/2+dot(next,f.right)*pixels/nd:x,ny=nd>0?h/2-dot(next,f.up)*pixels/nd:y,angle=Math.atan2(ny-y,nx-x),major=size*(1+stretch*9+3*clamp((motion.rate-.05)/.60,0,1));
+    for(let layer=0;layer<3;layer++){const spread=1+layer*.65;ctx.globalAlpha=clamp(brightness,0,1)*opacity*[.57,.20,.07][layer];ctx.beginPath();ctx.ellipse(x,y,major*spread*.5,Math.max(.3,size*.42)*spread,angle,0,TAU);ctx.fill();}
+    ctx.globalAlpha=clamp(brightness,0,1);
+   }else ctx.fillRect(x,y,size,size);
   }
   ctx.globalAlpha=1;
+  if(other&&s.bridgeWorlds==='earth-proxima'){
+   const light=unit(plus(scale(this.configCache.primaryBasis[2],-1),scale(this.configCache.primaryBasis[1],.65))),p=cpuProject(plus(f.observer,scale(light,100)),f,w,h);
+   if(p){const r=Math.max(1,p.pixels*1.479);ctx.fillStyle=cpuColor('#ff7852',s.spectrum,'star');ctx.beginPath();ctx.arc(p.x,p.y,r,0,TAU);ctx.fill();}
+  }
 
  }
  grid(){for(const _ of this.gridStages()){} }
  *gridStages(){
-  const s=this.state;if(!s.grid&&s.spectrum!=='geometry')return;
-  const m=this.massScale,holes=s.binary&&this.holeData[7]>0?2:1,f=this.cameraFrame,ctx=this.context2d,focus=this.getFocusFrame(),distance=focus?Math.hypot(...f.observer.map((v,i)=>v-focus.position[i])):Math.hypot(...f.observer),localScale=s.bridge?this.configCache.bridgeRadius:s.blackHole?m:Math.max(1/REFERENCE_RG_METERS,focus?Math.max(focus.radius*.5,distance*.035):distance*.035),spacing=.75*localScale*Math.pow(2,Math.max(0,Math.floor(Math.log2(Math.max(1,distance/localScale/22))))),extent=spacing*16,samples=this.cpuGeometry===0?16:24,lines=this.cpuGeometry===0?12:16,w=this.canvas.width,h=this.canvas.height,pixels=h/(.83*Math.max(1,1.35/(w/h)));
+  const s=this.displayState(),openSpace=this.isDriveOpenSpace();if(!s.grid&&s.spectrum!=='geometry')return;if(s.bridge&&!this.objectFrames.some(b=>b.collapsed))return;
+  const m=this.massScale,holes=s.binary&&this.holeData[7]>0?2:1,f=this.cameraFrame,ctx=this.context2d,focus=this.getFocusFrame(),distance=focus?Math.hypot(...f.observer.map((v,i)=>v-focus.position[i])):Math.hypot(...f.observer),localScale=s.bridge?this.configCache.bridgeRadius:s.blackHole?m:Math.max(1/REFERENCE_RG_METERS,focus?Math.max(focus.radius*.5,distance*.035):distance*.035),lines=this.cpuProfile.gridLines,spacing=.75*localScale*(16/lines)*Math.pow(2,Math.max(0,Math.floor(Math.log2(Math.max(1,distance/localScale/22))))),extent=spacing*lines,samples=this.cpuProfile.gridSamples,w=this.canvas.width,h=this.canvas.height,pixels=h/(.83*Math.max(1,1.35/(w/h)));
   const warpOwner=s.warp?this.objectFrames.find(b=>b.id===this.warpObjectId):null;
-  const normal=warpOwner?.frame?.[1]||(s.binary?[0,1,0]:this.configCache.primaryAxis),bx=unit(cross(normal,Math.abs(normal[2])>.9?[1,0,0]:[0,0,1])),bz=cross(bx,normal),anchor=warpOwner?scale(normal,dot(warpOwner.position,normal)):(s.blackHole?Array.from(this.holeData.slice(0,3)):[0,0,0]),cameraOffset=f.observer.map((v,i)=>v-anchor[i]),planeSlope=dot(f.forward,normal),hitDistance=Math.abs(planeSlope)>1e-5?-dot(cameraOffset,normal)/planeSlope:-1,origin=hitDistance>0?plus(cameraOffset,scale(f.forward,hitDistance)):cameraOffset,centerX=Math.round(dot(origin,bx)/spacing)*spacing,centerZ=Math.round(dot(origin,bz)/spacing)*spacing;
+  const drivenWarp=!!warpOwner&&warpOwner.id===this.driveId,normal=warpOwner?.frame?.[1]||(s.binary?[0,1,0]:this.configCache.primaryAxis),bx=drivenWarp?warpOwner.frame[0]:unit(cross(normal,Math.abs(normal[2])>.9?[1,0,0]:[0,0,1])),bz=drivenWarp?warpOwner.frame[2]:cross(bx,normal),warpSize=warpOwner?warpOwner.radius*effectiveWarpRadius(s.warpFactor):1,gridPhase=drivenWarp?(this.warpGridState?.(warpOwner,warpSize)?.offset||[0,0]):[0,0],anchor=warpOwner?(drivenWarp?plus(warpOwner.position,plus(scale(bz,-gridPhase[0]*warpSize),scale(bx,-gridPhase[1]*warpSize))):scale(normal,dot(warpOwner.position,normal))):(s.blackHole?Array.from(this.holeData.slice(0,3)):[0,0,0]),cameraOffset=f.observer.map((v,i)=>v-anchor[i]),planeSlope=dot(f.forward,normal),hitDistance=Math.abs(planeSlope)>1e-5?-dot(cameraOffset,normal)/planeSlope:-1,origin=hitDistance>0?plus(cameraOffset,scale(f.forward,hitDistance)):cameraOffset,centerX=Math.round(dot(origin,bx)/spacing)*spacing,centerZ=Math.round(dot(origin,bz)/spacing)*spacing;
 
-  const weakBodies=!s.blackHole?this.objectFrames.filter(b=>['star','planet','moon'].includes(b.type)&&b.massSolar>0).sort((a,b)=>b.massSolar-a.massSolar).slice(0,8):[];
+  const weakBodies=!s.blackHole&&!openSpace?this.objectFrames.filter(b=>(['star','planet','moon'].includes(b.type)||b.collapsed)&&b.massSolar>0).sort((a,b)=>b.massSolar-a.massSolar).slice(0,this.cpuProfile.weakBodies):[];
   // Two overlapping finite tracer windows replenish the CPU guide forever.
   // Each resets only at zero opacity; no late-time empty grid or hard reset.
   const flowWindow=s.blackHole&&(this.holeData[3]>0||this.holeData[7]>0)?12:weakBodies.length?weakGridFlowWindow(weakBodies[0].radius,weakBodies[0].massSolar/4300000):0;
@@ -205,13 +248,14 @@ export class CpuRenderer extends BlackHoleRenderer {
      point=plus(center,scale(rotation,factor));if(s.spectrum==='geometry')point=plus(point,scale(normal,-mass*1.8/Math.sqrt(1+(r/Math.max(mass*3,1e-20))**2)));
      if(!s.interiorView&&(label<=0||Math.hypot(...point.map((v,i)=>v-center[i]))<this.configCache.horizon[k])){visible=false;break;}
     }
-    if(warpOwner&&s.warpField){const delta=point.map((v,i)=>v-warpOwner.position[i]),size=Math.max(1e-20,warpOwner.radius*effectiveWarpRadius(s.warpFactor)),r=Math.hypot(...delta)/size,profile=Math.exp(-(((r-1)*2.8)**2)),direction=warpOwner.frame?.[2]||[0,0,1];point=plus(point,scale(direction,profile*Math.tanh((s.warpFactor||0)/4)*dot(delta,direction)));point=plus(point,scale(normal,-.34*Math.min(3,s.warpFactor*.3)*dot(delta,direction)*Math.exp(-(((r-1)*s.warpThickness*.7)**2))));}
+    if(warpOwner&&s.warpField){const delta=point.map((v,i)=>v-warpOwner.position[i]),size=Math.max(1e-20,warpOwner.radius*effectiveWarpRadius(s.warpFactor)),r=Math.hypot(...delta)/size,profile=Math.exp(-(((r-1)*2.8)**2)),direction=warpOwner.frame?.[2]||[0,0,1];point=plus(point,scale(direction,profile*Math.tanh((s.warpFactor||0)/4)*dot(delta,direction)));point=plus(point,scale(normal,-.34*warpDisplayStrength(s.warpFactor)*dot(delta,direction)*Math.exp(-(((r-1)*s.warpThickness*.7)**2))));}
     // Material markers follow the same radial free-fall clock as the GPU.
     // Replenished windows keep this finite CPU schematic populated indefinitely.
     for(const body of weakBodies){const delta=point.map((v,i)=>v-body.position[i]),radial=Math.hypot(...delta),next=weakGridTracerRadius(radial,body.massSolar/4300000,flowTime);if(next<=body.radius){visible=false;break;}point=plus(body.position,scale(delta,next/Math.max(radial,1e-30)));}
     // The depth cue remains an amplified schematic, not a physical rubber sheet.
     for(const body of weakBodies){const delta=point.map((v,i)=>v-body.position[i]),radial=Math.hypot(...delta),rg=body.massSolar/4300000,scaleRadius=Math.max(body.radius*2,localScale*2),strength=s.spectrum==='geometry'?localScale*1.5*Math.sqrt(body.massSolar/Math.max(weakBodies[0].massSolar,1e-20)):Math.sqrt(Math.max(0,2*rg*scaleRadius)),dip=strength/Math.sqrt(1+(radial/scaleRadius)**2);point=plus(point,scale(normal,-dip));}
     if(s.gravitationalWaves&&s.binary&&s.blackHole&&this.holeData[3]>0&&this.holeData[7]>0){const d=point.map((v,i)=>v-anchor[i]),radial=Math.hypot(...d),angle=Math.atan2(dot(d,bz),dot(d,bx)),phase=(this.time*(s.waveFrequency||1)-radial/Math.max(m,1e-20)*.3)*2,amplitude=(s.waveAmplitude??.3)*(this.cancellationFraction??1)*m/(1+radial/Math.max(m*20,1e-20));point=plus(point,scale(normal,amplitude*Math.cos(phase)*Math.cos(2*angle)));}
+    if(!openSpace&&this.anomalyFrames?.length)point=plus(point,anomalyGridOffset(point,this.anomalyFrames,this.time));
     const delta=point.map((v,i)=>v-f.observer[i]),depth=dot(delta,f.forward);if(!visible||depth<=1e-14){drawing=false;continue;}const x=w/2+dot(delta,f.right)*pixels/depth,y=h/2-dot(delta,f.up)*pixels/depth;if(!Number.isFinite(x+y)||Math.abs(x)>1e6||Math.abs(y)>1e6){drawing=false;continue;}if(drawing)ctx.lineTo(x,y);else{ctx.moveTo(x,y);drawing=true;}
 
    }
@@ -224,7 +268,7 @@ export class CpuRenderer extends BlackHoleRenderer {
  // near the subject without independent detached grids or a per-pixel march.
 
  *captureShadowStages(center,mass,horizon){
-  const ctx=this.context2d,f=this.cameraFrame,width=this.canvas.width,height=this.canvas.height,delta=center.map((v,i)=>v-f.observer[i]),distance=Math.hypot(...delta),toward=unit(delta),angle=this.state.lensing?apparentCaptureAngle(distance,mass):Math.asin(Math.min(1,horizon/distance)),cosine=Math.cos(angle),direction=[dot(toward,f.right),dot(toward,f.up),dot(toward,f.forward)],rows=Math.min(128,Math.max(24,Math.ceil(height/2)));
+  const ctx=this.context2d,f=this.cameraFrame,width=this.canvas.width,height=this.canvas.height,delta=center.map((v,i)=>v-f.observer[i]),distance=Math.hypot(...delta),toward=unit(delta),angle=this.state.lensing?apparentCaptureAngle(distance,mass):Math.asin(Math.min(1,horizon/distance)),cosine=Math.cos(angle),direction=[dot(toward,f.right),dot(toward,f.up),dot(toward,f.forward)],rows=Math.min(this.cpuProfile.shadowRows,Math.max(16,Math.ceil(height/2)));
   ctx.fillStyle='#000';ctx.beginPath();let previous=captureSpans(direction,cosine,width,height,0);
   for(let row=0;row<rows;row++){
    const y0=row*height/rows,y1=(row+1)*height/rows,next=captureSpans(direction,cosine,width,height,y1),middle=captureSpans(direction,cosine,width,height,(y0+y1)*.5);
@@ -235,7 +279,7 @@ export class CpuRenderer extends BlackHoleRenderer {
  }
  hole(k){for(const _ of this.holeStages(k)){} }
  *holeStages(k){
-  const source=this.state,s=k?{...source,whiteHole:!!source.secondaryWhiteHole,disk:source.secondaryDisk??source.disk,diskStyle:source.secondaryDiskStyle??source.diskStyle,diskColor:source.secondaryDiskColor??source.diskColor,diskThickness:source.secondaryDiskThickness??source.diskThickness,diskDensity:source.secondaryDiskDensity??source.diskDensity,jets:source.secondaryJets??source.jets,jetColor:source.secondaryJetColor??source.jetColor,jetSpread:source.secondaryJetSpread??source.jetSpread,jetLength:source.secondaryJetLength??source.jetLength,jetIntensity:source.secondaryJetIntensity??source.jetIntensity}:source,ctx=this.context2d,m=this.holeData[k*4+3],center=Array.from(this.holeData.slice(k*4,k*4+3)),distance=Math.hypot(...center.map((v,i)=>v-this.cameraFrame.observer[i])),nearCapture=this.sceneId==='radiant-descent'&&k===0&&distance<16*m&&!s.interiorView,q=cpuProject(center,this.cameraFrame,this.canvas.width,this.canvas.height)||(nearCapture?{pixels:this.canvas.height/(.83*Math.max(1,1.35/(this.canvas.width/this.canvas.height))*Math.max(distance,1e-20)),x:this.canvas.width*.5,y:this.canvas.height*.5}:null);if(!q)return;
+  const source=this.displayState(),s=k?{...source,whiteHole:!!source.secondaryWhiteHole,disk:source.secondaryDisk??source.disk,diskStyle:source.secondaryDiskStyle??source.diskStyle,diskColor:source.secondaryDiskColor??source.diskColor,diskThickness:source.secondaryDiskThickness??source.diskThickness,diskDensity:source.secondaryDiskDensity??source.diskDensity,jets:source.secondaryJets??source.jets,jetColor:source.secondaryJetColor??source.jetColor,jetSpread:source.secondaryJetSpread??source.jetSpread,jetLength:source.secondaryJetLength??source.jetLength,jetIntensity:source.secondaryJetIntensity??source.jetIntensity}:source,ctx=this.context2d,m=this.holeData[k*4+3],center=Array.from(this.holeData.slice(k*4,k*4+3)),distance=Math.hypot(...center.map((v,i)=>v-this.cameraFrame.observer[i])),nearCapture=this.sceneId==='radiant-descent'&&k===0&&distance<16*m&&!s.interiorView,q=cpuProject(center,this.cameraFrame,this.canvas.width,this.canvas.height)||(nearCapture?{pixels:this.canvas.height/(.83*Math.max(1,1.35/(this.canvas.width/this.canvas.height))*Math.max(distance,1e-20)),x:this.canvas.width*.5,y:this.canvas.height*.5}:null);if(!q)return;
   if(!(m>0))return;
   const horizon=this.configCache.horizon[k],imageRadius=cpuCompactImageRadius(horizon,m,s.lensing,s.interiorView&&s.spectrum==='geometry'),r=horizon*q.pixels,axis=k?this.configCache.secondaryAxis:this.configCache.primaryAxis,bx=unit(cross(axis,Math.abs(axis[2])>.9?[1,0,0]:[0,0,1])),bz=cross(bx,axis);
   if(s.spectrum==='geometry'){
@@ -250,9 +294,9 @@ export class CpuRenderer extends BlackHoleRenderer {
   if(s.disk){
    const inner=Math.max(horizon*1.03,this.configCache.isco[k]*m),outer=this.configCache.diskOuter[k];
    const cold=s.diskStyle==='dust'||s.diskStyle==='nebula',bandWeight=cold?(s.spectrum==='gamma'?.015:s.spectrum==='radio'?.18:s.spectrum==='xray'?.12:s.spectrum==='infrared'?1.7:1):1;
-   for(let ring=0;ring<18;ring++){
-    const radius=inner+(outer-inner)*(ring+.5)/18,points=[];for(let j=0;j<=72;j+=this.cpuGeometry===0?2:1){const c=circle[j];points.push([center[0]+(bx[0]*c[0]+bz[0]*c[1])*radius,center[1]+(bx[1]*c[0]+bz[1]*c[1])*radius,center[2]+(bx[2]*c[0]+bz[2]*c[1])*radius]);}
-    this.drawLine(points,cpuColor(s.diskPalette==='rainbow'?['#f34b57','#ff9b35','#e9e743','#4ed279','#3daeea','#8161ed','#d952dc'][ring%7]:s.diskColor,s.spectrum,'hot',Math.min(.9,(1-ring/22)*.65*s.diskDensity)*bandWeight,1-ring/18),Math.min(12,Math.max(.8,(outer-inner)*q.pixels/19)));yield;
+   const rings=this.cpuProfile.diskRings;for(let ring=0;ring<rings;ring++){
+    const radius=inner+(outer-inner)*(ring+.5)/rings,points=[];for(let j=0;j<=72;j+=this.cpuProfile.circleStep){const c=circle[j];points.push([center[0]+(bx[0]*c[0]+bz[0]*c[1])*radius,center[1]+(bx[1]*c[0]+bz[1]*c[1])*radius,center[2]+(bx[2]*c[0]+bz[2]*c[1])*radius]);}
+    this.drawLine(points,cpuColor(s.diskPalette==='rainbow'?['#f34b57','#ff9b35','#e9e743','#4ed279','#3daeea','#8161ed','#d952dc'][ring%7]:s.diskColor,s.spectrum,'hot',Math.min(.9,(1-ring/(rings+4))*.65*s.diskDensity)*bandWeight,1-ring/rings),Math.min(12,Math.max(.8,(outer-inner)*q.pixels/(rings+1))));yield;
    }
   }
   if(s.jets)for(const sign of [-1,1]){
@@ -271,7 +315,7 @@ export class CpuRenderer extends BlackHoleRenderer {
   // The CPU shadow cue and the horizon are different; no unlabeled horizon overlay.
  }
  *annulusStages(body){
-  const ctx=this.context2d,s=this.state,frame=this.cameraFrame,parent=this.objectFrames.find(x=>x.id===body.parentId),basis=cpuBodyBasis({...body,axialTilt:body.axialTilt??parent?.axialTilt??0},this.configCache.primaryBasis,this.time),inner=clamp(body.innerRadiusRatio??.55,.1,.97),bandCount=this.cpuGeometry===0?7:11,segments=this.cpuGeometry===0?48:72,material=body.material==='icy'?'#d4dfeb':body.material==='metallic'?'#9b9ea8':'#ad9476',q=cpuProject(body.position,frame,this.canvas.width,this.canvas.height);if(!q)return;
+  const ctx=this.context2d,s=this.state,frame=this.cameraFrame,parent=this.objectFrames.find(x=>x.id===body.parentId),basis=cpuBodyBasis({...body,axialTilt:body.axialTilt??parent?.axialTilt??0},this.configCache.primaryBasis,this.time),inner=clamp(body.innerRadiusRatio??.55,.1,.97),bandCount=this.cpuProfile.ringBands,segments=this.cpuProfile.ringSegments,material=body.material==='icy'?'#d4dfeb':body.material==='metallic'?'#9b9ea8':'#ad9476',q=cpuProject(body.position,frame,this.canvas.width,this.canvas.height);if(!q)return;
   const r=body.radius*q.pixels;
   ctx.strokeStyle=cpuColor(body.color||material,s.spectrum,body.type==='disk'?'hot':'surface',clamp(body.opacity??(body.type==='belt'?.16:.88),0,body.type==='belt'?.2:1));ctx.lineWidth=Math.min(body.type==='belt'?1.25:14,Math.max(.55,r*(1-inner)/bandCount*1.12));
   for(let k=0;k<bandCount;k++){
@@ -285,7 +329,7 @@ export class CpuRenderer extends BlackHoleRenderer {
   }
  }
  *planetDetailStages(body,r){
-  if(r<3)return;const ctx=this.context2d,s=this.state,id=Number(body.surfaceId)||0,fill=(color,alpha=1)=>{ctx.fillStyle=cpuColor(color,s.spectrum,'surface',alpha);},ellipse=(x,y,a,b,color,alpha=1,angle=0)=>{fill(color,alpha);ctx.beginPath();ctx.ellipse(x*r,y*r,a*r,b*r,angle,0,TAU);ctx.fill();};
+  if(r<this.cpuProfile.detailPixels)return;const ctx=this.context2d,s=this.state,id=Number(body.surfaceId)||0,fill=(color,alpha=1)=>{ctx.fillStyle=cpuColor(color,s.spectrum,'surface',alpha);},ellipse=(x,y,a,b,color,alpha=1,angle=0)=>{fill(color,alpha);ctx.beginPath();ctx.ellipse(x*r,y*r,a*r,b*r,angle,0,TAU);ctx.fill();};
   // These are bounded projected hints for the explicitly low-fidelity backend.
   // Named GPU surfaces use the separate higher-detail spherical material.
   if(id===1){
@@ -308,13 +352,13 @@ export class CpuRenderer extends BlackHoleRenderer {
   else {
    if(id===2){for(const[x,y,a,b]of [[-.35,-.15,.27,.24],[.1,-.42,.22,.15],[.39,-.13,.24,.18],[-.15,.34,.13,.17]])ellipse(x,y,a,b,'#5f656a',.65);yield;}
    if(id===21)ellipse(-.3,0,.48,.75,'#46362b',.8);
-   const count=Math.min(this.cpuGeometry===0?10:22,Math.floor(r*.6));
+   const count=Math.min(this.cpuProfile.craters,Math.floor(r*.6));
    for(let j=0;j<count;j++){const a=seeded(j+340)*TAU,rho=Math.sqrt(seeded(j+781))*.78,size=.015+.045*seeded(j+989),x=Math.cos(a)*rho,y=Math.sin(a)*rho;ellipse(x,y,size,size*.85,'#555253',.35);ctx.strokeStyle=cpuColor('#c7c3b7',s.spectrum,'surface',.4);ctx.lineWidth=Math.max(.5,r*.006);ctx.beginPath();ctx.ellipse(x*r,y*r,size*r,size*r*.85,0,0,TAU);ctx.stroke();if(j%8===7)yield;}
   }
  }
  body(body){for(const _ of this.bodyStages(body)){} }
  *dysonStages(body,insidePass){
-  const width=this.canvas.width,height=this.canvas.height,frame=this.cameraFrame,aspect=width/height,fov=.83*Math.max(1,1.35/aspect),origin=frame.observer.map((v,i)=>(v-body.position[i])/body.radius),ctx=this.context2d,cell=Math.max(12,Math.ceil(Math.sqrt(width*height/2200))),opacity=this.state.spectrum==='geometry'?1:body.opacity??1;
+  const width=this.canvas.width,height=this.canvas.height,frame=this.cameraFrame,aspect=width/height,fov=.83*Math.max(1,1.35/aspect),origin=frame.observer.map((v,i)=>(v-body.position[i])/body.radius),ctx=this.context2d,cell=Math.max(12,Math.ceil(Math.sqrt(width*height/this.cpuProfile.dysonCells))),opacity=this.state.spectrum==='geometry'?1:body.opacity??1;
   if(opacity<=0)return;ctx.save();ctx.globalAlpha=opacity;
   for(let y=0;y<height;y+=cell){for(let x=0;x<width;x+=cell){const dx=((x+cell*.5)/width-.5)*aspect*fov,dy=(.5-(y+cell*.5)/height)*fov,ray=unit(frame.forward.map((v,i)=>v+frame.right[i]*dx+frame.up[i]*dy)),hit=dysonShellHit(origin,ray,body.dysonCutaway??0);if(!hit||hit.inside!==insidePass)continue;ctx.fillStyle=this.state.spectrum==='geometry'?(hit.inside?'#727c80':'#606c77'):cpuColor(dysonPreviewMaterial(hit.point,hit.inside,body.bodyParams?.[1]??1),this.state.spectrum,'surface');ctx.fillRect(x,y,Math.min(cell+1,width-x),Math.min(cell+1,height-y));}yield;}
   ctx.restore();
@@ -352,13 +396,24 @@ export class CpuRenderer extends BlackHoleRenderer {
   if(type==='jets'){const axis=body.frame?.[1]||[0,1,0];for(const sign of [-1,1]){this.drawLine([plus(body.position,scale(axis,body.radius*.1*sign)),plus(body.position,scale(axis,body.radius*sign))],cpuColor(body.color||s.jetColor,s.spectrum,'jet',.6),Math.min(8,Math.max(.7,r*.05)));yield;}return;}
   if(type==='star'&&s.blackHole&&(body.corona??.35)>0){
    const centers=[0,...(s.binary&&!this.mergerComplete?[1]:[])],k=centers.sort((a,b)=>Math.hypot(...body.position.map((v,i)=>v-this.holeData[a*4+i]))-Math.hypot(...body.position.map((v,i)=>v-this.holeData[b*4+i])))[0],center=Array.from(this.holeData.slice(k*4,k*4+3)),offset=body.position.map((v,i)=>v-center[i]),distance=Math.hypot(...offset),tidal=body.radius*Math.cbrt(this.holeData[k*4+3]*4300000/Math.max(this.objectMassSolar?.(body)||1,.000001)),strength=clamp((tidal/distance)**3*.2,0,1)*(body.corona??.35);
-   if(strength>.003){const axis=k?this.configCache.secondaryAxis:this.configCache.primaryAxis,spin=k?s.secondarySpin:s.spin,points=[];for(let j=0;j<=24;j++){const t=j/24,along=this.configCache.horizon[k]*1.05+(distance-this.configCache.horizon[k]*1.05)*t,bend=spin*(1-t)**2*2.4,radial=scale(offset,along/distance),normal=cross(axis,radial),target=plus(plus(scale(radial,Math.cos(bend)),scale(normal,Math.sin(bend))),scale(axis,dot(axis,radial)*(1-Math.cos(bend))));points.push(plus(center,target));}this.drawLine(points,cpuColor(body.color||s.starColor,s.spectrum,'hot',Math.min(1,strength),1),Math.min(12,Math.max(1,r*.2)));yield;}
+   if(strength>.003){const axis=k?this.configCache.secondaryAxis:this.configCache.primaryAxis,spin=k?s.secondarySpin:s.spin,points=[];for(let j=0;j<=24;j++){const t=j/24,along=this.configCache.horizon[k]*1.05+(distance-this.configCache.horizon[k]*1.05)*t,bend=-tidalStreamBend((distance-along)/Math.max(distance-this.configCache.horizon[k],1e-20),spin),radial=scale(offset,along/distance),normal=cross(axis,radial),target=plus(plus(scale(radial,Math.cos(bend)),scale(normal,Math.sin(bend))),scale(axis,dot(axis,radial)*(1-Math.cos(bend))));points.push(plus(center,target));}this.drawLine(points,cpuColor(body.color||s.starColor,s.spectrum,'hot',Math.min(1,strength),1),Math.min(12,Math.max(1,r*.2)));yield;}
   }
   ctx.save();ctx.globalAlpha*=opacity;ctx.translate(q.x,q.y);if((type==='planet'||type==='moon')&&body.shapeAxes){const maximum=Math.max(...body.shapeAxes),axes=body.shapeAxes.map(v=>v/maximum),basis=cpuBodyBasis(body,this.configCache.primaryBasis,this.time);let xx=0,xy=0,yy=0;for(let j=0;j<3;j++){const x=dot(basis[j],this.cameraFrame.right)*axes[j],y=-dot(basis[j],this.cameraFrame.up)*axes[j];xx+=x*x;xy+=x*y;yy+=y*y;}const mid=(xx+yy)*.5,spread=Math.sqrt((xx-yy)**2*.25+xy*xy);ctx.rotate(.5*Math.atan2(2*xy,xx-yy));ctx.scale(Math.sqrt(Math.max(.01,mid+spread)),Math.sqrt(Math.max(.01,mid-spread)));}if(type==='probe'){const intensity=Math.max(1,body.luminosity||1),power=Math.log10(intensity)+1,halo=Math.min(this.canvas.width*2,Math.max(.4,r)*(2+power*3)),glow=ctx.createRadialGradient(0,0,0,0,0,halo);glow.addColorStop(0,cpuColor('#e5f8ff',s.spectrum,'probe',Math.min(.95,power*.18)));glow.addColorStop(.25,cpuColor('#94cfff',s.spectrum,'probe',Math.min(.7,power*.08)));glow.addColorStop(1,'transparent');ctx.fillStyle=glow;ctx.fillRect(-halo,-halo,2*halo,2*halo);}const c=cpuColor(type==='star'?stellarTint:body.color||((type==='planet'||type==='moon')?s.planetColor:'#c5cfdb'),s.spectrum,type==='star'?starKind:'surface',1,1,starFade);ctx.fillStyle=c;ctx.strokeStyle=c;ctx.lineWidth=Math.max(.5,r*.025);
-  if(type==='enterprise'){
+  if(type==='heighliner'){
+   // Bounded hollow transport schematic; concentric ellipses leave the mouth open.
+   const metal=ctx.createRadialGradient(-r*.12,0,0,0,0,r*.75);metal.addColorStop(0,cpuColor('#28353b',s.spectrum));metal.addColorStop(.45,cpuColor('#8d989a',s.spectrum));metal.addColorStop(1,cpuColor('#36434a',s.spectrum));
+   ctx.fillStyle=metal;ctx.fillRect(-r*.29,-r*.85,r*.58,r*1.7);
+   ctx.beginPath();ctx.ellipse(0,-r*.85,r*.29,r*.09,0,0,TAU);ctx.fill();ctx.beginPath();ctx.ellipse(0,r*.85,r*.29,r*.09,0,0,TAU);ctx.fill();
+   ctx.strokeStyle=cpuColor('#18262e',s.spectrum);ctx.lineWidth=Math.max(.5,r*.008);
+   for(let panel=-7;panel<=7;panel++){ctx.beginPath();ctx.moveTo(-r*.29,panel*r*.11);ctx.lineTo(r*.29,panel*r*.11);ctx.stroke();}
+   for(const x of [-.22,-.11,.11,.22]){ctx.beginPath();ctx.moveTo(x*r,-r*.85);ctx.lineTo(x*r,r*.85);ctx.stroke();}
+   ctx.fillStyle=cpuColor('#1b262d',s.spectrum);for(const z of [-.06,.04])ctx.fillRect(-r*.305,z*r,r*.61,r*.025);
+   ctx.fillStyle=cpuColor('#050a0e',s.spectrum);ctx.beginPath();ctx.ellipse(0,-r*.85,r*.235,r*.065,0,0,TAU);ctx.fill();
+   ctx.strokeStyle=cpuColor('#b5b6a2',s.spectrum);ctx.lineWidth=Math.max(.7,r*.011);ctx.beginPath();ctx.ellipse(0,-r*.85,r*.27,r*.08,0,0,TAU);ctx.stroke();
+  }else if(type==='enterprise'){
    ctx.beginPath();ctx.ellipse(r*.25,-r*.13,r*.57,r*.15,0,0,TAU);ctx.fill();ctx.fillRect(-r*.15,0,r*.16,r*.27);ctx.fillRect(-r*.48,r*.2,r*.72,r*.15);ctx.fillRect(-r*.7,-r*.35,r*.73,r*.12);ctx.fillRect(-r*.45,-r*.28,r*.07,r*.5);ctx.fillStyle=cpuColor('#d7723e',s.spectrum);ctx.fillRect(-r*.02,-r*.35,r*.06,r*.12);
   }else if(type==='shuttle'){
-   if(body.id===this.driveId){const f=this.getFlightState(),power=Math.abs(f.throttle||0),turn=Math.abs(f.steeringInput||0);ctx.fillStyle=cpuColor('#60bcff',s.spectrum,'hot',.8);if(power>.001){const direction=f.throttle>0?1:-1,start=f.throttle>0?.72:-.86;for(const x of [-.10,0,.10]){ctx.beginPath();ctx.moveTo((x-.028)*r,start*r);ctx.lineTo(x*r,(start+direction*(.16+power*.65))*r);ctx.lineTo((x+.028)*r,start*r);ctx.fill();}}if(turn>.001){const side=Math.sign(f.steeringInput);for(const z of [-.6,.55]){ctx.beginPath();ctx.moveTo(side*r*.12,z*r);ctx.lineTo(side*r*.38,(z+.03)*r);ctx.lineTo(side*r*.12,(z+.06)*r);ctx.fill();}}ctx.fillStyle=c;}
+   if(body.id===this.driveId){const f=this.getFlightState(),power=Math.abs(f.throttle||0),turn=Math.abs(f.steeringInput||0);ctx.fillStyle=cpuColor('#60bcff',s.spectrum,'hot',.8);if(power>.001){const direction=f.throttle>0?1:-1,start=f.throttle>0?.72:-.86;for(const x of [-.10,0,.10]){ctx.beginPath();ctx.moveTo((x-.028)*r,start*r);ctx.lineTo(x*r,(start+direction*(.16+power*.65))*r);ctx.lineTo((x+.028)*r,start*r);ctx.fill();}}if(turn>.001){const side=-Math.sign(f.steeringInput),z=-.52;ctx.beginPath();ctx.moveTo(side*r*.145,(z-.012)*r);ctx.lineTo(side*r*(.29+.07*turn),z*r);ctx.lineTo(side*r*.145,(z+.012)*r);ctx.fill();}ctx.fillStyle=c;}
    // Bounded schematic of the same 1.72-long / 1.10-wide double-delta planform.
    const outline=[[0,-.86],[.055,-.82],[.10,-.70],[.128,-.50],[.128,-.31],[.205,.18],[.55,.55],[.13,.67],[.13,.72],[-.13,.72],[-.13,.67],[-.55,.55],[-.205,.18],[-.128,-.31],[-.128,-.50],[-.10,-.70],[-.055,-.82]];
    ctx.beginPath();outline.forEach(([x,y],i)=>i?ctx.lineTo(x*r,y*r):ctx.moveTo(x*r,y*r));ctx.closePath();ctx.fill();
@@ -383,7 +438,7 @@ export class CpuRenderer extends BlackHoleRenderer {
    for(let n=0;n<9;n++){const a=seeded(n+210)*TAU+this.time*.03*(body.rotation??1),rho=r*Math.sqrt(seeded(n+67))*.68;ctx.beginPath();ctx.ellipse(Math.cos(a)*rho,Math.sin(a)*rho,r*(.025+.1*seeded(n+707)),r*(body.planetStyle==='ocean'?.008:body.planetStyle==='ice'?.025:.065),a,0,TAU);ctx.fill();}
   }
   if((type==='planet'||type==='moon')&&body.surfaceId)yield* this.planetDetailStages(body,r);
-  if(s.warp&&body.id===this.warpObjectId&&s.warpField){ctx.strokeStyle='rgba(104,183,241,.55)';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(0,0,r*effectiveWarpRadius(s.warpFactor),r*effectiveWarpRadius(s.warpFactor)*.6,0,0,TAU);ctx.stroke();}
+  if(s.warp&&s.warpFactor>0&&body.id===this.warpObjectId&&s.warpField){ctx.strokeStyle='rgba(104,183,241,.55)';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(0,0,r*effectiveWarpRadius(s.warpFactor),r*effectiveWarpRadius(s.warpFactor)*.6,0,0,TAU);ctx.stroke();}
   ctx.restore();
  }
  // Bounded schematic counterpart of the GPU's deliberately enlarged core.
@@ -435,8 +490,11 @@ export class CpuRenderer extends BlackHoleRenderer {
   const ctx=this.context2d,s=this.state;r=Math.max(.5,Math.min(r,20000));
   ctx.save();ctx.translate(x,y);
   const at=(x,y,first)=>{const scale=Math.max(1,Math.hypot(x,y)/.995);(first?ctx.moveTo:ctx.lineTo).call(ctx,x/scale*r,y/scale*r);};
-  ctx.fillStyle=cpuColor(other?'#b97031':'#126485',s.spectrum,'surface');ctx.beginPath();ctx.arc(0,0,r,0,TAU);ctx.fill();
-  if(other){
+  const proxima=other&&s.bridgeWorlds==='earth-proxima';
+  ctx.fillStyle=cpuColor(other?(proxima?'#9f8172':'#b97031'):'#126485',s.spectrum,'surface');ctx.beginPath();ctx.arc(0,0,r,0,TAU);ctx.fill();
+  if(proxima){
+   for(let j=0;j<22;j++){const angle=j*2.39996,rho=Math.sqrt((j+.5)/22)*.91,cx=Math.cos(angle)*rho*r,cy=Math.sin(angle)*rho*r,cr=r*(.024+.025*seeded(j+82));ctx.fillStyle=cpuColor(j%3?'#746256':'#b79f8f',s.spectrum,'surface',.62);ctx.beginPath();ctx.ellipse(cx,cy,cr,cr*.72,angle,0,TAU);ctx.fill();}
+  }else if(other){
    for(let j=-8;j<=8;j++){ctx.strokeStyle=cpuColor(j%3===0?'#82502b':'#e2a45a',s.spectrum,'surface',.55);ctx.lineWidth=Math.max(.6,r*.025);ctx.beginPath();for(let k=0;k<=18;k++){const xx=-1+k/9,yy=j*.13+Math.sin(xx*4+j*.6)*.035;at(xx,yy,k===0);}ctx.stroke();}
   }else{
    for(let j=0;j<8;j++){const angle=j*2.39996+.4,rho=Math.sqrt((j+.4)/8)*.7,cx=Math.cos(angle)*rho,cy=Math.sin(angle)*rho;ctx.fillStyle=cpuColor(j%3?'#3b783c':'#69834b',s.spectrum,'surface');ctx.beginPath();for(let k=0;k<=18;k++){const a=k/18*TAU,rr=.28+.065*Math.sin(k*1.5+j*2),xx=cx+Math.cos(a)*rr,yy=cy+Math.sin(a)*rr*.68;at(xx,yy,k===0);}ctx.closePath();ctx.fill();}
@@ -444,24 +502,47 @@ export class CpuRenderer extends BlackHoleRenderer {
   }
   const shade=ctx.createRadialGradient(-r*.25,-r*.25,r*.2,0,0,r);shade.addColorStop(0,'transparent');shade.addColorStop(.75,'rgba(0,0,0,.08)');shade.addColorStop(1,'rgba(0,0,0,.55)');ctx.fillStyle=shade;ctx.beginPath();ctx.arc(0,0,r,0,TAU);ctx.fill();ctx.restore();
  }
+ // Autopilot remains impulse-only. A manually driven Enterprise may add
+ // its bounded schematic bubble and rolling sheet to the bridge preview.
+ bridgeBubble(){
+  const s=this.state;if(!s.bridge||this.driveId!==this.bridgeObjectId||!s.warp||!(s.warpFactor>0))return;
+  const ship=this.frameById.get(this.bridgeObjectId);if(ship?.type!=='enterprise'||this.objectById.get(ship.id)?.flight?.mode!=='warp')return;
+  const radius=ship.radius*effectiveWarpRadius(s.warpFactor),axis=ship.frame[2],up=ship.frame[1],side=ship.frame[0];
+  if(s.grid){
+   const strength=warpDisplayStrength(s.warpFactor),thickness=Math.min(20,s.warpThickness*(1+s.warpFactor*.04)),count=this.cpuProfile.gridLines,samples=this.cpuProfile.gridSamples*2,spacing=2/count,offset=this.warpGridState(ship,radius).offset,phase=offset.map(v=>((v%spacing)+spacing)%spacing);
+   for(let direction=0;direction<2;direction++)for(let j=-count;j<=count;j++){
+    const points=[];for(let k=0;k<=samples;k++){const along=-2.25+k*4.5/samples,x=direction?j*spacing-phase[0]:along,z=direction?along:j*spacing-phase[1],r=Math.hypot(x,z),height=-.35-.34*strength*x*Math.exp(-(((r-1)*Math.max(1,thickness)*.7)**2))*clamp((2.5-r)/.5,0,1);points.push(plus(ship.position,plus(scale(axis,x*radius),plus(scale(side,z*radius),scale(up,height*radius)))));}
+    this.drawLine(points,'rgba(112,193,240,.62)',.85);
+   }
+  }
+  if(s.spectrum==='geometry'||s.warpField===false)return;
+  const q=cpuProject(ship.position,this.cameraFrame,this.canvas.width,this.canvas.height);if(!q)return;
+  const r=Math.min(4000,radius*q.pixels),ctx=this.context2d;if(!(r>.5))return;
+  ctx.save();ctx.strokeStyle=cpuColor('#8fcaff',s.spectrum,'nebula',.55);ctx.lineWidth=Math.max(1,Math.min(5,r*.012));ctx.beginPath();ctx.ellipse(q.x,q.y,r,r*.86,0,0,TAU);ctx.stroke();ctx.restore();
+ }
+ bridgeGrid(radius){
+  const normal=this.state.bridgeGridOrientation==='parallel'?this.configCache.primaryBasis[1]:this.configCache.primaryBasis[2],x=unit(cross(normal,Math.abs(normal[2])>.9?[1,0,0]:[0,0,1])),y=cross(x,normal);
+  const rings=this.cpuProfile.ringBands+2,segments=72/this.cpuProfile.circleStep;for(let n=0;n<rings;n++){const rr=radius*(.5+n*3.04/(rings-1)),points=[];for(let k=0;k<=segments;k++){const a=k/segments*TAU;points.push(plus(scale(x,Math.cos(a)*rr),scale(y,Math.sin(a)*rr)));}this.drawLine(points,'rgba(132,209,245,.5)',.7);}
+ }
  bridge(){
   if(!this.state.bridge)return;
-  const ctx=this.context2d,radius=this.configCache.bridgeRadius;
+  const stage=bridgeJourney(this.bridgeTime,this.configCache.bridgeRadius,this.state.bridgeLifecycle);if(stage.open<.001)return;
+  const ctx=this.context2d,radius=this.configCache.bridgeRadius*stage.open;
   const q=cpuProject([0,0,0],this.cameraFrame,this.canvas.width,this.canvas.height);if(!q)return;
   const r=Math.min(4000,radius*q.pixels);if(!(r>.2))return;
   if(this.state.spectrum==='geometry'){
    this.geometryOutline([0,0,0],radius,'#a8dcf8');
-   for(let n=0;n<10;n++){ctx.strokeStyle='rgba(132,209,245,.5)';ctx.lineWidth=.8;ctx.beginPath();ctx.ellipse(q.x,q.y,r*(.5+n*.09),r*.7,0,0,TAU);ctx.stroke();}
+   this.bridgeGrid(radius);
    if(this.state.bridgeMode==='crossed'){ctx.strokeStyle='#d5b8f0';ctx.lineWidth=2.4;ctx.beginPath();ctx.ellipse(q.x,q.y,r*.7,r*1.22,Math.PI/2,0,TAU);ctx.stroke();}
    return;
   }
-  const other=Math.hypot(...this.cameraFrame.observer)>=radius/2,far=other?this.state.bridgeOtherColor:this.state.nebulaColor,hasNebula=other?this.state.bridgeOtherNebula!==false:this.state.nebula;
+  const other=Math.hypot(...this.cameraFrame.observer)>=this.configCache.bridgeRadius/2,far=other?this.state.bridgeOtherColor:this.state.nebulaColor,hasNebula=other?this.state.bridgeOtherNebula!==false:this.state.nebula;
   ctx.fillStyle=hasNebula?cpuColor(far,this.state.spectrum,'nebula',.75):'#02050b';ctx.beginPath();ctx.arc(q.x,q.y,r*.72,0,TAU);ctx.fill();
   if(!hasNebula&&this.state.stars){ctx.fillStyle=cpuColor('#c8defa',this.state.spectrum,'star',.75);for(let n=0;n<38;n++){const a=seeded(n+901)*TAU,d=Math.sqrt(seeded(n+540))*r*.68;ctx.fillRect(q.x+Math.cos(a)*d,q.y+Math.sin(a)*d,1,1);}}
   if(this.state.bridgeSurfaces)this.paintBridgeWorld(q.x,q.y,r*.46,other);
   const glow=ctx.createRadialGradient(q.x,q.y,r*.7,q.x,q.y,r*1.4);glow.addColorStop(0,cpuColor('#200c38',this.state.spectrum,'nebula',.6));glow.addColorStop(.55,cpuColor('#6dc3eb',this.state.spectrum,'nebula',.7));glow.addColorStop(1,'transparent');ctx.fillStyle=glow;ctx.fillRect(q.x-r*1.4,q.y-r*1.4,r*2.8,r*2.8);
   if(this.state.bridgeMode==='crossed'){ctx.strokeStyle=cpuColor('#ba8ee8',this.state.spectrum,'nebula',.8);ctx.lineWidth=2.4;ctx.beginPath();ctx.ellipse(q.x,q.y,r*.7,r*1.22,0,0,TAU);ctx.stroke();}
-  if(this.state.grid){ctx.strokeStyle='rgba(132,209,245,.5)';ctx.lineWidth=.7;for(let n=0;n<10;n++){ctx.beginPath();ctx.ellipse(q.x,q.y,r*(.5+n*.09),r*.7,0,0,TAU);ctx.stroke();}}
+  if(this.state.grid)this.bridgeGrid(radius);
  }
  cockpit(){for(const _ of this.cockpitStages()){} }
  *cockpitStages(){
@@ -565,16 +646,16 @@ export class CpuRenderer extends BlackHoleRenderer {
   this.sky();yield;
   yield* this.gridStages();
   const geometry=this.state.spectrum==='geometry';
-  if(this.state.blackHole&&!geometry){if(this.state.binary&&this.holeData[7]>0)yield* this.holeStages(1);yield* this.holeStages(0);}this.bridge();yield;
-  const sceneBodies=[...this.objectFrames];
+  if(this.displayState().blackHole&&!geometry){if(this.state.binary&&this.holeData[7]>0)yield* this.holeStages(1);yield* this.holeStages(0);}this.bridge();this.bridgeBubble();yield;
+  const display=this.displayState(),sceneBodies=this.isDriveOpenSpace()?this.objectFrames.filter(b=>b.id===this.driveId):[...this.objectFrames];
   // Geometry masks are painted in depth order with bodies, preserving the
   // schematic foreground/behind relationship for black and white boundaries.
-  if(geometry&&this.state.blackHole)for(let k=0;k<(this.state.binary&&this.holeData[7]>0?2:1);k++)sceneBodies.push({id:k?'secondary':'primary',type:'hole',holeIndex:k,position:Array.from(this.holeData.slice(k*4,k*4+3)),radius:cpuCompactImageRadius(this.configCache.horizon[k],this.holeData[k*4+3],this.state.lensing,this.state.interiorView)});
+  if(geometry&&display.blackHole)for(let k=0;k<(this.state.binary&&this.holeData[7]>0?2:1);k++)sceneBodies.push({id:k?'secondary':'primary',type:'hole',holeIndex:k,position:Array.from(this.holeData.slice(k*4,k*4+3)),radius:cpuCompactImageRadius(this.configCache.horizon[k],this.holeData[k*4+3],this.state.lensing,this.state.interiorView)});
   if(this.state.bridge&&this.state.bridgeSurfaces){
-   const throat=this.configCache.bridgeRadius,other=Math.hypot(...this.cameraFrame.observer)<throat/2,world=bridgeWorldSphere(other,throat,this.configCache.primaryBasis[2]);
-   sceneBodies.push({id:other?'bridge-arakas':'bridge-caladan',type:'planet',position:world.center,radius:world.radius,color:other?'#b97031':'#126485',bridgeWorld:other,rotation:.03});
+   const throat=this.configCache.bridgeRadius,stage=bridgeJourney(this.bridgeTime,throat,this.state.bridgeLifecycle),other=stage.open<.001?stage.far:Math.hypot(...this.cameraFrame.observer)<throat/2,world=other&&stage.open<.001?bridgeFlatWorldSphere(this.cameraFrame.observer,throat,this.configCache.primaryBasis[2]):bridgeWorldSphere(other,throat,this.configCache.primaryBasis[2]);
+   sceneBodies.push({id:this.state.bridgeWorlds==='earth-proxima'?(other?'bridge-proxima-b':'bridge-earth'):(other?'bridge-arakas':'bridge-caladan'),type:'planet',position:world.center,radius:world.radius,color:other?'#b97031':'#126485',bridgeWorld:other,rotation:.03});
   }
-  const bodies=cpuVisibleBodies(sceneBodies,this.cameraFrame,this.canvas.width,this.canvas.height,this.focusId);
+  const bodies=cpuVisibleBodies(sceneBodies,this.cameraFrame,this.canvas.width,this.canvas.height,this.focusId,this.cpuProfile.bodies);
   for(const body of bodies)if(body.type==='dyson'){yield* this.dysonStages(body,true);yield;}
   for(const body of bodies){if(body.type==='hole')yield* this.holeStages(body.holeIndex);else yield* this.bodyStages(body);yield;}for(const body of bodies)if(body.type==='dyson'){yield* this.dysonStages(body,false);yield;}yield* this.metricStages(bodies);yield;return true;
  }
@@ -582,15 +663,21 @@ export class CpuRenderer extends BlackHoleRenderer {
   if(!this.ready||this.disposed||document.hidden||this.presentationPaused)return false;
   if(!force&&this.cpuNextDraw&&now+0.1<this.cpuNextDraw)return false;
   const interval=clamp((this.cpuDrawCost||0)*1.15,1000/30,1000/15);this.cpuNextDraw=this.cpuNextDraw&&now-this.cpuNextDraw<interval*2?this.cpuNextDraw+interval:now+interval;
+  if(this.resizePending)this.resize();
   let cost=0,started=this.now();const stages=this.paintStages();let stage;
   while(!(stage=stages.next()).done){cost+=Math.max(0,this.now()-started);yield;started=this.now();}
   if(stage.value===false)return false;
   cost+=Math.max(0,this.now()-started);this.frames++;
   this.noteCpuCost(cost,now);return true;
  }
- noteCpuCost(cost,now=this.now()){
-  this.cpuDrawCost=(this.cpuDrawCost||0)*.85+Math.max(0,cost)*.15;
-  if(this.cpuDrawCost>25){this.cpuGeometry=0;this.cpuDetailChanged=now;}else if(this.cpuDrawCost<17&&now-(this.cpuDetailChanged||0)>5000)this.cpuGeometry=1;
+ noteCpuCost(cost,now=this.now(),phase='render'){
+  // Command generation and Canvas presentation are consecutive frame work.
+  // Averaging them separately hid slow frames and prevented proper demotion.
+  if(phase==='render'&&Array.isArray(this.canvas.commands)){this.cpuGenerationCost=Math.max(0,cost);return;}
+  const total=Math.max(0,cost)+(phase==='presentation'?(this.cpuGenerationCost||0):0);
+  this.cpuDrawCost=this.cpuDrawCost?this.cpuDrawCost*.75+total*.25:total;
+  if(this.cpuBudget?.note(total,now)){this.cpuGeometry=this.cpuBudget.level==='low'?0:1;this.resizePending=true;}
  }
+
  render(now=this.now(),fromFrame=false,force=false){const stages=this.renderStages(now,fromFrame,force);let step;do{step=stages.next();}while(!step.done);return step.value;}
 }

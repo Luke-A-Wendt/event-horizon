@@ -6,12 +6,12 @@ const f=fixture(),errors=[];
 const renderer=new BlackHoleRenderer(f.canvas,{onError:message=>{if(message)errors.push(message);}});
 const uniform=name=>f.uniforms.get(name).args[0];
 const close=(a,b)=>assert(Math.abs(a-b)<1e-5,`${a} != ${b}`);
-assert.deepEqual(OBJECT_TYPES.map(({id})=>id),['blackhole','whitehole','disk','jets','dyson','planet','moon','star','probe','iss','shuttle','astronaut','enterprise','ring','belt']);
-assert.deepEqual(Object.keys(OBJECT_KIND).sort(),['planet','moon','probe','star','iss','shuttle','astronaut','enterprise','ring','belt','disk','jets','blackhole','whitehole','dyson'].sort());
-// The concentric hollow Dyson shell has dedicated physical-radius/intersection tests in v28-dyson.
+assert.deepEqual(OBJECT_TYPES.map(({id})=>id),['anomaly','blackhole','whitehole','disk','jets','dyson','planet','moon','star','probe','iss','shuttle','astronaut','heighliner','enterprise','ring','belt']);
+assert.deepEqual(Object.keys(OBJECT_KIND).sort(),['planet','moon','probe','star','iss','shuttle','astronaut','enterprise','ring','belt','disk','jets','blackhole','whitehole','dyson','heighliner','anomaly'].sort());
+// Dyson shells and non-solid anomaly regions have dedicated intersection/field tests.
 // Primary/binary holes use metric uniforms; compact bridge travelers and
 // stellar disc/jet leaves use bounded packed slots alongside other models.
-for(const {id} of OBJECT_TYPES.filter(({id})=>id in OBJECT_KIND&&id!=='dyson')){
+for(const {id} of OBJECT_TYPES.filter(({id})=>id in OBJECT_KIND&&!['dyson','anomaly'].includes(id))){
  renderer.clearObjects();const obj=renderer.addObject(id,12,.6,2);renderer.render();
  assert.equal(obj.type,id);close(obj.scale,2);assert.equal(uniform('uObjectCount'),1);close(uniform('uColors[0]')[3],OBJECT_KIND[id]);
  const data=uniform('uObjects[0]');assert(data.every(Number.isFinite));

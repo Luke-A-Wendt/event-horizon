@@ -21,7 +21,7 @@ function record(){
  do{step=stages.next();maxStageCommands=Math.max(maxStageCommands,canvas.commands.length-previous);previous=canvas.commands.length;}while(!step.done);
  assert.equal(step.value,true,`${renderer.state.scene} must render a complete frame`);
  const frame=canvas.takeFrame();finite(frame);
- assert.equal(frame.width,640);assert.equal(frame.height,400);
+ assert.ok(frame.width<=renderer.cpuProfile.width&&frame.height<=renderer.cpuProfile.height,'CPU uses its independent quality pixel budget');
  assert.ok(frame.commands.some(command=>command[0]==='fillRect'),'even an intentionally empty scene paints its background');
  assert.ok(frame.commands.length<20000,'frame command budget is bounded');
  let stack=0;for(const command of frame.commands){if(command[0]==='save')stack++;if(command[0]==='restore')stack--;assert.ok(stack>=0,'Canvas restore must have a matching save');}assert.equal(stack,0);

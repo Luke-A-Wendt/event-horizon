@@ -24,6 +24,32 @@ export function bridgePath(time, throatRadius, travel=true) {
  return {l,r:bridgeIsotropicRadius(l,throatRadius),inward:Math.sin(phase)>=0};
 }
 
+// Cinematic gate construction, not a time-dependent Einstein-equation solution.
+// The throat is fully open throughout the crossing, and closes only after the
+// traveler has crossed to the other mouth. The closing gate restores a flat
+// local chart; the cinematic transfer deliberately uses little translation. Existing round trips retain
+// their original path. No additional mutable timer is needed for scene saves.
+// Hull model: radius .305R, half-length .9R. The gate diameter is twice
+// the hull width; ±1.3R clears the full hull and the standard orbit eye.
+export const HEIGHLINER_PASSAGE=Object.freeze({hullRadius:.305,halfLength:.9,throatRadius:.61,endpoint:1.3});
+export function bridgeJourney(time,throatRadius,lifecycle='steady'){
+ const t=Math.max(0,Number(time)||0),smooth=x=>{const q=Math.max(0,Math.min(1,x));return q*q*(3-2*q);};
+ if(lifecycle!=='open-transit-close')return {...bridgePath(t,throatRadius),open:1,phase:'Open bridge',far:false};
+ const departure=7,arrival=departure+Math.PI/.12,closed=arrival+5;
+ const phaseTime=Math.max(0,Math.min(Math.PI/.12,t-departure)),l=(HEIGHLINER_PASSAGE.endpoint/HEIGHLINER_PASSAGE.throatRadius)*throatRadius*Math.cos(phaseTime*.12),path={l,r:bridgeIsotropicRadius(l,throatRadius)};
+ return {...path,inward:true,open:t<departure?smooth((t-2)/5):t<arrival?1:1-smooth((t-arrival)/5),far:l<0,phase:t<2?'Preparing passage':t<departure?'Opening bridge':t<arrival?'Crossing to Arakas':t<closed?'Closing bridge':'Arrived at Arakas'};
+}
+
+// One vehicle-relative orbit eye for ship bridge presets.
+// It occupies the standard chase-6 position, but looks at the vehicle center
+// and retains normal drag-to-orbit controls.
+export const BRIDGE_VEHICLE_CAMERA=Object.freeze({mode:'track',lookYaw:0,lookPitch:0,yaw:Math.PI,pitch:Math.atan2(1.44,4.32),focusDistance:Math.hypot(1.44,4.32)});
+
+// Geometric throat radius during gate construction. On the departure chart
+// it grows from zero. After transit, its reciprocal gives the same shrinking
+// throat in the inverted arrival chart without moving the nearby traveler.
+export function bridgeMetricScale(open,far=false){const radius=Math.max(1e-4,Math.min(1,Number(open)||0));return far?1/radius:radius;}
+
 // A robust Gaussian line integral used by the jet sampler. This independent
 // numerical counterpart makes subpixel, oblique jet crossings testable.
 export function gaussianSegmentIntegral(start, end, width) {

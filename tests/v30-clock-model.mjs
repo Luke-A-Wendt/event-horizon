@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {clockRate,CLOCK_LIGHT_SPEED as c,CLOCK_SOLAR_GM as gm} from '../dist/object-clocks.js';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+
+const horizon=2*gm/(c*c),source={id:'hole',massSolar:1,horizonMeters:horizon,positionMeters:[0,0,0]};
+const at=radius=>clockRate({positionMeters:[radius*horizon,0,0],sources:[source]});
+assert(Math.abs(at(1.125).rateFactor-3)<1e-12);
+assert(at(1.000001).rateFactor>999);
+assert.equal(at(1).rateFactor,Infinity);
+assert.equal(clockRate().rateFactor,1);
+const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});
+r.loadScene('bridge-earth-proxima');
+const id=r.bridgeObjectId,object=r.objectById.get(id),t=Math.PI/.24;
+r.time=t;r.fillObjects();
+const reading=r.getObjectClock(id),b=r.configCache.bridgeRadius;
+const beta=.72*b/18;
+assert(reading.ultrastaticBridge);assert.equal(reading.gravityLossRate,0);
+assert(reading.lossRate>0,'Prescribed traversal includes local motion rather than stale orbital velocity');
+assert(Math.abs(reading.lossRate/(beta*beta/(1+Math.sqrt(1-beta*beta)))-1)<1e-7);
+r.update({bridgeTravel:false});assert.equal(r.getObjectClock(id).lossRate,0);
+r.loadScene('bridge');assert.equal(r.getObjectClock(r.bridgeObjectId),null,'Enterprise exempt');
+r.dispose();
+console.log('PASS: near-horizon growth, finite 3× at 1.125rs, ultrastatic bridge and local moving clock, Enterprise exemption.');

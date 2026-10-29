@@ -91,6 +91,23 @@ vec4 frustumHit(vec3 ro,vec3 rd,vec3 center,float halfLength,float rearRadius,fl
  }
  return vec4(normal,t==100000.0?-1.0:t);
 }
+// Finite hollow cylinder, including both walls and the annular end faces.
+// Analytic intersections keep the open ship bay transparent, even at low quality.
+vec4 hollowCylinderHit(vec3 ro,vec3 rd,float halfLength,float outerRadius,float innerRadius){
+ float best=100000.0;vec3 normal=vec3(0);float a=dot(rd.xy,rd.xy),b=dot(ro.xy,rd.xy);
+ for(int wall=0;wall<2;wall++){
+  float radius=wall==0?outerRadius:innerRadius,h=b*b-a*(dot(ro.xy,ro.xy)-radius*radius);
+  if(a>.000001&&h>=0.0){for(int side=0;side<2;side++){
+   float t=(-b+(side==0?-1.0:1.0)*sqrt(h))/a;vec3 q=ro+rd*t;
+   if(t>=0.0&&t<best&&abs(q.z)<=halfLength){best=t;normal=vec3(unit(vec3(q.xy,0)).xy,0)*(wall==0?1.0:-1.0);}
+  }}
+ }
+ if(abs(rd.z)>.000001)for(int end=0;end<2;end++){
+  float signZ=end==0?-1.0:1.0,t=(signZ*halfLength-ro.z)/rd.z;vec3 q=ro+rd*t;float radius=length(q.xy);
+  if(t>=0.0&&t<best&&radius>=innerRadius&&radius<=outerRadius){best=t;normal=vec3(0,0,signZ);}
+ }
+ return vec4(normal,best==100000.0?-1.0:best);
+}
 CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
  CraftSurface s;s.t=maximum+max(.001,abs(maximum)*.00001);s.normal=vec3(0);s.albedo=vec3(.8);s.material=0.0;
  vec3 white=vec3(.82,.84,.82),silver=vec3(.48,.54,.58),dark=vec3(.018,.023,.028),blue=vec3(.025,.065,.16),gold=vec3(.92,.63,.19);
@@ -282,7 +299,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    }
    selectSurface(boxHit(ro,rd,vec3(0,.168,-.342),vec3(.067,.058,.010)),white,10.0,s);
   }
- }else{
+ }else if(type<6.5){
   // TOS studio-model silhouette. The longitudinal extent is exactly 1.84:
   // aft nacelle cap z=-.92 to the forward saucer rim z=.92.
   // Saucer diameter .83 / 1.84 matches the approximately 417 / 947 ft ratio.
@@ -337,6 +354,23 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    selectSurface(boxHit(ro,rd,vec3(.292*x,.185,-.655),vec3(.023,.008,.145)),hull,16.0,s);
    selectSurface(boxHit(ro,rd,vec3(.347*x,.133,-.625),vec3(.004,.020,.142)),vec3(.20,.23,.23),18.0,s);
   }
+ }else if(type>11.5&&type<12.5){
+  // Guild Heighliner: open cylindrical transit bay, a 10 km illustrative scale.
+  // Its length is 1.8 model units; the complete hull stays inside the unit bound.
+  selectSurface(hollowCylinderHit(ro,rd,.90,.29,.235),vec3(.33,.36,.37),31.0,s);
+  // Reinforced mouth rims and the paired central structural bands.
+  for(int band=0;band<4;band++){
+   float z=band==0?-.875:band==1?.875:band==2?-.055:.055;
+   selectSurface(hollowCylinderHit(ro-vec3(0,0,z),rd,band<2?.025:.016,.305,.232),vec3(.44,.47,.47),32.0,s);
+  }
+  if(uDetail>=1.0){
+   // Long hull ribs leave the central bay unobstructed from either end.
+   for(int rib=0;rib<8;rib++){
+    float angle=float(rib)*PI*.25;vec2 direction=vec2(cos(angle),sin(angle));
+    selectSurface(capsuleHit(ro,rd,vec3(direction*.291,-.82),vec3(direction*.291,.82),.008),vec3(.25,.29,.30),32.0,s);
+   }
+  }
+
  }
  return s;
 }
@@ -611,6 +645,21 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
  if(material>23.5&&material<24.5){
   float rib=.5+.5*sin(hit.y*270.0);albedo*=.78+.22*rib;
  }
+
+ if(material>30.5&&material<32.5){
+  float angle=atan(hit.y,hit.x),inside=dot(surface.normal.xy,hit.xy)<0.0?1.0:0.0;
+  float sector=floor((angle+PI)*12.0/PI),row=floor((hit.z+.9)*38.0);
+  float panel=fract(sin(sector*127.1+row*311.7)*43758.5453);
+  float longitudinal=abs(fract((angle+PI)*12.0/PI)-.5),transverse=abs(fract((hit.z+.9)*38.0)-.5);
+  float seam=max(smoothstep(.46,.495,longitudinal),smoothstep(.45,.495,transverse));
+  albedo*=mix(.77+panel*.27,.28,seam);
+  albedo=mix(albedo,vec3(.105,.12,.125)*(1.0-.5*seam),inside);
+  spec*=1.6;
+  // Tiny warm bay lights and long recessed service strips suggest immense scale.
+  float windows=step(.88,panel)*step(.43,transverse)*(1.0-step(.45,longitudinal));
+  emission+=inside*windows*.8;
+  albedo+=inside*windows*vec3(.34,.26,.11);
+ }
  float roughness=material>9.5&&material<10.5?.07:.42;
  vec3 result=albedo*(.24+NdotL*.92)+vec3(.65,.74,.81)*spec*roughness+vec3(.07,.12,.16)*rim;
  if(material>3.5&&material<4.5){
@@ -625,30 +674,85 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
 
 // Keep the full model geometry for every selected craft, while omitting models
 // that are absent from this scene before the driver parses or specializes GLSL.
-// Bits: ISS=1, Shuttle=2, astronaut=4, Enterprise=8. Shared materials/primitives
-// stay identical, and mask 15 is byte-for-byte the original complete source.
-export function createCraftGLSL({mask=15}={}) {
- const selected=Number.isInteger(mask)?mask&15:15;
- if(selected===15)return CRAFT_GLSL;
+// Bits: ISS=1, Shuttle=2, astronaut=4, Enterprise=8, Heighliner=16.
+// Materials are pruned only when no selected model can use them. Every
+// reachable material and primitive stays identical to the full shader.
+export function createCraftGLSL({mask=31}={}) {
+ const selected=Number.isInteger(mask)?mask&31:31;
+ if(selected===31)return CRAFT_GLSL;
  const headers=[
   '\n if(type<3.5){\n',
   '\n }else if(type<4.5){\n',
   '\n }else if(type<5.5){\n',
-  '\n }else{\n  // TOS studio-model silhouette.'
+  '\n }else if(type<6.5){\n  // TOS studio-model silhouette.',
+  '\n }else if(type>11.5&&type<12.5){\n'
  ];
  const start=CRAFT_GLSL.indexOf('CraftSurface craftHit(');
  const positions=headers.map(header=>CRAFT_GLSL.indexOf(header,start));
- const end=CRAFT_GLSL.indexOf('\n }\n return s;\n}',positions[3]);
+ const end=CRAFT_GLSL.indexOf('\n }\n return s;\n}',positions[4]);
  if(start<0||positions.some((position,i)=>position<start||(i>0&&position<=positions[i-1]))||end<0)throw new Error('Craft shader model boundaries changed');
- const tests=['type>2.5&&type<3.5','type>=3.5&&type<4.5','type>=4.5&&type<5.5','type>=5.5'];
+ const tests=['type>2.5&&type<3.5','type>=3.5&&type<4.5','type>=4.5&&type<5.5','type>=5.5&&type<6.5','type>11.5&&type<12.5'];
  const branches=[];
- for(let i=0;i<4;i++){
+ for(let i=0;i<5;i++){
   if(!(selected&(1<<i)))continue;
   // Only remove the branch delimiter. Keep every vertex, marking, dimension,
   // primitive call and material assignment in the selected model unchanged.
   const opening=CRAFT_GLSL.indexOf('{',positions[i])+1;
-  const body=CRAFT_GLSL.slice(opening,i<3?positions[i+1]:end);
+  const body=CRAFT_GLSL.slice(opening,i<4?positions[i+1]:end);
   branches.push(`\n ${branches.length?'else if':'if'}(${tests[i]}){${body}\n }`);
  }
- return CRAFT_GLSL.slice(0,positions[0])+branches.join('')+CRAFT_GLSL.slice(end+3);
+ let result=CRAFT_GLSL.slice(0,positions[0])+branches.join('')+CRAFT_GLSL.slice(end+3);
+ // Derive reachable material IDs from the selected geometry itself. A future
+ // nonliteral assignment conservatively retains every material branch.
+ const geometry=branches.join(''),calls=geometry.match(/\bselectSurface\s*\(/g)||[];
+ const assignments=[...geometry.matchAll(/,\s*(\d+(?:\.\d+)?)\s*,\s*s\s*\)/g)];
+ const materials=new Set([0,...assignments.map(match=>Number(match[1]))]);
+ const knownMaterials=calls.length===assignments.length;
+ const guards=[
+  ['material>9.5&&material<10.5&&uDetail>=1.0',[10]],['material>.5&&material<1.5',[1]],
+  ['(material>1.5&&material<2.5)||(material>11.5&&material<12.5)',[2,12]],
+  ...[3,4,5,6,7,10,12,13,15,16,17,18,19,20,21,22,23,24].map(value=>[`material>${value-.5}&&material<${value+.5}`,[value]]),
+  ['material>30.5&&material<32.5',[31,32]]
+ ];
+ for(const [condition,ids] of guards){
+  if(!knownMaterials||ids.some(id=>materials.has(id)))continue;
+  const header=`if(${condition})`;let from=result.indexOf(header,result.indexOf('vec3 shadeCraft('));
+  while(from>=0){
+   let to=from+header.length;
+   if(result[to]==='{'){let depth=1;for(to++;to<result.length&&depth;to++){if(result[to]==='{')depth++;else if(result[to]==='}')depth--;}}
+   else to=result.indexOf(';',to)+1;
+   if(to<=from)throw new Error('Craft material boundaries changed');
+   result=result.slice(0,from)+result.slice(to);from=result.indexOf(header,from);
+  }
+ }
+ return pruneCraftHelpers(result);
+}
+
+// Remove only complete, unreachable helper definitions. The call graph starts
+// at the exported GLSL entry points and shared sphere primitive; selected geometry/material expressions
+// are never rewritten. Ignore comments so braces or example calls in prose do
+// not change parsing. Unknown functions remain external references unchanged.
+function pruneCraftHelpers(source){
+ const code=source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,comment=>comment.replace(/[^\n]/g,' '));
+ const pattern=/^(?:float|vec[234]|void|CraftSurface)\s+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{/gm;
+ const functions=new Map();let match;
+ while((match=pattern.exec(code))){
+  let depth=1,end=pattern.lastIndex;
+  for(;end<code.length&&depth;end++){if(code[end]==='{')depth++;else if(code[end]==='}')depth--;}
+  if(depth)return source;
+  functions.set(match[1],{start:match.index,end,body:code.slice(pattern.lastIndex,end)});
+  pattern.lastIndex=end;
+ }
+ if(!functions.has('craftHit')||!functions.has('shadeCraft'))return source;
+ const reachable=new Set(),pending=['craftHit','shadeCraft','ellipsoidHit'];
+ while(pending.length){
+  const name=pending.pop();if(reachable.has(name))continue;reachable.add(name);
+  for(const call of functions.get(name).body.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)){
+   if(functions.has(call[1])&&!reachable.has(call[1]))pending.push(call[1]);
+  }
+ }
+ for(const [name,fn] of [...functions].reverse()){
+  if(!reachable.has(name))source=source.slice(0,fn.start)+source.slice(fn.end);
+ }
+ return source;
 }

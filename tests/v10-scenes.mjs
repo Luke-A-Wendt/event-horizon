@@ -9,7 +9,7 @@ const near=(a,b,t=1e-10)=>assert(Math.abs(a-b)<t,`${a} != ${b}`);
 const dot=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0);
 const norm=v=>Math.hypot(...v);
 const f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false});
-assert.equal(SCENE_PRESETS.length,45);assert.equal(new Set(SCENE_PRESETS.map(p=>p.id)).size,45);
+assert.equal(SCENE_PRESETS.length,47);assert.equal(new Set(SCENE_PRESETS.map(p=>p.id)).size,47);
 r.loadScene('lens-alignment');r.render();assert.equal(r.state.grid,true);assert.equal(r.state.warpGrid,true);
 const project=point=>{const c=r.cameraFrame,q=point.map((v,i)=>v-c.observer[i]),z=dot(q,c.forward);return [dot(q,c.right)/z,dot(q,c.up)/z,z];};
 const primary=project(Array.from(r.holeData.slice(0,3))),secondary=project(Array.from(r.holeData.slice(4,7)));

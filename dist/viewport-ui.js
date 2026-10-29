@@ -165,7 +165,7 @@ export function installViewportUI(api){
  const quickDriveTarget=()=>isPilotable(renderer()?.selectedId)?renderer().selectedId:renderer()?.focusId;
  $('quickDrive').addEventListener('click',()=>drive(quickDriveTarget()));
  function refresh(stats={}){
-  $('viewportScenes').classList.toggle('scene-discovery',!scenesDiscovered&&(stats.sceneId||api.activePreset?.()||'disk')==='disk');
+  $('viewportScenes').classList.toggle('scene-discovery',!scenesDiscovered);
   const current=quickDriveTarget(),pilot=renderer()?.driveId; $('quickDrive').hidden=!isPilotable(current)||!!pilot;$('quickDrive').textContent='Drive';
   if(selection!=='add'&&selection!=='space'&&!tree().some(n=>n.id===selection)&&!componentEntries.some(e=>e[0]===selection)&&!api.objects().some(o=>o.id===selection)){selection='space';if(panel==='inspector')setPanel('elements');}
   if(selection==='primary'){const label=api.state().whiteHole?'White hole':labelFor('primary');$('inspectorTitle').textContent=label;}
@@ -226,5 +226,5 @@ export function installViewportUI(api){
  $('universe').addEventListener('pointerdown',()=>setPanel(null));
  scene.addEventListener('keydown',event=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]')&&panel){event.stopPropagation();setPanel(null);$('elementsToggle').focus({preventScroll:true});}});
  refresh();refreshVRSupport();
- return {refresh,select,track:id=>focus(id,'track'),sceneChanged:()=>{mapOrbitPending=null;if(mapDialog.open)mapDialog.close();selection='space';collapsed.clear();knownBranches.clear();objectSearch='';cameraSearch='';setPanel(null);refresh(renderer()?.getState());},openElements:()=>setPanel('elements'),openDisplay:()=>setPanel('display'),openCamera:()=>setPanel('camera'),openPicture,openMap,close:()=>setPanel(null),rendererChanged:()=>{$('universe').addEventListener('pointerdown',()=>setPanel(null));lastSignature='';lastTargetSignature='';refresh();refreshVRSupport();},dispose:()=>{photoAbort?.abort();if(photoUrl)URL.revokeObjectURL(photoUrl);}};
+ return {resetDiscovery:()=>{scenesDiscovered=false;refresh();},refresh,select,track:id=>focus(id,'track'),sceneChanged:()=>{mapOrbitPending=null;if(mapDialog.open)mapDialog.close();selection='space';collapsed.clear();knownBranches.clear();objectSearch='';cameraSearch='';setPanel(null);refresh(renderer()?.getState());},openElements:()=>setPanel('elements'),openDisplay:()=>setPanel('display'),openCamera:()=>setPanel('camera'),openPicture,openMap,close:()=>setPanel(null),rendererChanged:()=>{$('universe').addEventListener('pointerdown',()=>setPanel(null));lastSignature='';lastTargetSignature='';refresh();refreshVRSupport();},dispose:()=>{photoAbort?.abort();if(photoUrl)URL.revokeObjectURL(photoUrl);}};
 }

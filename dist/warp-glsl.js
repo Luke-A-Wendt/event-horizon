@@ -8,7 +8,8 @@ vec2 warpShape(float radius){
  return vec2((a-b)/denom,s*(b*b-a*a)/denom);
 }
 // Gradient projected normal to the ray keeps its direction normalized.
-// Optical strength=.3*W, capped at3. It is not Frenet curvature or v_s/c.
+// Optical strength is a bounded logarithmic display of beta=v_s/c. It is
+// not substituted for beta in the physical metric, nor an exact ray solution.
 // f(r) is spherical. Curvature and torsion orient/transport the center worldline;
 // they do not arbitrarily reshape the scalar Alcubierre wall.
 vec3 warpAcceleration(vec3 q,vec3 direction){
@@ -54,7 +55,8 @@ vec4 warpAppearance(vec3 a,vec3 b,float travel){
 }
 // One connected reference surface extends through the bubble to the flat far
 // field. Only its local displacement moves with the ship: grid coordinates
-// remain anchored in the world through a CPU-double phase offset.
+// remain anchored in the world through a CPU-double phase offset. Manual
+// Drive uses a bounded, integrated rolling phase to avoid aliasing at warp.
 vec4 warpGridAt(vec3 q,vec3 ro,vec3 rd,float travel){
  float radial=length(q.xz),f=warpShape(radial).x;
  vec2 local=q.xz;local.x+=.20*uWarpStrength*q.x*f;
