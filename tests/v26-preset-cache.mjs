@@ -10,7 +10,7 @@ function normalized(objects){
  const ids=new Map(objects.map((object,i)=>[object.id,`slot-${i}`]));
  return objects.map(object=>{const out=JSON.parse(JSON.stringify(object));out.id=ids.get(out.id);out.parentId=ids.get(out.parentId)||out.parentId;if(out.referenceId)out.referenceId=ids.get(out.referenceId)||out.referenceId;return out;});
 }
-r.loadScene('solar-system');assert.equal(additions,517,'First load validates every authored object');
+r.loadScene('solar-system');assert.equal(additions,518,'First load validates every authored object');
 const first=normalized(r.objects),firstIds=new Set(r.objects.map(o=>o.id)),firstObjects=r.objects,phases=r.objects.map(o=>o.phase),selectedIndex=r.objects.findIndex(o=>o.id===r.selectedId);
 const earth=r.objects.find(o=>o.name==='Earth'),irregular=r.objects.find(o=>Array.isArray(o.shapeAxes));
 r.updateObject(earth.id,{name:'Edited Earth',radiusMeters:earth.radiusMeters*1.5,color:'#123456'});
@@ -20,14 +20,14 @@ assert.equal(additions,0,'Returning to an unchanged catalog reuses validated tem
 assert.deepEqual(normalized(r.objects),first,'Runtime edits never modify a cached authored scene');
 r.objects.forEach((object,i)=>assert(Object.is(object.phase,phases[i]),'Signed initial phases are preserved'));
 assert.notEqual(r.objects,firstObjects);assert(r.objects.every(o=>!firstIds.has(o.id)),'IDs remain unique across reloads');
-assert.equal(r.objects.length,517);assert.equal(r.selectedId,r.objects[selectedIndex].id);
+assert.equal(r.objects.length,518);assert.equal(r.selectedId,r.objects[selectedIndex].id);
 const ids=new Set(r.objects.map(o=>o.id));for(const o of r.objects)assert(o.parentId==='space'||ids.has(o.parentId));
 
 // Authored source edits invalidate the template, including nested properties.
 const preset=SCENE_PRESETS.find(p=>p.id==='solar-system'),source=preset.objects.find(o=>o.name==='Earth'),previous=source.color;
 try{
  source.color='#fedcba';additions=0;r.loadScene('solar-system');
- assert.equal(additions,517);assert.equal(r.objects.find(o=>o.name==='Earth').color,'#fedcba');
+ assert.equal(additions,518);assert.equal(r.objects.find(o=>o.name==='Earth').color,'#fedcba');
 }finally{if(previous===undefined)delete source.color;else source.color=previous;}
 r.loadScene('solar-system');assert.deepEqual(normalized(r.objects),first);
 const other=make();other.loadScene('solar-system');
@@ -42,4 +42,4 @@ for(const preset of SCENE_PRESETS){
  assert.equal(r.sceneBuildObjects,null);assert(r.validateFrameGeometry(),preset.id);
 }
 other.dispose();r.dispose();
-console.log('PASS: cold validation, cached 517-body reload, fresh IDs/arrays, runtime-edit isolation, authored-edit invalidation, cross-renderer reuse and all-scene repeated-load parity.');
+console.log('PASS: cold validation, cached 518-body reload, fresh IDs/arrays, runtime-edit isolation, authored-edit invalidation, cross-renderer reuse and all-scene repeated-load parity.');

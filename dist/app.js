@@ -433,6 +433,13 @@ function openDialog(id,button){openers.set(id,button);if(!$(id).open)$(id).showM
 function setupDialog(id,closeId){$(closeId).addEventListener('click',()=>$(id).close());$(id).addEventListener('close',()=>{pauseCoveredView(!!document.querySelector('dialog[open]'));openers.get(id)?.focus();});$(id).addEventListener('click',e=>{const r=$(id).getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$(id).close();});}
 document.querySelectorAll('[data-open-atlas]').forEach(button=>button.addEventListener('click',()=>openDialog('atlasDialog',button)));setupDialog('atlasDialog','closeAtlas');
 let mathGuideReady=false,warpGuideReady=false,bridgeGuideReady=false,relativityGuideReady=false;
+// A subject always has an explicit route back, including links opened from an object's properties.
+document.querySelectorAll('[data-math-back]').forEach(button=>button.addEventListener('click',()=>{
+ const dialog=button.closest('dialog'),hub=$('mathHubDialog'),card=hub.querySelector('[data-open-'+button.dataset.mathBack+']');
+ openers.set(dialog.id,card||$('mathNav'));
+ // Open the hub before closing the notebook so the scene stays presentation-paused.
+ openDialog('mathHubDialog',$('mathNav'));dialog.close();hub.scrollTop=0;(card||$('closeMathHub')).focus();
+}));
 document.querySelectorAll('[data-open-relativity]').forEach(button=>button.addEventListener('click',()=>{openDialog('relativityDialog',button);if(!relativityGuideReady){renderRelativityGuide($('relativityContent'));relativityGuideReady=true;}}));setupDialog('relativityDialog','closeRelativity');
 $('relativityContent').addEventListener('click',event=>{const sectionButton=event.target.closest?.('[data-relativity-section]');if(sectionButton){const target=$(sectionButton.dataset.relativitySection);if(target){target.open=true;requestAnimationFrame(()=>target.scrollIntoView({block:'start',behavior:reducedMotion()?'instant':'smooth'}));}return;}const jump=event.target.closest?.('[data-relativity-target]');if(!jump)return;const selectors={blackholes:'[data-open-math]',warp:'[data-open-warp]',wormholes:'[data-open-bridge]'},selector=selectors[jump.dataset.relativityTarget],button=selector&&$('mathHubDialog').querySelector(selector);if(button){$('relativityDialog').close();button.click();}});
 document.querySelectorAll('[data-open-bridge]').forEach(button=>button.addEventListener('click',()=>{openDialog('bridgeDialog',button);if(!bridgeGuideReady){renderWormholeGuide($('bridgeMathContent'));bridgeGuideReady=true;}}));setupDialog('bridgeDialog','closeBridge');
@@ -457,7 +464,7 @@ if(typeof installPilotControls==='function')pilotUI=installPilotControls({mount:
 if(typeof installStellarControls==='function')stellarUI=installStellarControls({container:$('objectEditor'),renderer:()=>renderer,changed:()=>{syncRendererState();markCustom();renderObjectManager();}});
 if(typeof installAnomalyControls==='function')anomalyUI=installAnomalyControls({container:$('objectEditor'),renderer:()=>renderer,changed:()=>{syncRendererState();markCustom();renderObjectManager();}});
 $('objectEditor').prepend($('objectOpacity'));
-if(typeof installAnnotations==='function')annotationsUI=installAnnotations($('scene'),()=>renderer,{onSelect:id=>viewportUI?.select(id),onTrack:id=>viewportUI?.track(id)});
+if(typeof installAnnotations==='function')annotationsUI=installAnnotations($('scene'),()=>renderer,{onSelect:id=>viewportUI?.select(id),onTrack:id=>viewportUI?.track(id),onLabelTap:id=>pilotUI?.previewTravel(id)||false});
 if(typeof installSceneFiles==='function')sceneFilesUI=installSceneFiles({saveButton:$('sceneSave'),loadButton:$('sceneLoad'),fileInput:$('sceneFileInput'),status:$('sceneFileStatus'),renderer:()=>renderer,context:()=>sceneRequestSerial,load:loadSceneSnapshot,onMessage:message=>toast(message)});
 function showVisitEntrance(){
  $('quality').value='adaptive';

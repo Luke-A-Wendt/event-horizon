@@ -18,5 +18,5 @@ const clock=createObjectClock();clock.rapidityVector=[eta,0,0];advanceObjectCloc
 const reading=objectClockReading(clock,sr,{id:'astronaut',type:'astronaut'});near(reading.lagSeconds,2.5);assert.equal(reading.type,'astronaut');
 const before=structuredClone(clock);for(const dt of [0,-1,NaN,Infinity])advanceObjectClock(clock,dt,sr);assert.deepEqual(clock,before);
 let previous=1;for(const gap of [1,.1,.001,.000001]){const rate=clockRate({positionMeters:[rs*(1+gap),0,0],sources:[hole]});assert(rate.rateFactor>previous);previous=rate.rateFactor;}
-assert.equal(formatClockDuration(0),'0.0 × 10⁺⁰⁰ s');assert.equal(formatClockDuration(1e-9),'1.0 × 10⁻⁰⁹ s');assert.equal(formatClockRate(1),'1.0 × 10⁺⁰⁰ s/s');assert.equal(formatClockRate(1e6),'1.0 × 10⁺⁰⁶ s/s');assert.equal(formatClockRate(NaN),'—');
-console.log('PASS: two-model proper-wall-clock contracts, finite horizon comparison, exempt types, fixed two-significant-figure scientific notation.');
+assert.equal(formatClockDuration(0),'0 s');assert.equal(formatClockDuration(1e-9),'1.0 ns');assert.equal(formatClockRate(1),'1.0×');assert.equal(formatClockRate(1e6),'1.0 million×');assert.equal(formatClockRate(NaN),'—');
+console.log('PASS: two-model proper-wall-clock contracts, finite horizon comparison, exempt types, readable two-significant-figure units.');

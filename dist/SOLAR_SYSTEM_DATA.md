@@ -2,7 +2,7 @@
 
 Snapshot: **25 October 2026**. These files are bundled data; the website does not contact the source services.
 
-The expanded Solar System preset contains **515 selectable entries**: the Sun, eight planets, 24 selected dwarf planets and smaller heliocentric bodies, 461 planetary satellites from JPL's census and Cassini observations, 14 additional satellites of selected small bodies, five ring systems, and two statistical belts. The 461-entry planetary table includes 172 proper names and 289 provisional designations. It covers the Moon, Mars (2), Jupiter (115), Saturn (293), Uranus (29), Neptune (16), and Pluto (5).
+The expanded Solar System preset contains **518 selectable entries**: the Sun, eight planets, 24 selected dwarf planets and smaller heliocentric bodies, 461 planetary satellites from JPL's census and Cassini observations, 14 additional satellites of selected small bodies, five ring systems, two statistical belts, an ISS and NASA Shuttle in illustrative Earth orbits, and a fictional Enterprise in lunar orbit. The 461-entry planetary table includes 172 proper names and 289 provisional designations. It covers the Moon, Mars (2), Jupiter (115), Saturn (293), Uranus (29), Neptune (16), and Pluto (5).
 
 This is a broad teaching catalog, **not every object in the Solar System**. It does not instantiate the millions of asteroids/comets individually, every small-body binary, the Oort cloud, or spacecraft. Belt populations are statistical displays. New discoveries after the snapshot are not automatically added.
 

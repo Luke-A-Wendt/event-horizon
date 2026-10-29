@@ -39,7 +39,7 @@ function createRenderHost(canvas,callbacks,{cpu}){
   exploreWarp(){let o=items.find(o=>o.type==='enterprise')||api.addObject('enterprise');api.setObjectWarp(o.id,true);api.focusTarget(o.id,'track');return o;},
   setBridgeTraveler(type){let o=items.find(o=>o.bridgeTraveler);if(o){Object.assign(o,{type,label:OBJECT_TYPES.find(o=>o.id===type).label,lengthMeters:OBJECT_DIMENSIONS[type].lengthMeters});}else o=api.addObject(type);calls.push(['setBridgeTraveler',type]);return o;},
   focusObject(id,mode){return api.focusTarget(id,mode);},focusTarget(id,mode){if(!api.getSceneTargets().some(o=>o.id===id))return false;api.focusId=id;api.focusMode=mode;return true;},releaseFocus(){api.focusId=null;},
-  setViewMode(mode){state.viewMode=mode;},resetCamera(){api.focusId=null;},setPresentationPaused(){},getVRSupport:async()=>({supported:false,reason:'No headset in fixture'}),dispose(){api.disposed=true;},resize(){},zoom(){},look(){},
+  setViewMode(mode){state.viewMode=mode;},resetCamera(){api.focusId=null;},setPresentationPaused(value){api.presentationPaused=value;},getVRSupport:async()=>({supported:false,reason:'No headset in fixture'}),dispose(){api.disposed=true;},resize(){},zoom(){},look(){},
  };
  nextStartup=null;host=api;return api;
 }
@@ -86,4 +86,11 @@ const relativityButton=document.querySelector('[data-open-relativity]');assert(r
 assert($('relativityDialog').open);assert($('relativityContent').innerHTML.includes('Lorentz'));
 const roadmap=$('relativityContent').querySelector('[data-relativity-section]');assert(roadmap);roadmap.click();assert($(roadmap.dataset.relativitySection).open);await frame();
 for(const [target,dialog]of [['blackholes','mathDialog'],['warp','warpDialog'],['wormholes','bridgeDialog']]){relativityButton.click();const jump=$('relativityContent').querySelector('[data-relativity-target="'+target+'"]');assert(jump);jump.click();assert(!$('relativityDialog').open);assert($(dialog).open);$(dialog).close();}
+// Each notebook returns to the subject picker, including direct/contextual entry.
+for(const [subject,dialog]of [['relativity','relativityDialog'],['math','mathDialog'],['warp','warpDialog'],['bridge','bridgeDialog']]){
+ const hub=$('mathHubDialog'),card=hub.querySelector('[data-open-'+subject+']');hub.close();card.click();assert($(dialog).open);
+ const back=$(dialog).querySelector('[data-math-back]');assert(back);assert.equal(back.getAttribute('aria-label'),'Back to Math subjects');back.click();
+ assert(!$(dialog).open);assert(hub.open);assert.equal(document.activeElement,card);assert(host.presentationPaused,'Math hub keeps scene paused');
+ $('closeMathHub').click();assert(!hub.open);assert.equal(document.activeElement,$('mathNav'));
+}
 console.log('PASS: actual app bootstrap opens Scenes over default; first alternate selection keeps pulse; actual button click permanently clears it for this visit; bridge/warp IDs unique; bridge property events, restored GPU/CPU FPS status anomaly inspector edits, and independent nested compact mass/orbit fields work. DOM fixture, not browser layout.');

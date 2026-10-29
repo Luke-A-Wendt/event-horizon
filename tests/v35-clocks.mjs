@@ -20,7 +20,7 @@ const coarse=createObjectClock();advanceObjectClock(coarse,10,clockRate(),[accel
 const fine=createObjectClock(),one=createObjectClock();for(let i=0;i<100;i++)advanceObjectClock(fine,.01,clockRate({rapidityVector:fine.rapidityVector}),[acceleration,0,0]);advanceObjectClock(one,1,clockRate(),[acceleration,0,0]);near(one.coordinateSeconds,fine.coordinateSeconds);
 const enormous=createObjectClock();enormous.rapidityVector=[300,0,0];advanceObjectClock(enormous,1e300,clockRate({rapidityVector:enormous.rapidityVector}));assert(Number.isFinite(enormous.coordinateSeconds));assert(Object.values(enormous).flat().every(Number.isFinite));
 const combined=createObjectClock(),g=clockRate({positionMeters:[2*rs,0,0],sources:[source]});advanceObjectClock(combined,10,g,[acceleration,0,0]);near(combined.coordinateSeconds,Math.sqrt(2)*10*Math.sinh(1));
-assert.equal(formatClockDuration(0),'0.0 × 10⁺⁰⁰ s');assert.equal(formatClockDuration(1e-9),'1.0 × 10⁻⁰⁹ s');assert.equal(formatClockDuration(99999),'1.0 × 10⁺⁰⁵ s');assert.equal(formatClockRate(1),'1.0 × 10⁺⁰⁰ s/s');assert.equal(formatClockRate(1800),'1.8 × 10⁺⁰³ s/s');
+assert.equal(formatClockDuration(0),'0 s');assert.equal(formatClockDuration(1e-9),'1.0 ns');assert.equal(formatClockDuration(99999),'1.2 d');assert.equal(formatClockRate(1),'1.0×');assert.equal(formatClockRate(1800),'1,800×');
 class LogicHost extends RenderHost{startBackend(){}queueSnapshot(){}resize(){}}
 for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
  const f=fixture(),canvas=Class===CpuRenderer?new CpuCommandCanvas():f.canvas;if(Class===CpuRenderer)canvas.getBoundingClientRect=f.canvas.getBoundingClientRect;
@@ -44,4 +44,4 @@ for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
  r.loadScene('binary');const nearby=r.addChildObject('secondary','iss',{orbitMeters:1});assert(nearby.id);r.fillObjects();const secondary=r.getObjectClock(nearby.id);assert(Number.isFinite(secondary.rateFactor));assert(secondary.horizonGapMeters>0);
  r.loadScene('warp-lab');assert.equal(r.getObjectClock(r.objects.find(o=>o.type==='enterprise').id),null);r.dispose();
 }
-console.log('PASS: exact supplied Schwarzschild/constant-proper-acceleration equations and integrated t, coasting/reverse burns, full active wallτ independent of FPS/playrate, finite exterior guards, lifetime persistence, 2sig fixedscientific formatting, GPU/CPU/host consistency.');
+console.log('PASS: exact supplied Schwarzschild/constant-proper-acceleration equations and integrated t, coasting/reverse burns, full active wallτ independent of FPS/playrate, finite exterior guards, lifetime persistence, 2sig readable formatting, GPU/CPU/host consistency.');

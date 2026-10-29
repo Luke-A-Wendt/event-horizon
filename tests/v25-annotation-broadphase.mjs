@@ -37,7 +37,7 @@ for(const opacity of [0,.4,1]){const body={id:'test',center:[0,0,4],radius:1,opa
 const replacement=prepareDirectOcclusion({...frame,occluders:[{id:'away',center:[5,0,4],radius:1}]});replacement.occluders=[{id:'front',center:[0,0,4],radius:1}];assert.equal(projectDirectVisible(replacement,[0,0,8]),null);
 
 const f=fixture(),renderer=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false});
-renderer.loadScene('solar-system');renderer.render();assert.equal(renderer.objectFrames.length,517);
+renderer.loadScene('solar-system');renderer.render();assert.equal(renderer.objectFrames.length,518);
 for(const name of [null,'Sun','Earth','Saturn']){
  if(name){renderer.focusTarget(renderer.objects.find(b=>b.name===name).id,'track');renderer.render();}
  for(const moving of [false,true]){
@@ -46,7 +46,7 @@ for(const name of [null,'Sun','Earth','Saturn']){
   const anchors=payload=>payload.objectFrames.map(b=>[b.id,b.anchor,b.screenRadius]);
   assert.deepEqual(anchors(paused),anchors(current),'A paused pose preserves every current anchor');
   assert.equal(current.projection.rays,0);assert.equal(current.projection.weak,true);
-  assert.equal(renderer.objectFrames.length,517,'The broadphase does not remove catalog targets');
+  assert.equal(renderer.objectFrames.length,518,'The broadphase does not remove catalog targets');
  }
 }
 renderer.dispose();
@@ -62,4 +62,4 @@ for(let i=0;i<517;i++){
 annotations.update(payload);
 for(const body of payload.objectFrames){const {x,y}=body.anchor;assert.equal(annotations.pick(450+x/payload.projection.aspect*900,325-y*650)?.id,body.id);}
 annotations.dispose();
-console.log(`PASS: ${checked} exhaustive/indexed occultation comparisons, near-plane and inside observers, moving/paused poses, translucent cores, water caps, triaxial/contact shapes, 517 retained catalog bodies and picks.`);
+console.log(`PASS: ${checked} exhaustive/indexed occultation comparisons, near-plane and inside observers, moving/paused poses, translucent cores, water caps, triaxial/contact shapes, 518 retained catalog bodies and picks.`);

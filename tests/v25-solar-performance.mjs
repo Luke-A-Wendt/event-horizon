@@ -12,7 +12,7 @@ const near=(a,b)=>assert(Math.abs(a-b)<=2e-12*Math.max(1,Math.abs(a),Math.abs(b)
 function sameFrames(a,b){assert.equal(a.length,b.length);for(let j=0;j<a.length;j++){assert.equal(a[j].id,b[j].id);near(a[j].radius,b[j].radius);for(const key of ['position','velocity','frame']){const x=a[j][key].flat(),y=b[j][key].flat();x.forEach((value,k)=>near(value,y[k]));}}}
 function freshEquivalent(){const cached=capture();r.lastGeometryRevision=-1;r.fillObjects();sameFrames(cached,capture());}
 
-r.loadScene('solar-system');assert.equal(r.objects.length,517);
+r.loadScene('solar-system');assert.equal(r.objects.length,518);
 const geometry=r.orbitGeometryById,lookup=r.objectById,earth=r.objects.find(o=>o.name==='Earth'),sun=r.objects.find(o=>o.name==='Sun'),moon=r.objects.find(o=>o.name==='Moon');
 r.focusTarget(earth.id,'track');
 const originalOmega=r.orbitalOmega,originalRadius=r.objectRadius;let frequencyCalls=0,radiusCalls=0;
@@ -21,7 +21,7 @@ const before=capture();r.time+=.25;r.fillObjects();
 assert.equal(r.orbitGeometryById,geometry);assert.equal(r.objectById,lookup);
 assert.equal(frequencyCalls,0,'Unchanged orbital elements do not recalculate 1,500 frequencies per moving frame');
 assert.equal(radiusCalls,0,'Static body dimensions are retained during orbital motion');
-assert.notDeepEqual(capture(),before);assert.equal(r.objectFrames.length,517);assert(r.objectCount<=r.gpuObjectLimit);
+assert.notDeepEqual(capture(),before);assert.equal(r.objectFrames.length,518);assert(r.objectCount<=r.gpuObjectLimit);
 r.orbitalOmega=originalOmega;r.objectRadius=originalRadius;freshEquivalent();
 
 const omega=r.orbitGeometryById.get(earth.id).omega;
@@ -41,4 +41,4 @@ r.loadScene('collapse-cycle');const star=r.objects.find(o=>o.collapseEnabled),st
 for(const time of [0,7.5,15,22.5]){r.time=time;r.fillObjects();const info=stellarInfo(star,time),frame=r.frameById.get(star.id);near(frame.radius,(info.collapsed?info.horizonMeters:info.radiusMeters)/REFERENCE_RG_METERS);assert.equal(frame.collapsed,info.collapsed);}
 assert.equal(r.orbitGeometryById,stellarCache,'Dynamic collapse changes the surface without invalidating static orbital metadata');
 r.dispose();
-console.log('PASS: 517-body orbital metadata reuse, zero repeated static frequency/radius work, mass/size/orbit/snapshot invalidation, same-size replacement, all-scene cached/fresh parity, and dynamic collapse.');
+console.log('PASS: 518-body orbital metadata reuse, zero repeated static frequency/radius work, mass/size/orbit/snapshot invalidation, same-size replacement, all-scene cached/fresh parity, and dynamic collapse.');

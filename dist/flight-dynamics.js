@@ -69,7 +69,7 @@ function ordinaryVelocity(u){const gamma=Math.hypot(1,...u.map(x=>x/FLIGHT_LIGHT
 function properImpulse(u,a){const gamma=Math.hypot(1,...u.map(x=>x/FLIGHT_LIGHT_SPEED)),projection=dot(u,a)/(c2*gamma*(gamma+1));return a.map((x,i)=>x/gamma+u[i]*projection);}
 function coordinateAcceleration(v,a){const beta=Math.min(1-8*Number.EPSILON,Math.hypot(...v)/FLIGHT_LIGHT_SPEED),invGamma=Math.sqrt((1-beta)*(1+beta)),projection=dot(v,a)/c2;return a.map((x,i)=>invGamma*invGamma*(x-v[i]*projection/(1+invGamma)));}
 export function shuttleRelativity(flight,options={}){
- const velocity=finiteVelocity(flight),speed=Math.hypot(...velocity),beta=speed/FLIGHT_LIGHT_SPEED,invGamma=Math.sqrt(Math.max(0,(1-beta)*(1+beta))),properAcceleration=impulseThrustSetting(flight.thrust,options.maxThrustG)*FLIGHT_STANDARD_GRAVITY,vector=coordinateAcceleration(velocity,flight.basis[2].map(x=>x*properAcceleration));
+ const velocity=finiteVelocity(flight),speed=Math.hypot(...velocity),beta=speed/FLIGHT_LIGHT_SPEED,invGamma=Math.sqrt(Math.max(0,(1-beta)*(1+beta))),properAcceleration=(flight.brakeSpeed?Math.max(0,flight.thrust||0):impulseThrustSetting(flight.thrust,options.maxThrustG))*FLIGHT_STANDARD_GRAVITY,vector=coordinateAcceleration(velocity,flight.basis[2].map(x=>x*properAcceleration));
  return {velocity,speed,beta,lorentzFactor:1/Math.max(invGamma,1e-15),properAcceleration,coordinateAcceleration:Math.hypot(...vector),coordinateAccelerationVector:vector};
 }
 function clockLagRate(velocity){const b=Math.min(1,Math.hypot(...velocity)/FLIGHT_LIGHT_SPEED),b2=b*b;return b2/(1+Math.sqrt(Math.max(0,(1-b)*(1+b))));}
@@ -140,8 +140,8 @@ export function integratePlanar(flight,dt,input={},options={}){
 export function integrateShuttlePlanar(flight,dt,input={},options={}){
  dt=clamp(Number(dt)||0,0,1);if(!dt)return flight;
  if(input.curvature)flight.brakeTurn=false;
- if(flight.brakeSpeed){flight.thrust=0;flight.brakeSpeed=false;}
- flight.thrust=impulseThrustSetting(flight.thrust,options.maxThrustG);
+ if(flight.brakeSpeed){flight.thrust=Math.max(0,(flight.thrust||0)-Math.max(.5,flight.brakeInitialSpeed||flight.thrust||.5)*dt/1.2);if(flight.thrust===0)flight.brakeSpeed=false;}
+ else flight.thrust=impulseThrustSetting(flight.thrust,options.maxThrustG);
  planarTurn(flight,dt,input,options.controlled===true);
  const [N,B,T]=orthonormalFrame(flight.basis),w=flight.angularVelocity,x=w*dt,x2=x*x;
  const velocity=finiteVelocity(flight,T),u0=properVelocity(velocity),acceleration=flight.thrust*FLIGHT_STANDARD_GRAVITY;

@@ -40,6 +40,6 @@ assert.deepEqual(costs[0],[160,160,'frame']);
 worker.renderer.render(160);command=messages.filter(m=>m.type==='cpu-frame').at(-1);await worker.handle({type:'cpu-presented',serial:command.serial,costMs:4,cancelled:true});assert.equal(costs.length,1);
 await worker.handle({type:'dispose'});
 const html=await readFile(new URL('../dist/index.html',import.meta.url),'utf8');
-const loader=html.match(/<div class="scene-loading"[\s\S]*?<\/div><\/div>/)?.[0]||'';
+const loader=html.match(/<div class="scene-loading[^"]*"[\s\S]*?<\/div><\/div>/)?.[0]||'';
 assert(loader.includes('loading-orbit.gif'));assert(loader.includes('loadingPercent'));assert(loader.includes('loadingReason'));assert(!loader.includes('loadingDiagnostics'));assert(!loader.includes('Preparing'));
 console.log('PASS: independent elapsed loading percentage, suspension/revision/reset/disposal, GPU+CPU 60s initial limits, retained live stall deadlines, actual CPU command roundtrip cost.');

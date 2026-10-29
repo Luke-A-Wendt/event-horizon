@@ -1,5 +1,5 @@
 // Plain-data snapshots keep the UI controller independent of render-thread work.
-const FIELDS=['sceneRevision','driveId','freeReferenceId','freeReferencePosition','state','camera','target','cameraGuide','objects','time','orbitOverrides','sceneId','sceneFocusId','bridgeObjectId','bridgeTime','bridgeTravelTime','freePosition','freeTarget','freeBasis','nextObjectId','selectedId','focusId','focusMode','warpObjectId','savedOverview','warpTravelWorld','warpTravelPosition','warpTravelTime','travel'];
+const FIELDS=['transfer','lastTransfer','sceneRevision','driveId','freeReferenceId','freeReferencePosition','state','camera','target','cameraGuide','focusReferenceFrame','objects','time','orbitOverrides','sceneId','sceneFocusId','bridgeObjectId','bridgeTime','bridgeTravelTime','freePosition','freeTarget','freeBasis','nextObjectId','selectedId','focusId','focusMode','warpObjectId','savedOverview','warpTravelWorld','warpTravelPosition','warpTravelTime','travel'];
 const copy=value=>typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value));
 export function snapshotRenderer(renderer,{includeObjects=true}={}){
  const value={};for(const field of FIELDS)if(renderer[field]!==undefined&&(field!=='objects'||includeObjects))value[field]=renderer[field];

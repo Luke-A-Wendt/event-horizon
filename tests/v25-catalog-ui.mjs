@@ -10,7 +10,7 @@ r.focusTarget(earth.id,'track');r.selectObject(earth.id);
 for(const time of [0,10,10000]){
  r.time=time;r.fillHoles();r.fillObjects();r.updateCameraFrame();
  const objects=r.getObjects(),targets=r.getSceneTargets(objects);
- assert.equal(objects.length,517);assert.equal(targets.length,517);
+ assert.equal(objects.length,518);assert.equal(targets.length,518);
  for(let i=0;i<objects.length;i++){
   const raw=r.objects[i],object=objects[i],target=targets[i],frame=r.frameById.get(raw.id);
   assert.equal(object.id,raw.id);assert.equal(object.label,raw.name);
@@ -26,4 +26,4 @@ for(const time of [0,10,10000]){
  }
 }
 r.dispose();
-console.log('PASS: all 517 UI catalog entries preserve physical sizes, names, phases, live positions, selection, camera targets, and snapshot isolation across three epochs.');
+console.log('PASS: all 518 UI catalog entries preserve physical sizes, names, phases, live positions, selection, camera targets, and snapshot isolation across three epochs.');

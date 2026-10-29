@@ -48,7 +48,7 @@ export function captureAnnotationFrame(renderer){
  // With labels off, expensive inverse projections run only when the user taps.
  // The retained chart is from this submitted image, never the live controller.
  const pickOptics=defer?{...optics,origin:vector(optics.origin),observer:vector(optics.observer),forward:vector(optics.forward),right:vector(optics.right),up:vector(optics.up),bodies:optics.bodies.map(b=>({...b,center:vector(b.center),axis:vector(b.axis),...(b.waterCap?{waterCap:{...b.waterCap,direction:vector(b.waterCap.direction)}}:{}),...(b.shapeAxes?{shapeAxes:vector(b.shapeAxes),shapeBasis:b.shapeBasis.map(vector)}:{})})),holes:optics.holes.map(b=>({...b,center:vector(b.center),axis:vector(b.axis)})),warp:optics.warp?{...optics.warp,center:vector(optics.warp.center),axis:vector(optics.warp.axis)}:null,occluders:undefined,budget:{...optics.budget}}:null;
- return {kind:'annotation-frame',annotations:!!s.annotations,cpu:!!renderer.cpu,sceneRevision:renderer.sceneRevision,time:renderer.time,focusId:renderer.focusId,cameraFrame:{observer:vector(frame.observer),forward:vector(frame.forward),right:vector(frame.right),up:vector(frame.up)},objectFrames:bodies,holes,pickOptics,projection:{aspect,fov,width,height,rays:optics.budget.rays,steps:optics.budget.iterations,limited:optics.budget.limited,weak},interiorView:optics.interior,geometry:s.spectrum==='geometry'};
+ return {kind:'annotation-frame',driveId:renderer.driveId||null,travelTargetIds:renderer.driveId&&s.annotations?(renderer.getTravelTargets?.()||[]).map(t=>t.id):null,annotations:!!s.annotations,cpu:!!renderer.cpu,sceneRevision:renderer.sceneRevision,time:renderer.time,focusId:renderer.focusId,cameraFrame:{observer:vector(frame.observer),forward:vector(frame.forward),right:vector(frame.right),up:vector(frame.up)},objectFrames:bodies,holes,pickOptics,projection:{aspect,fov,width,height,rays:optics.budget.rays,steps:optics.budget.iterations,limited:optics.budget.limited,weak},interiorView:optics.interior,geometry:s.spectrum==='geometry'};
 }
 
 export function installAnnotations(scene,getRenderer,options={}){
@@ -72,6 +72,7 @@ export function installAnnotations(scene,getRenderer,options={}){
   const r=value.kind==='annotation-frame'?value:captureAnnotationFrame(getRenderer());if(!r?.cameraFrame){hide(true);return;}
   const rect=bounds(),{width,height}=rect,aspect=r.projection?.aspect||width/height,fov=r.projection?.fov||.83,mobile=width<600;
   if(lastRevision!==r.sceneRevision){placements.clear();visibleIds.clear();gestures.cancel();lastRevision=r.sceneRevision;}
+  const travelTargets=r.driveId?new Set(r.travelTargetIds||[]):null;
   const key=JSON.stringify([rect,r]);if(key===previousKey)return;previousKey=key;
   Object.assign(layer.style,{left:rect.offsetX+'px',top:rect.offsetY+'px',width:width+'px',height:height+'px'});layer.setAttribute('viewBox',`0 0 ${width} ${height}`);
   const entities=[...(r.objectFrames||[]),...(r.holes||[])],screen=a=>a?{x:width*.5+a.x/aspect*width,y:height*.5-a.y*height,z:a.z}:null;pendingProjection=r.pickOptics?{entities,optics:r.pickOptics,solved:new Set()}:null;
@@ -79,8 +80,8 @@ export function installAnnotations(scene,getRenderer,options={}){
   for(const body of entities){
    const p=screen(body.anchor);if(!p)continue;const pixelRadius=(body.screenRadius||body.radius/p.z/fov)*height;if(!Number.isFinite(p.x+p.y+pixelRadius))continue;
    hits.push({body,x:p.x,y:p.y,z:p.z,radius:pixelRadius});
-   if(!r.annotations||p.x<3||p.x>width-3||p.y<3||p.y>height-3)continue;
-   const id=body.id,base={body,id,p,text:body.name||bodyLabel(body),detail:body.collapsed?(r.cpu?'Shadow · CPU schematic':'Lensed shadow'):'',radius:pixelRadius,priority:body.priority??priority(body,r.focusId),sizeClass:body.sizeClass??Math.floor(Math.log2(Math.max(.25,pixelRadius))),color:'#9bcbe4',shadow:body.collapsed};
+   if(!r.annotations||travelTargets&&!travelTargets.has(body.id)||p.x<3||p.x>width-3||p.y<3||p.y>height-3)continue;
+   const id=body.id,base={body,id,p,text:body.name||bodyLabel(body),detail:travelTargets?'Tap to plan a flight':body.collapsed?(r.cpu?'Shadow · CPU schematic':'Lensed shadow'):'',radius:pixelRadius,priority:body.priority??priority(body,r.focusId),sizeClass:body.sizeClass??Math.floor(Math.log2(Math.max(.25,pixelRadius))),color:'#9bcbe4',shadow:body.collapsed};
    if(!body.collapsed||!r.interiorView){labels.push(base);continue;}
    for(const [value,color,inner] of [[body.horizonRadius,'#a6dcf3',false],[body.innerHorizonRadius,'#edca8b',true]]){if(!(value>body.horizonRadius*.001))continue;const radius=value/Math.max(p.z,1e-20)/fov*height;labels.push({...base,id:id+(inner?':inner':':outer'),p:{...p,x:clamp(p.x+(inner?-1:1)*radius*.7,12,width-12),y:clamp(p.y+(inner?1:-1)*radius*.7,12,height-12)},text:inner?'Inner horizon · r−':'Event horizon · r+',detail:'Coordinate geometry cutaway',radius:0,color,boundary:true,inner});}
    labels.push({...base,id:id+':singularity',text:body.singularityRadius>body.horizonRadius*.001?'Ring singularity':'Point singularity',detail:'Coordinate geometry cutaway',radius:0,color:'#f3b3c4',singularity:true});
