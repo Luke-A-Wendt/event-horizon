@@ -34,6 +34,13 @@ export function cpuWarpStarDirection(direction,forward,phase,layer=0){
 export function cpuWarpStarOpacity(phase,layer=0,rate=0){
  const value=((phase+.25+.25*layer)%1+1)%1,smooth=x=>{const t=clamp(x,0,1);return t*t*(3-2*t);},edge=.1+.08*smooth((rate-.05)/.60);return smooth(value/edge)*(1-smooth((value-1+edge)/edge));
 }
+// Shared GPU/CPU visual threshold: clouds are gone before warp streaking.
+// Rate comes from the smoothed flight state, so moving the power slider does
+// not abruptly replace the environment before the stars respond.
+export function cpuWarpNebulaVisibility(rate=0,active=true){
+ if(!active)return 1;
+ const t=clamp(Math.max(0,Number(rate)||0)/.006,0,1);return 1-t*t*(3-2*t);
+}
 export function cpuWarpStarElongation(beta){
  const x=clamp((Math.max(0,beta)-10.07937)/(38.94074-10.07937),0,1);
  return x*x*(3-2*x)*clamp(Math.log1p(Math.max(0,beta)/38.94074)/8.542,0,1);
@@ -190,12 +197,13 @@ export class CpuRenderer extends BlackHoleRenderer {
   const other=s.bridge&&Math.hypot(...f.observer)<this.configCache.bridgeRadius/2;
   const nebula=other?{color:s.bridgeOtherColor,shape:s.bridgeOtherShape,rotation:s.bridgeOtherRotation,scale:s.bridgeOtherScale,intensity:s.bridgeOtherIntensity}:{color:s.nebulaColor,shape:s.nebulaShape,rotation:s.nebulaRotation,scale:s.nebulaScale,intensity:s.nebulaIntensity};
   ctx.fillStyle=s.spectrum==='geometry'?'#000':'#02050b';ctx.fillRect(0,0,w,h);if(s.spectrum==='geometry')return;
-  if(other?s.bridgeOtherNebula!==false:s.nebula){
+  const motion=this.warpMotionState(),haze=cpuWarpNebulaVisibility(motion.rate,motion.active);
+  if(haze>0&&(other?s.bridgeOtherNebula!==false:s.nebula)){
    const n=Math.min(this.cpuGeometry===0?2:4,nebula.shape==='filaments'?7:nebula.shape==='shell'?5:4);
    for(let k=0;k<n;k++){
     const a=(k*.93+nebula.rotation*Math.PI/180),direction=unit([Math.sin(a),Math.cos(a*1.3)*.55,Math.cos(a)]),q=cpuProject(plus(f.observer,scale(direction,100)),f,w,h);if(!q)continue;
     const radius=w*.36*nebula.scale,g=ctx.createRadialGradient(q.x,q.y,0,q.x,q.y,Math.max(1,radius));
-    g.addColorStop(0,cpuColor(nebula.color,s.spectrum,'nebula',Math.min(.3,nebula.intensity*.13)));g.addColorStop(1,'transparent');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+    g.addColorStop(0,cpuColor(nebula.color,s.spectrum,'nebula',Math.min(.3,nebula.intensity*.13)*haze));g.addColorStop(1,'transparent');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
    }
   }
   const showStars=other?s.bridgeOtherStars!==false:s.stars,starDensity=other?(s.bridgeOtherStarDensity??1):s.starDensity,brightness=other?(s.bridgeOtherStarBrightness??1):(s.starBrightness??1),variety=other?(s.bridgeOtherStarVariety??1):(s.starVariety??1);
@@ -204,7 +212,7 @@ export class CpuRenderer extends BlackHoleRenderer {
   if(this.cpuStarBand!==s.spectrum+variety){this.cpuStarBand=s.spectrum+variety;this.cpuStarColors=Array.from({length:16},(_,i)=>{const palette=['#90b9ff','#c8defa','#fff1cb','#ffbd7d'],tint=variety>.1?palette[i%4]:'#c8defa';return cpuColor(tint,s.spectrum,'star',.25+i/20);});this.cpuSourceColors=Array.from({length:16},(_,i)=>cpuColor('#c8defa',s.spectrum,'source',.25+i/20));}
   const count=Math.min(starDirections.length,Math.floor(this.cpuProfile.stars*starDensity*(showStars?1:0))),pixels=h/(.83*Math.max(1,1.35/(w/h)));
   ctx.globalAlpha=clamp(brightness,0,1);
-  const motion=this.warpMotionState(),pilot=motion.active?this.frameById.get(this.driveId):null,stretch=pilot?cpuWarpStarElongation(motion.beta):0,phase=motion.phase||0;
+  const pilot=motion.active?this.frameById.get(this.driveId):null,stretch=pilot?cpuWarpStarElongation(motion.beta):0,phase=motion.phase||0;
   for(let k=0;k<count;k++){
    const raw=starDirections[k],base=pilot?cpuWarpStarDirection(raw,pilot.frame[2],phase,k%3):raw;
    const d=s.lensing&&!openSpace&&this.anomalyFrames?.length?anomalySkyDirection(base,f.observer,this.anomalyFrames,this.time):base,depth=dot(d,f.forward);if(depth<=0)continue;const x=w/2+dot(d,f.right)*pixels/depth,y=h/2-dot(d,f.up)*pixels/depth;if(x<0||y<0||x>w||y>h)continue;
@@ -639,7 +647,9 @@ export class CpuRenderer extends BlackHoleRenderer {
   const pilot=this.objects.find(o=>o.id===this.driveId);if(pilot?.flight){const owner=this.objectFrames.find(o=>o.id===pilot.id);if(owner){const length=owner.radius*REFERENCE_RG_METERS*(this.state.warp?effectiveWarpRadius(this.state.warpFactor):5),points=predictedFlightPath(pilot.flight,length,20).map(p=>scale(p,1/REFERENCE_RG_METERS));this.drawLine(points,'#70deb1',2.4);yield;}}
  }
  *paintStages(){
-  this.fillHoles();this.protectObserver();this.fillObjects();this.updateCameraFrame();
+  // Separate scene preparation from painting so old-browser cooperative
+  // tasks can yield before the next expensive stage, including the first frame.
+  this.fillHoles();this.protectObserver();yield;this.fillObjects();yield;this.updateCameraFrame();yield;
   // A scene with no emitting objects can legitimately be black. Validate the
   // actual geometry before painting, rather than guessing from its pixels.
   if(!this.validateFrameGeometry())return false;

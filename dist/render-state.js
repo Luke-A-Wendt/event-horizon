@@ -33,9 +33,10 @@ export class LatestStateMailbox {
 // suspension is excluded from the deadline; a paused simulation still renders.
 export const GPU_SCENE_LOAD_TIMEOUT_MS=60000;
 export const GPU_FRAME_TIMEOUT_MS=30000;
-export const CPU_SCENE_TIMEOUT_MS=15000;
+export const CPU_SCENE_TIMEOUT_MS=60000;
+export const CPU_FRAME_TIMEOUT_MS=15000;
 export class SceneLoadLifecycle {
- constructor({cpu=false,now=()=>performance.now()}={}){this.now=now;this.loadTimeout=cpu?CPU_SCENE_TIMEOUT_MS:GPU_SCENE_LOAD_TIMEOUT_MS;this.frameTimeout=cpu?CPU_SCENE_TIMEOUT_MS:GPU_FRAME_TIMEOUT_MS;this.revision=0;this.begin();}
+ constructor({cpu=false,now=()=>performance.now()}={}){this.now=now;this.loadTimeout=cpu?CPU_SCENE_TIMEOUT_MS:GPU_SCENE_LOAD_TIMEOUT_MS;this.frameTimeout=cpu?CPU_FRAME_TIMEOUT_MS:GPU_FRAME_TIMEOUT_MS;this.revision=0;this.begin();}
  begin(){this.revision++;this.state='loading';this.timeout=this.loadTimeout;this.error='';this.elapsed=0;this.suspended=false;this.lastCheck=this.now();return this.revision;}
  check(suspended=false){const now=this.now(),gap=Math.max(0,now-this.lastCheck);this.lastCheck=now;const wasSuspended=this.suspended;this.suspended=suspended;if(this.state==='failed')return false;if(!suspended&&!wasSuspended)this.elapsed+=gap;if(this.elapsed<this.timeout)return false;this.fail(this.state==='loading'?'This scene did not finish loading. Retry, or choose another scene.':'The renderer stopped producing complete frames. Retry, or choose another scene.');return true;}
  complete(revision){if(revision!==this.revision||this.state==='failed')return false;this.state='ready';this.timeout=this.frameTimeout;this.error='';this.elapsed=0;this.lastCheck=this.now();return true;}

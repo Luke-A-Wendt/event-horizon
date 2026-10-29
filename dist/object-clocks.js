@@ -1,82 +1,71 @@
-// A bounded-cost clock comparison with a distant, stationary reference.
-// Exterior Schwarzschild lapse × local special-relativistic clock rate.
-// A spinning compact body's supplied horizon defines an axial Kerr lapse
-// proxy, ignoring latitude and frame dragging. Multiple sources multiply lapse
-// factors; this is not an exact many-body solution. Extended-body interiors
-// use the surface potential approximation.
+// Clock telemetry only: active wall seconds are the traveler's proper time τ.
+// Static Schwarzschild lapse plus proper-thrust rapidity. The Kerr horizon is
+// shifted into a Schwarzschild comparison radius; multiple lapse factors and
+// curved/turning paths are inexpensive visual approximations, not solved GR.
 export const CLOCK_LIGHT_SPEED=299792458;
 export const CLOCK_SOLAR_GM=1.32712440018e20;
-// A finite exterior experiment: preserve body clearance as well as precision.
 export const CLOCK_HORIZON_EPSILON=1e-6;
+export const CLOCK_MAX_SECONDS=1e300;
+const MAX_RAPIDITY=300,MAX_RATE=1e150;
 export const compactExteriorRadius=(horizon,bodyRadius=0)=>horizon*(1+CLOCK_HORIZON_EPSILON)+2*Math.max(0,bodyRadius);
 export const CLOCK_TYPES=Object.freeze(['astronaut','shuttle','iss']);
 export const supportsObjectClock=type=>CLOCK_TYPES.includes(type);
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const finiteVector=v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite);
-export function createObjectClock(){return {coordinateSeconds:0,lagSeconds:0,coordinateCompensation:0,lagCompensation:0};}
-
-export function clockRate({id=null,positionMeters=[0,0,0],velocityMetersPerSecond=[0,0,0],sources=[]}={}){
- let gravityLossRate=0,gravityProperRate=1,horizonLimit=false;
+const boundedRate=v=>Math.max(1,Math.min(MAX_RATE,Number.isFinite(v)?v:MAX_RATE));
+const rapidity=clock=>finiteVector(clock?.rapidityVector)?clock.rapidityVector:[0,0,0];
+const gamma=eta=>Math.cosh(Math.min(MAX_RAPIDITY,Math.hypot(...eta)));
+export function createObjectClock(){return {properSeconds:0,coordinateSeconds:0,lagSeconds:0,properCompensation:0,coordinateCompensation:0,lagCompensation:0,rapidityVector:[0,0,0]};}
+export function clockRate({id=null,positionMeters=[0,0,0],bodyRadiusMeters=0,rapidityVector=[0,0,0],sources=[]}={}){
+ let gravityFactor=1,horizonLimit=false;
  if(finiteVector(positionMeters))for(const source of sources){
   if(source.id===id||!(source.massSolar>0)||!Number.isFinite(source.massSolar)||!finiteVector(source.positionMeters))continue;
   const distance=Math.hypot(...positionMeters.map((v,i)=>v-source.positionMeters[i])),compact=Number.isFinite(source.horizonMeters)&&source.horizonMeters>0;
-  const surface=Math.max(0,Number(source.radiusMeters)||0),radius=Math.max(distance,compact?0:surface,1e-30);
-  const physicalSchwarzschild=2*CLOCK_SOLAR_GM*source.massSolar/(CLOCK_LIGHT_SPEED*CLOCK_LIGHT_SPEED),horizon=compact?source.horizonMeters:physicalSchwarzschild;
-  // Renderer horizon constants are rounded. Keep the nonspinning limit and
-  // loss + proper-rate identity consistent with the same displayed boundary.
-  const schwarzschild=compact?Math.max(physicalSchwarzschild,horizon):physicalSchwarzschild;
+  const rs=2*CLOCK_SOLAR_GM*source.massSolar/(CLOCK_LIGHT_SPEED*CLOCK_LIGHT_SPEED),horizon=compact?source.horizonMeters:rs;
+  // At a Kerr horizon use δ=r-r_+, and r_comparison=r_s+δ. For spin=0
+  // this is exactly sqrt(1-r_s/r)^-1; factoring δ avoids cancellation.
+  const radius=compact?distance:Math.max(distance,Number(source.radiusMeters)||0),minimumGap=Math.max(horizon*CLOCK_HORIZON_EPSILON,compact?2*Math.max(0,bodyRadiusMeters):0,1e-30);
+  const gap=Math.max(radius-horizon,minimumGap);
   if(compact&&distance<=horizon)horizonLimit=true;
-  // a²=r_+(r_s-r_+); Δ/(r²+a²) vanishes at r_+ while retaining
-  // the correct first-order 1-r_s/r behavior far from a spinning hole.
-  const a2=compact?Math.max(0,horizon*(schwarzschild-horizon)):0;
-  const u=clamp(schwarzschild/(radius+a2/radius),0,1);
-  // Factor Δ rather than subtracting almost equal numbers near r_+.
-  const lapse2=compact?clamp((radius-horizon)*(radius-(schwarzschild-horizon))/(radius*radius+a2),0,1):1-u;
-  const root=Math.sqrt(lapse2),loss=u/(1+root);
-  gravityProperRate*=root;
-  // 1 - sqrt(1-u), evaluated without subtracting nearly equal numbers.
-  gravityLossRate+=loss*(1-gravityLossRate);
+  gravityFactor=boundedRate(gravityFactor*Math.sqrt(1+rs/gap));
  }
- const speed=finiteVector(velocityMetersPerSecond)?Math.hypot(...velocityMetersPerSecond):0;
- const beta=Math.min(1-8*Number.EPSILON,speed/CLOCK_LIGHT_SPEED),beta2=beta*beta;
- const kinematicLossRate=beta2/(1+Math.sqrt((1-beta)*(1+beta)));
- const lossRate=horizonLimit?1:clamp(gravityLossRate+kinematicLossRate-gravityLossRate*kinematicLossRate,0,1);
- const properRate=horizonLimit?0:Math.max(0,gravityProperRate*Math.sqrt((1-beta)*(1+beta)));
- return {properRate,lossRate,rateFactor:properRate>0?1/properRate:Infinity,horizonLimit,gravityLossRate,kinematicLossRate};
+ const kinematicFactor=gamma(finiteVector(rapidityVector)?rapidityVector:[0,0,0]),rateFactor=boundedRate(gravityFactor*kinematicFactor),properRate=1/rateFactor;
+ return {rateFactor,gravityFactor,kinematicFactor,properRate,lossRate:1-properRate,horizonLimit,gravityLossRate:1-1/gravityFactor,kinematicLossRate:1-1/kinematicFactor};
 }
-
 function accumulate(clock,key,compensationKey,increment){
- const previous=Number.isFinite(clock[key])?clock[key]:0,correction=Number.isFinite(clock[compensationKey])?clock[compensationKey]:0;
+ const previous=Math.max(0,Number(clock[key])||0),correction=Number.isFinite(clock[compensationKey])?clock[compensationKey]:0;
  const y=increment-correction,next=previous+y;
- if(!Number.isFinite(next))return;
+ if(!Number.isFinite(next)||next>=CLOCK_MAX_SECONDS){clock[key]=CLOCK_MAX_SECONDS;clock[compensationKey]=0;return;}
  clock[compensationKey]=(next-previous)-y;clock[key]=next;
 }
-export function advanceObjectClock(clock,seconds,rate){
+// Straight constant proper acceleration integrates analytically. A turn uses
+// a bounded three-point quadrature of the vector-rapidity approximation.
+export function advanceObjectClock(clock,seconds,rate={},accelerationVector=[0,0,0]){
  if(!clock||!Number.isFinite(seconds)||seconds<=0)return clock;
- accumulate(clock,'coordinateSeconds','coordinateCompensation',seconds);
- accumulate(clock,'lagSeconds','lagCompensation',seconds*clamp(Number(rate?.lossRate)||0,0,1));
+ const initial=[...rapidity(clock)],a=finiteVector(accelerationVector)?accelerationVector:[0,0,0],magnitude=Math.hypot(...a),delta=a.map(v=>v*seconds/CLOCK_LIGHT_SPEED),next=initial.map((v,i)=>v+delta[i]);
+ const norm=Math.hypot(...next);if(norm>MAX_RAPIDITY)for(let i=0;i<3;i++)next[i]*=MAX_RAPIDITY/norm;
+ const midpoint=initial.map((v,i)=>(v+next[i])*.5),startGamma=gamma(initial),endGamma=gamma(next);
+ let averageGamma=(startGamma+4*gamma(midpoint)+endGamma)/6;
+ if(magnitude>0){
+  const direction=a.map(v=>v/magnitude),x=initial.reduce((sum,v,i)=>sum+v*direction[i],0),transverse=initial.reduce((sum,v,i)=>sum+(v-x*direction[i])**2,0),d=next.reduce((sum,v,i)=>sum+(v-initial[i])*direction[i],0);
+  if(transverse<1e-20){const half=d*.5,sinhc=Math.abs(half)<1e-5?1+half*half/6+half**4/120:Math.sinh(half)/half;averageGamma=Math.cosh(x+half)*sinhc;}
+ }
+ const gravity=Number.isFinite(rate.gravityFactor)?rate.gravityFactor:boundedRate(rate.rateFactor||1)/startGamma,averageRate=boundedRate(gravity*averageGamma);
+ accumulate(clock,'properSeconds','properCompensation',seconds);
+ accumulate(clock,'coordinateSeconds','coordinateCompensation',seconds*averageRate);
+ clock.rapidityVector=next;
+ // Retained internally for old flight telemetry; the HUD displays t, not t-τ.
+ clock.lagSeconds=Math.max(0,clock.coordinateSeconds-clock.properSeconds);clock.lagCompensation=0;
  return clock;
 }
 export function objectClockReading(clock,rate={},metadata={}){
- const coordinateSeconds=Math.max(0,Number(clock?.coordinateSeconds)||0),lagSeconds=Math.max(0,Math.min(coordinateSeconds,Number(clock?.lagSeconds)||0));
- return {...metadata,coordinateSeconds,lagSeconds,properSeconds:coordinateSeconds-lagSeconds,...rate};
+ const coordinateSeconds=Math.max(0,Number(clock?.coordinateSeconds)||0),properSeconds=Math.max(0,Number(clock?.properSeconds)||0);
+ return {...metadata,coordinateSeconds,properSeconds,lagSeconds:Math.max(0,coordinateSeconds-properSeconds),...rate};
 }
-
-const superscripts={'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
-const durationUnits=[[1e-9,'ns'],[1e-6,'μs'],[1e-3,'ms'],[1,'s'],[60,'min'],[3600,'h'],[86400,'d'],[31557600,'yr']];
-// Reference seconds per local second. Unlike accumulated loss per reference
-// second, this ratio grows without a bound at the exterior horizon limit.
-export function formatClockRate(factor){
- if(factor===Infinity)return '∞';
- if(!Number.isFinite(factor)||factor<1)return '—';
- if(factor>=1e4){const [m,e]=factor.toExponential(1).split('e');return m+' × 10'+String(Number(e)).split('').map(c=>superscripts[c]).join('')+'×';}
- return Number(factor.toPrecision(2)).toLocaleString(undefined,{minimumSignificantDigits:2,maximumSignificantDigits:2,useGrouping:false})+'×';
+const superscripts={'+':'⁺','-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
+function scientific(value,suffix){
+ if(!Number.isFinite(value)||value<0)return '—';
+ const [mantissa,raw]=value.toExponential(1).split('e'),exponent=Number(raw),digits=(exponent<0?'-':'+')+Math.abs(exponent).toString().padStart(2,'0');
+ return mantissa+' × 10'+digits.split('').map(c=>superscripts[c]).join('')+' '+suffix;
 }
-export function formatClockDuration(seconds){
- if(!Number.isFinite(seconds)||seconds<0)return '—';if(seconds===0)return '0 ns';
- let index=0;while(index<durationUnits.length-1&&seconds>=durationUnits[index+1][0])index++;
- while(index<durationUnits.length-1&&Number((seconds/durationUnits[index][0]).toPrecision(2))*durationUnits[index][0]>=durationUnits[index+1][0])index++;
- const [divisor,unit]=durationUnits[index],scaled=seconds/divisor;
- if(scaled>=1e4||scaled<.01){const [m,e]=scaled.toExponential(1).split('e');return m+' × 10'+String(Number(e)).split('').map(c=>superscripts[c]).join('')+' '+unit;}
- return Number(scaled.toPrecision(2)).toLocaleString(undefined,{minimumSignificantDigits:2,maximumSignificantDigits:2,useGrouping:false})+' '+unit;
-}
+export const formatClockRate=factor=>scientific(factor,'s/s');
+export const formatClockDuration=seconds=>scientific(seconds,'s');

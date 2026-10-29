@@ -67,7 +67,7 @@ assert(QUALITY_PROFILES.ultra.steps>=768&&QUALITY_PROFILES.ultra.pixels>=1600000
 {
  const f=fixture({webgl2:false}),r=new BlackHoleRenderer(f.canvas);
  for(let i=0;i<=60;i++)f.step(r,1000+i*16.667);
- assert(f.draws<=32&&f.draws>=25,`WebGL1 submitted ${f.draws} frames in one second`);
+ assert(f.draws<=42&&f.draws>=35,`WebGL1 submitted ${f.draws} frames in one second`);
  assert.equal(f.calls.fence,0);assert.deepEqual(r.profile(),QUALITY_PROFILES[r.getState().effectiveQuality]);
  r.dispose();
 }
@@ -115,13 +115,13 @@ console.log('PASS: honest stalled-GPU FPS reporting and bounded feature-program 
  assert.equal(f.uniforms.get('uObjectCount').args[0],2);
  assert(r.programSupports({...r.shaderFeatures(),craftMask:8}),'A compiled superset may continue rendering its remaining model');
  assert(!r.programSupports({...r.shaderFeatures(),craftMask:11}),'Uncompiled ISS geometry must require a new variant');
- // If objects are removed during compilation, a completed superset is already
- // useful; do not freeze another interval just to compile a smaller variant.
+ // If removal changes the compiled object-slot capacity, the fresh smaller
+ // variant is polled on the next frame; remaining geometry must be complete.
  f.control.compileComplete=false;const station=r.addObject('iss',18,2,1);r.frame(1100.002);
  assert.equal(r.pendingProgram.features.craftMask,11);
  for(const object of [...r.objects])if(object.id!==station.id)r.removeObject(object.id);
- const beforeSuperset=f.draws;f.control.compileComplete=true;r.frame(1116.669);
- assert(f.draws>beforeSuperset,'A freshly completed superset must render after objects are removed mid-compile');
+ const beforeSuperset=f.draws;f.control.compileComplete=true;r.frame(1116.669);r.frame(1133.336);
+ assert(f.draws>beforeSuperset,'A changed object-slot count resumes after its smaller specialized variant completes');
  assert(r.programSupports(r.shaderFeatures()));assert.equal(f.uniforms.get('uObjectCount').args[0],1);
  r.dispose();
 }

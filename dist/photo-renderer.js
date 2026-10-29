@@ -137,6 +137,21 @@ async function waitForFence(gl,sync,renderer,signal,deadline=Infinity,onWait=()=
  }
 }
 
+// Live WebGL1 may use an asynchronous timer-query completion fence. Preserve
+// its ownership on cancellation/deadline, so the next live frame still waits.
+async function waitForLiveFrame(renderer,signal,deadline=Infinity){
+ const fence=renderer.gpuFence;if(!fence)return;
+ if(!fence.query){await waitForFence(renderer.gl,fence.sync,renderer,signal,deadline);renderer.releaseFence();return;}
+ const started=now(),query=renderer.completionQuery;
+ if(!query)throw new Error('The pending graphics query is unavailable. Retry graphics.');
+ for(;;){
+  usable(renderer,signal);checkBudget(deadline);
+  if(query.getQueryObjectEXT(fence.query,query.QUERY_RESULT_AVAILABLE_EXT)){renderer.releaseFence();return;}
+  if(now()-started>30000)throw new Error('The GPU took too long to finish the live frame. Try a lower quality.');
+  await pollTask();
+ }
+}
+
 async function makeProgram(gl,features,webgl2,renderer,signal,resources,deadline=Infinity,onWait=()=>{}){
  let vertex=VERTEX,fragment=createFragment({...features,ultra:true,photo:true});
  if(webgl2){vertex='#version 300 es\n'+vertex.replace('attribute','in');fragment='#version 300 es\n'+fragment.replace('precision highp float;','precision highp float;\nout vec4 outColor;').replaceAll('gl_FragColor','outColor');}
@@ -199,7 +214,7 @@ async function renderPicture(renderer,{presetId='high',onProgress=()=>{},signal,
  try{
   report('Preparing GPU renderer',true);checkBudget(deadline);
   if(snapshot.features.planetary)await waitForTextures(renderer.planetTextures,snapshot.focusSurfaceId||0,renderer,signal,true,deadline);
-  if(renderer.gpuFence){await waitForFence(gl,renderer.gpuFence.sync,renderer,signal,deadline);renderer.releaseFence();}
+  if(renderer.gpuFence)await waitForLiveFrame(renderer,signal,deadline);
   const program=await makeProgram(gl,{...snapshot.features,photoSteps:preset.steps},renderer.webgl2,renderer,signal,resources,deadline,()=>report('Preparing GPU renderer'));
   gl.useProgram(program);
   const locations=new Map(),location=name=>{if(!locations.has(name))locations.set(name,gl.getUniformLocation(program,name));return locations.get(name);};
@@ -338,3 +353,5 @@ async function renderPicture(renderer,{presetId='high',onProgress=()=>{},signal,
 }
 
 export function createPhotoRender(renderer,options={}){return renderPicture(renderer,options);}
+
+export {waitForLiveFrame};

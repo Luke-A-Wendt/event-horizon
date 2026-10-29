@@ -6,7 +6,7 @@ import {CpuRenderer} from '../dist/cpu-renderer.js';
 import {CpuCommandCanvas} from '../dist/cpu-commands.js';
 import {fixture} from './render-fixture.mjs';
 const journey=t=>bridgeJourney(t,1,'open-transit-close'),endpoint=HEIGHLINER_PASSAGE.endpoint/HEIGHLINER_PASSAGE.throatRadius;
-assert.equal(journey(0).l,endpoint);assert.equal(journey(0).open,0);assert.equal(journey(7).open,1);assert.equal(journey(60).l,-endpoint);
+assert.equal(journey(0).l,endpoint);assert.equal(journey(0).open,0);assert.equal(journey(7).open,1);assert.equal(journey(40).l,-endpoint);
 assert(journey(3).open<journey(4).open&&journey(4).open<journey(5).open);
 for(const open of [.01,.1,.5,1])assert.equal(bridgeMetricScale(open)*bridgeMetricScale(open,true),1);
 const force=b=>Math.hypot(...bridgeGradient([2,0,0],b));assert(force(.01)<force(.1)&&force(.1)<force(1),'Opening radius changes curvature, not opacity');

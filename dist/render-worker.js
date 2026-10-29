@@ -23,7 +23,7 @@ export function installRenderWorker(scope,dependencies={}){
  }
  const status=(extra={})=>{
   if(!renderer)return;
-  const s=renderer.getState();send({type:'status',stats:{fps:s.fps||0,effectiveQuality:s.effectiveQuality,adaptiveLevel:s.adaptiveLevel,adaptiveStatus:s.adaptiveStatus,adaptiveReason:s.adaptiveReason,probePending:s.probePending,shaderCompiling:s.shaderCompiling,webgl:s.webgl,width:renderer.canvas.width,height:renderer.canvas.height,scale:renderer.renderScale,steps:renderer.steps,cpu:!!renderer.cpu,surfaceWarning:s.surfaceWarning||'',surfaceRefining:!!s.surfaceRefining,contextLost:renderer.contextLost,...extra}});
+  const s=renderer.getState();send({type:'status',stats:{fps:s.fps||0,effectiveQuality:s.effectiveQuality,adaptiveLevel:s.adaptiveLevel,qualityReduced:!!s.qualityReduced,adaptivePixelScale:s.adaptivePixelScale,adaptiveStatus:s.adaptiveStatus,adaptiveReason:s.adaptiveReason,probePending:s.probePending,shaderCompiling:s.shaderCompiling,webgl:s.webgl,width:renderer.canvas.width,height:renderer.canvas.height,scale:renderer.renderScale,steps:renderer.steps,cpu:!!renderer.cpu,surfaceWarning:s.surfaceWarning||'',surfaceRefining:!!s.surfaceRefining,contextLost:renderer.contextLost,...extra}});
  };
  const makeClass=Base=>class extends Base{
   bindControls(){}
@@ -44,7 +44,7 @@ export function installRenderWorker(scope,dependencies={}){
    // Encoding owns this freshly drawn buffer until it settles. It must not be
    // transferred to a diagnostic ImageBitmap in the same task.
    if(capturing)return drawn;
-   if(drawn&&commandCanvas){commandFrame={serial:++commandSerial,signature,sceneRevision:this.sceneRevision};send({type:'cpu-frame',serial:commandSerial,signature,sceneRevision:this.sceneRevision,frame:commandCanvas.takeFrame(),annotationFrame:captureAnnotationFrame(this)});return true;}
+   if(drawn&&commandCanvas){commandFrame={serial:++commandSerial,signature,sceneRevision:this.sceneRevision,startedAt:now};send({type:'cpu-frame',serial:commandSerial,signature,sceneRevision:this.sceneRevision,frame:commandCanvas.takeFrame(),annotationFrame:captureAnnotationFrame(this)});return true;}
    if(drawn){const annotationFrame=captureAnnotationFrame(this);if(annotationFrame?.annotations&&typeof this.canvas.transferToImageBitmap==='function'){if(this.gpuFence)this.gpuFence.presented=true;this.completed(signature,now,this.sceneRevision,annotationFrame);}else if(this.gpuFence){this.gpuFence.renderedSignature=signature;this.gpuFence.sceneRevision=this.sceneRevision;this.gpuFence.annotationFrame=annotationFrame;}else this.completed(signature,now,this.sceneRevision,annotationFrame);}
    return drawn;
   }
@@ -92,7 +92,7 @@ export function installRenderWorker(scope,dependencies={}){
     if(bitmapFrame?.serial===message.serial){const frame=bitmapFrame;bitmapFrame=null;if(!message.cancelled){frameReported=frame.signature===signature;lastReport=renderer.now();status({renderedSignature:frame.signature,sceneRevision:frame.sceneRevision,frameReady:true});}}return;
    }
    if(message.type==='cpu-presented'){
-    if(commandFrame?.serial===message.serial){if(!message.cancelled)renderer.noteCpuCost?.(message.costMs||0,renderer.now(),'presentation');if(!message.cancelled)renderer.completed(commandFrame.signature,renderer.now(),commandFrame.sceneRevision);commandFrame=null;}return;
+    if(commandFrame?.serial===message.serial){if(!message.cancelled)renderer.noteCpuCost?.(Math.max(message.costMs||0,renderer.now()-commandFrame.startedAt),renderer.now(),'frame');if(!message.cancelled)renderer.completed(commandFrame.signature,renderer.now(),commandFrame.sceneRevision);commandFrame=null;}return;
    }
    if(message.type==='visibility'){
     document.hidden=!!message.hidden;if(message.presentationPaused!==undefined)presentationIntent=!!message.presentationPaused;renderer.setPresentationPaused(!!message.hidden||presentationIntent);

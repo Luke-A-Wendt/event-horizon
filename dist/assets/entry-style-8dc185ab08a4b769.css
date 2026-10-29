@@ -482,7 +482,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .scene.has-flight-controls .gesture-hint{display:none}
 .scene.has-viewport-ui .viewport-popover{bottom:var(--overlay-bottom);max-height:calc(100% - var(--overlay-bottom) - 74px)}
 .scene.has-viewport-ui .viewport-inspector{top:74px;bottom:var(--overlay-bottom);max-height:none}
-.scene.viewport-panel-open .scene-tools,.scene.viewport-panel-open .scene-bottom,.scene.viewport-panel-open .quick-drive,.scene.pilot-camera-open .scene-tools{visibility:hidden}
+.scene.viewport-panel-open .scene-tools,.scene.viewport-panel-open .scene-bottom,.scene.viewport-panel-open .quick-drive{visibility:hidden}
 .scene.has-flight-controls .cpu-quality-notice{bottom:calc(var(--overlay-bottom) + 80px)}
 .pilot-console{position:absolute;inset:auto 0 0;height:var(--flight-strip,76px);width:100%;z-index:12;display:grid;grid-template-columns:40px minmax(0,1fr) 40px;grid-template-rows:minmax(0,1fr);gap:12px;align-items:center;padding:9px 16px;background:#081320;border-top:1px solid #284156;color:#c9e4f5;box-sizing:border-box}
 .pilot-console[hidden]{display:none}
@@ -502,8 +502,6 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .pilot-power{display:grid;grid-template-columns:36px minmax(0,1fr) 44px;gap:8px;align-items:center;font-size:11px;margin:0;min-width:0}
 .pilot-power input{width:100%;margin:0;accent-color:#9ed5f7;touch-action:none}.pilot-power output{text-align:right;font:11px ui-monospace,monospace}
 .pilot-range{position:relative;display:flex;align-items:center;min-width:0}
-.pilot-settings{position:absolute;right:12px;bottom:calc(100% + var(--dock-height,60px) + 22px);display:flex;gap:8px;width:max-content;max-width:calc(100% - 24px);padding:8px;border:1px solid #426078;border-radius:8px;background:#091b2cf5;box-sizing:border-box}
-.pilot-settings[hidden]{display:none}.pilot-settings button{min-height:40px;font-size:11px}.pilot-settings button[aria-pressed=true]{background:#254b65;border-color:#8bc7ed}
 .pilot-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 @media(max-width:600px){
  .pilot-console{grid-template-columns:32px minmax(0,1fr) 32px;grid-template-rows:minmax(0,1fr);gap:4px;padding:8px 7px}
@@ -511,7 +509,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
  .pilot-console #pilotBrakeSpeed{width:30px;min-height:32px;padding:0;font-size:0}
  .pilot-console #pilotBrakeSpeed::after{content:attr(data-short-label);font:11px ui-monospace,monospace}
  .pilot-actions{gap:4px}.pilot-actions button{width:28px;min-height:32px;height:32px;padding:3px}
- .pilot-power{grid-template-columns:minmax(0,1fr) 32px;gap:4px;font-size:10px}.pilot-power>span:first-child{display:none}.pilot-power output{font-size:10px}
+ .pilot-power{grid-template-columns:minmax(0,1fr) 32px;gap:4px;font-size:10px}.pilot-power output{font-size:10px}
  .scene.has-flight-controls .scene-bottom{right:60px;max-width:calc(100% - 77px);gap:7px}.pilot-telemetry{gap:4px}.pilot-telemetry>div{gap:12px}.pilot-telemetry output{font-size:10px}
  .scene.has-flight-controls .scene-heading{max-width:calc(100% - 78px)}
  .site-header #mathNav{font-size:16px}
@@ -540,14 +538,11 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
  .scene.has-viewport-ui .viewport-popover,.scene.has-viewport-ui .viewport-inspector{top:64px;bottom:var(--overlay-bottom);max-height:none;overflow-y:auto}
  .scene.has-viewport-ui .viewport-inspector{display:block}.scene.has-viewport-ui .viewport-inspector .controls-body{overflow:visible}
  .scene.has-viewport-ui .viewport-panel-heading,.scene.has-viewport-ui .viewport-inspector-heading{margin-bottom:8px}
- .scene.has-viewport-ui .pilot-settings{bottom:calc(100% + var(--dock-height) + 22px)}
 }
 @media(max-height:400px) and (orientation:landscape){.scene.has-flight-controls .scene-heading{display:none}.scene.has-viewport-ui .scene-bottom .distance-readout>.eyebrow{display:none}.scene.has-viewport-ui .scene-bottom .distance-readout small{max-width:150px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}}
 @media(max-height:420px) and (orientation:landscape){.scene.has-flight-controls .viewport-dock{visibility:hidden}}
 @media(max-height:400px) and (orientation:landscape){
  .scene.has-flight-controls .scene-tools{visibility:hidden}
- .scene.has-flight-controls.pilot-camera-open .viewport-dock,.scene.has-flight-controls.viewport-panel-open .viewport-dock{visibility:hidden}
- .scene.has-flight-controls .pilot-settings{bottom:calc(100% + 8px)}
  .scene.has-flight-controls .viewport-popover,.scene.has-flight-controls .viewport-inspector{bottom:calc(var(--flight-strip) + 8px)}
 }
 @media(max-height:360px) and (orientation:landscape){.scene.has-flight-controls .scene-tools,.scene.has-flight-controls .scene-bottom{visibility:hidden}}
@@ -561,7 +556,6 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
    operating ranges, never a progress fill. */
 .pilot-console{--pilot-risk-start:80%}
 .pilot-console.pilot-shuttle{--pilot-risk-start:40%}
-.pilot-console.pilot-impulse{--pilot-risk-start:100%}
 .pilot-sliders input[type=range]{appearance:none;-webkit-appearance:none;height:28px;border:0;border-radius:8px;background:transparent;box-shadow:none;outline-offset:2px}
 .pilot-sliders input[type=range]::-webkit-slider-runnable-track{height:5px;border:0;border-radius:8px;background:#607b90}
 .pilot-sliders input[type=range]::-moz-range-track{height:5px;border:0;border-radius:8px;background:#607b90}
@@ -581,8 +575,6 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
  .scene.has-flight-controls .scene-bottom{bottom:calc(var(--flight-strip) + 9px);right:12px;max-width:calc(100% - 24px);gap:5px}
  .scene.has-flight-controls .scene-tools{bottom:calc(var(--flight-strip) + 118px)}
  .scene.has-flight-controls .viewport-popover,.scene.has-flight-controls .viewport-inspector{top:112px;bottom:calc(var(--flight-strip) + 9px);max-height:none}
- .scene.has-flight-controls .pilot-settings{bottom:calc(100% + 12px)}
- .scene.has-flight-controls.pilot-camera-open .scene-bottom{visibility:hidden}
 }
 
 /* A gentle first-visit cue; opacity alone animates without layout work. */
@@ -613,27 +605,20 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 
 .pilot-telemetry #pilotDilationRateRow{align-items:baseline;gap:14px;color:#9bd2f5}
 .pilot-telemetry #pilotDilationRate{min-width:12ch;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.pilot-telemetry #pilotDilationRow small{display:inline;font:inherit;color:#728da4;white-space:nowrap}
-.pilot-telemetry .pilot-clock-relation{margin:0;text-align:right;font:8px/1.4 ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#9bb8cc;white-space:nowrap}
-.pilot-telemetry .pilot-clock-relation[hidden]{display:none}
 
-/* Corner heading buttons and one active engine fit inside the same reserved
-   strip. Changing modes never adds a panel over the centered vehicle. */
+/* Corner heading buttons and power fit inside the reserved strip, leaving
+   the centered vehicle clear on desktop and mobile. */
 .pilot-console{grid-template-columns:44px minmax(0,1fr) 44px;gap:12px;padding:7px 16px}
 .pilot-main{grid-column:2;grid-row:1}
 .pilot-console .pilot-turn{height:44px;min-height:44px;font-size:34px;user-select:none;-webkit-user-select:none}
 .pilot-console .pilot-turn:disabled{opacity:.4;cursor:default}
 .pilot-sliders{display:grid;gap:2px;min-width:0}
-.pilot-mode-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;min-width:0}
-.pilot-modes{display:flex;gap:3px;align-items:center}.pilot-modes[hidden]{display:none}
-.pilot-console .pilot-modes button{min-height:22px;height:22px;padding:2px 9px;font-size:10px;line-height:1;border-color:#2e4b63;background:#0a1b2a;color:#8eabc1}
-.pilot-console .pilot-modes button[aria-pressed=true]{color:#e0f1ff;background:#214661;border-color:#8ac4e9}
-.pilot-console .pilot-modes button:disabled{opacity:.35;cursor:default}
+.pilot-info-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;min-width:0;font-size:11px;color:#c9e4f5}
 .pilot-heading-readout{margin-left:auto;display:flex;align-items:baseline;gap:5px;white-space:nowrap;color:#8da9bd;font-size:9px}
 .pilot-heading-readout output{display:block;min-width:5ch;text-align:right;font:11px ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#d2eafa}
-.pilot-sliders .pilot-power{display:grid;grid-template-columns:45px minmax(0,1fr) 55px;gap:8px;align-items:center;font-size:11px;margin:0;min-width:0}
+.pilot-sliders .pilot-power{display:grid;grid-template-columns:minmax(0,1fr) 55px;gap:8px;align-items:center;font-size:11px;margin:0;min-width:0}
 .pilot-sliders .pilot-power input{width:100%;height:28px;margin:0;accent-color:#9ed5f7;touch-action:none}
-@media(max-width:600px){.pilot-console{grid-template-columns:36px minmax(0,1fr) 36px;gap:5px;padding:7px}.pilot-console .pilot-turn{height:44px;min-height:44px;font-size:31px}.pilot-mode-row{gap:4px}.pilot-console .pilot-modes button{padding:2px 6px;font-size:9px}.pilot-heading-readout{gap:3px}.pilot-heading-readout>span{display:none}.pilot-heading-readout output{font-size:9px;min-width:4ch}.pilot-sliders .pilot-power{grid-template-columns:minmax(0,1fr) 44px;gap:4px;font-size:9px}.pilot-sliders .pilot-power>span:first-child{display:none}.pilot-telemetry .pilot-clock-relation{font-size:7px}}
+@media(max-width:600px){.pilot-console{grid-template-columns:36px minmax(0,1fr) 36px;gap:5px;padding:7px}.pilot-console .pilot-turn{height:44px;min-height:44px;font-size:31px}.pilot-info-row{gap:4px;font-size:10px}.pilot-heading-readout{gap:3px}.pilot-heading-readout output{font-size:9px;min-width:4ch}.pilot-sliders .pilot-power{grid-template-columns:minmax(0,1fr) 44px;gap:4px;font-size:9px}}
 
 /* Fixed columns keep the selected mode still while quality and FPS change. */
 .scene.has-viewport-ui .scene-top .render-pill{grid-template-columns:5px 61px 44px 48px 50px;column-gap:7px;white-space:nowrap}
@@ -641,3 +626,38 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .render-pill .backend-status.is-cpu{color:#aab7ca}
 @media(max-width:760px){.scene.has-viewport-ui .scene-top .render-pill{grid-template-columns:52px 35px 38px 41px;column-gap:4px;padding:8px 6px;font-size:7.5px;letter-spacing:0}.scene-top .render-pill>i{display:none}}
 @media(max-width:400px){.scene.has-viewport-ui .scene-top .render-pill{grid-template-columns:46px 30px 34px 38px;column-gap:3px;padding:8px 5px;font-size:7px}.scene.has-viewport-ui .scene-top{right:9px;gap:4px}.render-pill .corner-fps{padding-left:3px}}
+
+/* Relativity notebook: a readable path with local MathML and diagrams. */
+.math-hub-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+.math-hub-foundations{background:#102132;border-color:#74a5c9}
+.relativity-lead{font-size:15px;color:#d2e6f5;line-height:1.85}
+.relativity-roadmap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:19px 0}
+.relativity-roadmap button{display:flex;gap:9px;align-items:center;padding:10px 12px;text-align:left;border:1px solid #36516a;background:#0d1b28;border-radius:5px;color:#cfe6f7;font:inherit;font-size:12px;min-height:43px}
+.relativity-roadmap button span{color:#79a7c9;font:10px ui-monospace,monospace}
+.relativity-roadmap button:hover,.relativity-roadmap button:focus-visible{border-color:#9fd6f8;background:#163048;outline:1px solid transparent}
+.relativity-guide .math-section{scroll-margin-top:100px}
+.relativity-guide .math-section-body{line-height:1.9}
+.relativity-guide .math-section-body>p{margin:15px 0}
+.relativity-guide .relativity-figure{overflow-x:auto;padding:0 0 5px;scrollbar-color:#476c89 #07111a}
+.relativity-diagram{display:block;width:100%;height:auto;min-width:640px;border:1px solid #263e52;border-radius:8px;box-sizing:border-box}
+.relativity-figure figcaption{font-size:11px;color:#8ca8bf;line-height:1.7;margin:10px 0 0}
+.relativity-reading{border-top:1px solid #2b4358;margin-top:25px;padding-top:10px}
+.relativity-guide .outline-button{margin:5px 0 7px;font-size:12px}
+@media(max-width:600px){.math-hub-cards{grid-template-columns:1fr}.relativity-lead{font-size:13px}.relativity-roadmap{grid-template-columns:repeat(2,minmax(0,1fr))}.relativity-roadmap button{font-size:11px;padding:9px}.relativity-figure figcaption{font-size:10px}.relativity-guide .math-section-body{line-height:1.85}}
+
+/* Loading feedback has its own small UI timer; render diagnostics stay in Display. */
+.loading-card #loadingReason{font-size:13px;font-weight:500;letter-spacing:.2px;line-height:1.5;max-width:240px}.loading-card #loadingPercent{font:500 17px/1.3 ui-monospace,monospace;font-variant-numeric:tabular-nums;color:#cde6ff;min-width:4ch}.scene-loading .loading-orbit{contain:layout paint;transform:translateZ(0);animation:loading-breathe 2.8s ease-in-out infinite;will-change:opacity}@keyframes loading-breathe{0%,100%{opacity:.78}50%{opacity:1}}@media(prefers-reduced-motion:reduce){.scene-loading .loading-orbit{animation:none;will-change:auto}}
+
+/* Flight has one return action; the main Camera panel owns viewpoints. */
+.pilot-actions #pilotStop{width:36px;height:36px;min-height:36px;padding:7px}
+.pilot-actions #pilotStop .icon{width:21px;height:21px;stroke-width:1.7}
+.pilot-telemetry #pilotDilation,.pilot-telemetry #pilotDilationRate{min-width:18ch;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pilot-telemetry #pilotDilationRate{font:600 11px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;color:#b9dcf4}
+@media(max-width:600px){.pilot-telemetry #pilotDilation{font-size:12px}.pilot-telemetry #pilotDilationRate{font-size:10px}.scene.has-object-clock:not(.has-flight-controls) .gesture-hint{bottom:calc(var(--overlay-bottom) - 12px);font-size:8px;line-height:10px}.pilot-actions #pilotStop{width:34px;height:34px;min-height:34px;padding:6px}}
+/* Discovery rings animate only opacity, without moving controls or text. */
+#viewportPause{position:relative}
+.control-discovery::after{content:"";position:absolute;inset:-4px;border:2px solid #a9dcff;border-radius:9px;box-shadow:0 0 14px #84caff55;pointer-events:none;animation:control-discovery-pulse 3.2s ease-in-out infinite}
+@keyframes control-discovery-pulse{0%,100%{opacity:.15}50%{opacity:.95}}
+@media(prefers-reduced-motion:reduce){.control-discovery::after{animation:none;opacity:.65}}
+
+@media(max-height:400px) and (orientation:landscape){.scene.has-flight-controls.viewport-panel-open .viewport-dock{visibility:hidden}}

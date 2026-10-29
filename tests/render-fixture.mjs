@@ -1,9 +1,10 @@
 // A recording GL stub for logic tests and feeding the real shader to native EGL.
 // It does not emulate a browser or claim to validate browser behavior.
-export function fixture({width=900,height=650,dpr=1,maxSize=8192,webgl2=true,parallelCompile=false,compileComplete=true,gpuComplete=true,gpuLatencyMs=null}={}) {
+export function fixture({width=900,height=650,dpr=1,maxSize=8192,webgl2=true,parallelCompile=false,compileComplete=true,gpuComplete=true,gpuLatencyMs=null,completionQuery=false}={}) {
  const uniforms=new Map(),sources=[],programs=[];
  let draws=0,disposed=0,activeProgram=null,nextId=1;
  const calls={shaderStatus:0,linkStatus:0,completionStatus:0,fence:0,wait:0,deleteSync:0,finish:0,flush:0,capture:0};
+ const assertQueryAvailability=key=>{if(key!==34919)throw Error('Completion polling must not synchronously read GPU timing results');};
  const control={compileComplete,gpuComplete,waitStatus:null,now:0,gpuLatencyMs,lastDrawTime:null,lastCapture:null,linkSuccess:true};
  const target=()=>({listeners:new Map(),addEventListener(name,fn){this.listeners.set(name,fn);},removeEventListener(name){this.listeners.delete(name);},emit(name,event={}){this.listeners.get(name)?.({preventDefault(){},...event});}});
  const base={
@@ -14,7 +15,12 @@ export function fixture({width=900,height=650,dpr=1,maxSize=8192,webgl2=true,par
   shaderSource:(shader,source)=>{shader.source=source;sources.push({type:shader.type,source});},
   createProgram:()=>{const p={id:nextId++,shaders:[]};programs.push(p);return p;},
   attachShader:(program,shader)=>program.shaders.push(shader),useProgram:program=>{activeProgram=program;},
-  getExtension:name=>name==='KHR_parallel_shader_compile'&&parallelCompile?{COMPLETION_STATUS_KHR:37297}:null,
+  getExtension:name=>name==='KHR_parallel_shader_compile'&&parallelCompile?{COMPLETION_STATUS_KHR:37297}:name==='EXT_disjoint_timer_query'&&completionQuery?{
+   TIME_ELAPSED_EXT:35007,QUERY_RESULT_AVAILABLE_EXT:34919,
+   createQueryEXT:()=>({id:nextId++}),beginQueryEXT:(_,query)=>{control.activeQuery=query;},
+   endQueryEXT:()=>{const query=control.activeQuery,latency=typeof control.gpuLatencyMs==='function'?control.gpuLatencyMs(uniforms):control.gpuLatencyMs;query.readyAt=latency===null?null:control.now+latency;control.activeQuery=null;},
+   getQueryObjectEXT:(query,key)=>{assertQueryAvailability(key);return query.readyAt===null?control.gpuComplete:control.now>=query.readyAt;},deleteQueryEXT:()=>{calls.deleteQuery=(calls.deleteQuery||0)+1;}
+  }:null,
   getParameter:k=>k===36349?512:maxSize,
   getShaderParameter:()=>{calls.shaderStatus++;return true;},
   getProgramParameter:(program,key)=>{if(key===37297){calls.completionStatus++;return control.compileComplete;}calls.linkStatus++;return control.linkSuccess;},

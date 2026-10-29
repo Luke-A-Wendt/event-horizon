@@ -15,7 +15,8 @@ function simulation(options={}){
   const s=r.getState();history.push({time:now,quality:s.effectiveQuality,status:s.adaptiveStatus});
   if(s.quality==='adaptive'){
    assert(['low','medium','high'].includes(s.effectiveQuality),'Adaptive may select only visible non-Ultra presets');
-   assert.deepEqual(r.budget.profile,QUALITY_PROFILES[s.effectiveQuality],'Adaptive must never use a hidden scale/detail budget');
+   if(!s.qualityReduced)assert.deepEqual(r.budget.profile,QUALITY_PROFILES[s.effectiveQuality],'Named tiers retain their published budgets outside emergency Low pixels');
+   else assert.equal(r.budget.profile.steps,QUALITY_PROFILES.low.steps,'Emergency Low preserves ray sampling and object geometry');
   }
  }
  function run(duration,interval=1000/60){const end=now+duration;while(now<end-.001)tick(typeof interval==='function'?interval():interval);}
@@ -38,7 +39,8 @@ function simulation(options={}){
  assert(s.history.filter(h=>h.time>14000).every(h=>h.quality==='high'),'50–60 FPS is sufficient; never demand a locked 60 FPS');
  assert(s.statistics.at(-1).fps>=49&&s.statistics.at(-1).fps<=61);
  s.run(5000,25);assert.equal(s.r.getState().effectiveQuality,'high','A stable 40 FPS is above the requested cutoff');
- s.run(3500,1000/29);assert.notEqual(s.r.getState().effectiveQuality,'high','A sustained 29 FPS is below the requested cutoff');
+ s.run(3500,1000/29);assert.equal(s.r.getState().effectiveQuality,'high','29 FPS is inside the requested band');
+ s.run(3500,1000/12);assert.notEqual(s.r.getState().effectiveQuality,'high','A sustained 12 FPS is below the requested cutoff');
  s.r.dispose();
 }
 
@@ -47,9 +49,8 @@ function simulation(options={}){
 // acceptable 30 FPS stream, not an overload on every fence poll.
 {
  const s=simulation({gpuLatencyMs:20});let interval=0;s.run(28000,()=>[16,17,16,18,16.3333,16.6667][interval++%6]);
- assert.equal(s.r.getState().effectiveQuality,'high','A 30 FPS stream must be allowed to test and retain higher modes');
- const lastHigh=s.history.findLastIndex(h=>h.quality!=='high');
- assert(s.history.length-lastHigh>120,'High should remain stable for several seconds at a 30 FPS retirement cadence');
+ assert.equal(s.r.getState().effectiveQuality,'low','A 30 FPS stream holds its preset until there is headroom above30');
+ assert(s.history.every(h=>h.quality==='low'),'Stable30 FPS must not repeatedlyprobeandfallback');
  assert(s.statistics.at(-1).fps>=29&&s.statistics.at(-1).fps<=31);
  assert(s.f.calls.wait>s.f.draws,'This case must actually skip alternate RAF submissions');
  assert.equal(s.f.calls.finish,0);s.r.dispose();
@@ -61,7 +62,7 @@ function simulation(options={}){
  const s=simulation();s.run(6000);assert.equal(s.r.getState().effectiveQuality,'high');
  s.f.control.gpuLatencyMs=70;s.run(6000);
  assert.equal(s.r.getState().effectiveQuality,'low');
- assert.deepEqual(s.r.budget.profile,QUALITY_PROFILES.low);assert.equal(s.r.steps,QUALITY_PROFILES.low.steps);
+ assert(s.r.budget.profile.scale<QUALITY_PROFILES.low.scale);assert.equal(s.r.steps,QUALITY_PROFILES.low.steps);
  assert(s.statistics.at(-1).fps<30,'The slowdown must be measured from completed work');
  s.f.control.gpuLatencyMs=4;s.run(55000);assert.equal(s.r.getState().effectiveQuality,'high','Quality should recover after load improves, even after failed probes');
  for(const quality of ['low','medium','high','ultra']){
@@ -76,11 +77,11 @@ function simulation(options={}){
 // A failed upgrade must settle on Medium without repeatedly toggling High;
 // a later improvement still gets another opportunity to use High.
 {
- const s=simulation({gpuLatencyMs:uniforms=>uniforms.get('uSteps')?.args[0]>=256?40:4});s.run(12000);
+ const s=simulation({gpuLatencyMs:uniforms=>uniforms.get('uSteps')?.args[0]>=QUALITY_PROFILES.high.steps?90:4});s.run(12000);
  assert.equal(s.r.getState().effectiveQuality,'medium');
  const highEntries=s.history.filter((h,i)=>h.quality==='high'&&s.history[i-1]?.quality!=='high');
  assert.equal(highEntries.length,1,'A failed High probe needs a cooldown, not rapid oscillation');
- s.f.control.gpuLatencyMs=4;s.run(30000);assert.equal(s.r.getState().effectiveQuality,'high');
+ s.f.control.gpuLatencyMs=4;s.run(40000);assert.equal(s.r.getState().effectiveQuality,'high');
  s.r.dispose();
 }
 
@@ -98,22 +99,22 @@ function simulation(options={}){
  s.r.dispose();
 }
 
-// The intentional WebGL1 30 FPS submission ceiling must not force Adaptive
+// The legacy WebGL1 40 FPS submission ceiling must not force Adaptive
 // downward forever or prevent it from testing higher preset budgets.
 {
  const s=simulation({webgl2:false});s.run(28000);
  assert.equal(s.r.getState().effectiveQuality,'high');
- assert(s.statistics.at(-1).fps>=29&&s.statistics.at(-1).fps<=31);
+ assert(s.statistics.at(-1).fps>=38&&s.statistics.at(-1).fps<=42);
  assert.equal(s.f.calls.fence,0);s.r.dispose();
 }
 {
  const s=simulation({webgl2:false});s.run(28000,1000/144);
  assert.equal(s.r.getState().effectiveQuality,'high','A high-refresh display must not alias the WebGL1 deadline into a below-30 FPS trap');
- assert(s.statistics.at(-1).fps>=29&&s.statistics.at(-1).fps<=31);
+ assert(s.statistics.at(-1).fps>=38&&s.statistics.at(-1).fps<=42);
  assert.equal(s.f.calls.fence,0);s.r.dispose();
 }
 
-console.log('PASS: exact named adaptive presets, rapid healthy startup to High, stable 30–60 FPS, below-30 reduction, bounded Low floor, recovery and failed-probe cooldown, manual Ultra, compilation/visibility exclusions, and WebGL1 cadence.');
+console.log('PASS: named adaptive presets with explicit emergency Low pixels, rapid healthy startup to High, stable15–30 FPS, below-15 reduction, emergency Low pixel floor, recovery and failed-probe cooldown, manual Ultra, compilation/visibility exclusions, and WebGL1 cadence.');
 
 // Dialogs may pause GPU presentation without changing the user's play/pause
 // choice or making their rendering quality look overloaded after they return.

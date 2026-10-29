@@ -37,7 +37,7 @@ for(const Cls of [BlackHoleRenderer,CpuRenderer]){
  assert(Number.isFinite(clock.rateFactor)&&clock.rateFactor>1000);assert(!clock.horizonLimit);
  const same=clockRate({id:falling.id,positionMeters:frame.position.map(x=>x*REFERENCE_RG_METERS),velocityMetersPerSecond:[0,0,0],sources:r.clockSources()});
  assert(Math.abs(same.rateFactor/clock.rateFactor-1)<1e-12,'Endpoint clock uses actual position without hidden clearance subtraction');
- const total=createObjectClock();advanceObjectClock(total,10,clock);assert(total.lagSeconds>9.9&&total.lagSeconds<10,'Large dt/dτ means slow proper time, not unbounded lag per reference second');
+ const total=createObjectClock();advanceObjectClock(total,10,clock);assert(Math.abs(total.coordinateSeconds/(10*clock.rateFactor)-1)<1e-12,'Wall seconds are proper time, so displayed t grows by the full rate');
  r.dispose();
 }
-console.log('PASS: shared actual-radius clocks, deep adjustable proximity, finite epsilon endpoint, persistent Drive clock, bounded accumulated lag on GPU/CPU controllers.');
+console.log('PASS: shared actual-radius clocks, deep adjustable proximity, finite epsilon endpoint, persistent Drive clock, integrated distant time on GPU/CPU controllers.');

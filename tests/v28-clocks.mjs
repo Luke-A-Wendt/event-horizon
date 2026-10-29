@@ -1,37 +1,22 @@
+// Basic clock contracts; active wall-τ integration replaced the former
+// distant-wall-clock/lag policy in v35. Renderer coverage is in v35-clocks.
 import assert from 'node:assert/strict';
 import {CLOCK_LIGHT_SPEED as c,CLOCK_SOLAR_GM as mu,supportsObjectClock,createObjectClock,clockRate,advanceObjectClock,objectClockReading,formatClockDuration,formatClockRate} from '../dist/object-clocks.js';
-const near=(a,b,tolerance=1e-12)=>assert(Math.abs(a-b)<=tolerance,`${a} ≠ ${b}`);
+const near=(a,b,t=1e-11)=>assert(Math.abs(a-b)<=t*Math.max(1,Math.abs(a),Math.abs(b)),`${a} ≠ ${b}`);
 for(const type of ['astronaut','shuttle','iss'])assert(supportsObjectClock(type));
 for(const type of ['enterprise','planet','star','dyson'])assert(!supportsObjectClock(type));
-const rs=2*mu/(c*c),source={id:'sun',massSolar:1,positionMeters:[0,0,0],radiusMeters:696340000};
-const flat=clockRate();near(flat.properRate,1);near(flat.lossRate,0);assert(!flat.horizonLimit);
-const sr=clockRate({velocityMetersPerSecond:[.6*c,0,0]});near(sr.properRate,.8);near(sr.lossRate,.2);near(sr.rateFactor,1.25);
-const hole={...source,id:'hole',radiusMeters:rs,horizonMeters:rs};
+const rs=2*mu/(c*c),source={id:'sun',massSolar:1,positionMeters:[0,0,0],radiusMeters:696340000},hole={...source,id:'hole',radiusMeters:rs,horizonMeters:rs};
+const flat=clockRate();near(flat.properRate,1);near(flat.rateFactor,1);
+const eta=Math.atanh(.6),sr=clockRate({rapidityVector:[eta,0,0]});near(sr.properRate,.8);near(sr.rateFactor,1.25);
 const gravity=clockRate({positionMeters:[rs*5,0,0],sources:[hole]});near(gravity.properRate,Math.sqrt(.8));
-const combined=clockRate({positionMeters:[rs*5,0,0],velocityMetersPerSecond:[.6*c,0,0],sources:[hole]});near(combined.properRate,Math.sqrt(.8)*.8);near(combined.lossRate,1-Math.sqrt(.8)*.8);
-const weak=clockRate({positionMeters:[1e14,0,0],velocityMetersPerSecond:[1,0,0],sources:[source]});
-assert(weak.lossRate>0);near(weak.lossRate,mu/(1e14*c*c)+1/(2*c*c),1e-20);
-const tiny=clockRate({velocityMetersPerSecond:[1e-3,0,0]});assert(tiny.lossRate>0,'Small kinetic lag survives floating point cancellation');
-near(tiny.lossRate,1e-6/(2*c*c),1e-35);
+const combined=clockRate({positionMeters:[rs*5,0,0],rapidityVector:[eta,0,0],sources:[hole]});near(combined.properRate,Math.sqrt(.8)*.8);
 const insideStar=clockRate({positionMeters:[0,0,0],sources:[source]});near(insideStar.properRate,Math.sqrt(1-rs/source.radiusMeters));assert(!insideStar.horizonLimit);
 near(clockRate({id:'sun',positionMeters:[0,0,0],sources:[source]}).properRate,1);
-const second={...hole,id:'other',positionMeters:[10*rs,0,0]};
-near(clockRate({positionMeters:[5*rs,0,0],sources:[hole,second]}).properRate,.8);
-const horizon=clockRate({positionMeters:[rs,0,0],sources:[hole]});assert(horizon.horizonLimit);assert.equal(horizon.rateFactor,Infinity);near(horizon.lossRate,1);
-const spinning={...hole,horizonMeters:rs*.6};
-assert(clockRate({positionMeters:[spinning.horizonMeters,0,0],sources:[spinning]}).horizonLimit);
-const farSpin=clockRate({positionMeters:[1e7*rs,0,0],sources:[spinning]}),farStatic=clockRate({positionMeters:[1e7*rs,0,0],sources:[hole]});near(farSpin.gravityLossRate/farStatic.gravityLossRate,1,1e-12);
-const clock=createObjectClock();advanceObjectClock(clock,10,sr);near(clock.coordinateSeconds,10);near(clock.lagSeconds,2);
-advanceObjectClock(clock,10,combined);assert(clock.lagSeconds>2);const before=clock.lagSeconds;
-advanceObjectClock(clock,10,horizon);near(clock.lagSeconds,before+10);assert(Object.values(clock).every(Number.isFinite),'Persisted elapsed/lag clocks never contain Infinity');
-const reading=objectClockReading(clock,horizon,{id:'astronaut',type:'astronaut'});assert.equal(reading.rateFactor,Infinity);assert(reading.lagSeconds<reading.coordinateSeconds);assert.equal(reading.type,'astronaut');
-const noTime={...clock};for(const dt of [0,-1,NaN,Infinity])advanceObjectClock(clock,dt,sr);assert.deepEqual(clock,noTime);
-const tinyClock=createObjectClock();for(let i=0;i<10000;i++)advanceObjectClock(tinyClock,.001,tiny);near(tinyClock.coordinateSeconds,10);near(tinyClock.lagSeconds,10*tiny.lossRate,1e-33);
-for(const [seconds,wanted]of [[0,'0 ns'],[1e-9,'1.0 ns'],[1.234e-9,'1.2 ns'],[999e-9,'1.0 μs'],[1.234e-6,'1.2 μs'],[.1234,'120 ms'],[1.234,'1.2 s'],[60,'1.0 min'],[3600,'1.0 h'],[86400,'1.0 d'],[31557600,'1.0 yr'],[1e20,'3.2 × 10¹² yr'],[-1,'—'],[Infinity,'—']])assert.equal(formatClockDuration(seconds),wanted);
-console.log('PASS: finite lifetime clock totals, compensated small GR/SR lag, combined gravity and speed, horizon-rate divergence, immune types and two-significant-figure units.');
-
-// The single current-rate display grows steeply in the exterior limit while
-// accumulated loss per reference second remains correctly bounded by one.
-let previous=1;
-for(const gap of [1,.1,.001,.000001]){const rate=clockRate({positionMeters:[rs*(1+gap),0,0],sources:[hole]});assert(rate.rateFactor>previous);assert(rate.lossRate<1);previous=rate.rateFactor;}
-assert(previous>999);assert.equal(formatClockRate(Infinity),'∞');assert.equal(formatClockRate(1),'1.0×');assert.equal(formatClockRate(1234),'1200×');assert.equal(formatClockRate(1e6),'1.0 × 10⁶×');assert.equal(formatClockRate(NaN),'—');
+const second={...hole,id:'other',positionMeters:[10*rs,0,0]};near(clockRate({positionMeters:[5*rs,0,0],sources:[hole,second]}).properRate,.8);
+const horizon=clockRate({positionMeters:[rs,0,0],sources:[hole]});assert(horizon.horizonLimit);assert(Number.isFinite(horizon.rateFactor)&&horizon.rateFactor>999);
+const clock=createObjectClock();clock.rapidityVector=[eta,0,0];advanceObjectClock(clock,10,sr);near(clock.coordinateSeconds,12.5);near(clock.properSeconds,10);
+const reading=objectClockReading(clock,sr,{id:'astronaut',type:'astronaut'});near(reading.lagSeconds,2.5);assert.equal(reading.type,'astronaut');
+const before=structuredClone(clock);for(const dt of [0,-1,NaN,Infinity])advanceObjectClock(clock,dt,sr);assert.deepEqual(clock,before);
+let previous=1;for(const gap of [1,.1,.001,.000001]){const rate=clockRate({positionMeters:[rs*(1+gap),0,0],sources:[hole]});assert(rate.rateFactor>previous);previous=rate.rateFactor;}
+assert.equal(formatClockDuration(0),'0.0 × 10⁺⁰⁰ s');assert.equal(formatClockDuration(1e-9),'1.0 × 10⁻⁰⁹ s');assert.equal(formatClockRate(1),'1.0 × 10⁺⁰⁰ s/s');assert.equal(formatClockRate(1e6),'1.0 × 10⁺⁰⁶ s/s');assert.equal(formatClockRate(NaN),'—');
+console.log('PASS: two-model proper-wall-clock contracts, finite horizon comparison, exempt types, fixed two-significant-figure scientific notation.');

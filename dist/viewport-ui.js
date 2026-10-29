@@ -10,6 +10,7 @@ export function installViewportUI(api){
  const icon=name=>`<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
  const escape=text=>String(text).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  let scenesDiscovered=false; // This visit only: never persisted in browser storage.
+ let playDiscovered=false;const drivenTargets=new Set();
  let panel=null,selection='space',lastSignature='',lastTargetSignature='',lastFocusedId=null,lastVRError='',lastChromeSignature='',lastOverlaySignature='',photoAbort=null,photoUrl=null,vrSupport=null;
  const collapsed=new Set(),knownBranches=new Set();let objectSearch='',cameraSearch='',mapSelection=null;
  const tree=()=>renderer()?.getObjectTree?.()||[];
@@ -111,13 +112,12 @@ export function installViewportUI(api){
  const isShuttle=id=>api.objects().some(o=>o.id===id&&o.type==='shuttle');
  const isEnterprise=id=>api.objects().some(o=>o.id===id&&o.type==='enterprise');
  const isPilotable=id=>isShuttle(id)||isEnterprise(id);
- function drive(id){if(!isPilotable(id))return;setPanel(null);if(api.startDrive)return api.startDrive(id);renderer()?.setFreeDrive?.(id,true);api.refresh();}
+ function drive(id){if(!isPilotable(id))return;drivenTargets.add(id);$('quickDrive').classList.remove('control-discovery');setPanel(null);if(api.startDrive)return api.startDrive(id);renderer()?.setFreeDrive?.(id,true);api.refresh();}
  const selectedTarget=()=>{const id=selection==='space'?null:selection==='binary'?'secondary':selection==='warp'?renderer()?.getState().warpObjectId:selection==='bridge'?(renderer()?.getState().bridgeObjectId||'bridge'):selection;return targets().find(t=>t.id===id);};
  function setPanel(next,focus=false){
   panel=next;for(const name of ['elements','camera','display']){$(`${name}Panel`).hidden=next!==name;$(`${name}Toggle`).setAttribute('aria-expanded',String(next===name));}
   controls.hidden=next!=='inspector';scene.classList.toggle('inspector-open',next==='inspector');scene.classList.toggle('viewport-panel-open',!!next);
-  if($('pilotSettings')){$('pilotSettings').hidden=true;$('pilotCompact')?.setAttribute('aria-expanded','false');scene.classList.remove('pilot-camera-open');}
-  if(next==='elements'){refreshElements(true);$('elementsPanel').scrollTop=0;}if(next==='camera'){refreshTargets(true);refreshVRSupport();}if(next==='inspector')controls.querySelector('.controls-body').scrollTop=0;
+  if(next==='elements'){refreshElements(true);$('elementsPanel').scrollTop=0;}if(next==='camera'){refreshTargets(true);const id=renderer()?.driveId||quickDriveTarget()||renderer()?.focusId;if(targets().some(t=>t.id===id)){$('viewportTarget').value=id;refreshTargets();}refreshVRSupport();}if(next==='inspector')controls.querySelector('.controls-body').scrollTop=0;
   if(focus&&next){const region=next==='inspector'?controls:$(`${next}Panel`);region.querySelector('button,select,input')?.focus({preventScroll:true});}
  }
  function labelFor(id){return tree().find(n=>n.id===id)?.label||(componentEntries.find(e=>e[0]===id)?.[1])||api.objects().find(o=>o.id===id)?.label||'Object';}
@@ -142,7 +142,7 @@ export function installViewportUI(api){
   if(id==='space'){renderer()?.resetCamera();renderer()?.releaseFocus(false);api.refresh();setPanel(null);return;}
   if(!renderer()?.focusTarget?.(id,mode)){api.toast('Turn this element on before following it.');return;}
   api.refresh();api.syncViewMode(mode==='onboard'||mode==='chase'?'look':'orbit');setPanel(null);refreshTargets(true);
-  api.toast(mode==='chase'?'Following behind the Enterprise. Drag to look around in every direction.':mode==='onboard'?'Riding along. Drag to look in every direction.':'Tracking this body. Drag to orbit; scroll or pinch to move closer.');
+  api.toast(mode==='chase'?'Following behind the vehicle. Drag to look around in every direction.':mode==='onboard'?'Riding along. Drag to look in every direction.':'Tracking this body. Drag to orbit; scroll or pinch to move closer.');
  }
  function refreshElements(force=false){
   if(!force&&panel!=='elements')return;
@@ -166,7 +166,8 @@ export function installViewportUI(api){
  $('quickDrive').addEventListener('click',()=>drive(quickDriveTarget()));
  function refresh(stats={}){
   $('viewportScenes').classList.toggle('scene-discovery',!scenesDiscovered);
-  const current=quickDriveTarget(),pilot=renderer()?.driveId; $('quickDrive').hidden=!isPilotable(current)||!!pilot;$('quickDrive').textContent='Drive';
+  const current=quickDriveTarget(),pilot=renderer()?.driveId;if(pilot)drivenTargets.add(pilot);$('quickDrive').hidden=!isPilotable(current)||!!pilot;$('quickDrive').textContent='Drive';$('quickDrive').classList.toggle('control-discovery',!$('quickDrive').hidden&&!drivenTargets.has(current));
+  if(!api.state().paused)playDiscovered=true;$('viewportPause').classList.toggle('control-discovery',!playDiscovered&&!!api.state().paused);
   if(selection!=='add'&&selection!=='space'&&!tree().some(n=>n.id===selection)&&!componentEntries.some(e=>e[0]===selection)&&!api.objects().some(o=>o.id===selection)){selection='space';if(panel==='inspector')setPanel('elements');}
   if(selection==='primary'){const label=api.state().whiteHole?'White hole':labelFor('primary');$('inspectorTitle').textContent=label;}
   refreshElements();refreshTargets();if(stats.vrError&&stats.vrError!==lastVRError){lastVRError=stats.vrError;api.toast(stats.vrError);}const s=api.state(),mode=stats.viewMode||s.viewMode;
@@ -226,5 +227,5 @@ export function installViewportUI(api){
  $('universe').addEventListener('pointerdown',()=>setPanel(null));
  scene.addEventListener('keydown',event=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]')&&panel){event.stopPropagation();setPanel(null);$('elementsToggle').focus({preventScroll:true});}});
  refresh();refreshVRSupport();
- return {resetDiscovery:()=>{scenesDiscovered=false;refresh();},refresh,select,track:id=>focus(id,'track'),sceneChanged:()=>{mapOrbitPending=null;if(mapDialog.open)mapDialog.close();selection='space';collapsed.clear();knownBranches.clear();objectSearch='';cameraSearch='';setPanel(null);refresh(renderer()?.getState());},openElements:()=>setPanel('elements'),openDisplay:()=>setPanel('display'),openCamera:()=>setPanel('camera'),openPicture,openMap,close:()=>setPanel(null),rendererChanged:()=>{$('universe').addEventListener('pointerdown',()=>setPanel(null));lastSignature='';lastTargetSignature='';refresh();refreshVRSupport();},dispose:()=>{photoAbort?.abort();if(photoUrl)URL.revokeObjectURL(photoUrl);}};
+ return {resetDiscovery:()=>{scenesDiscovered=false;refresh();},refresh,select,track:id=>focus(id,'track'),sceneChanged:()=>{playDiscovered=false;drivenTargets.clear();mapOrbitPending=null;if(mapDialog.open)mapDialog.close();selection='space';collapsed.clear();knownBranches.clear();objectSearch='';cameraSearch='';setPanel(null);refresh(renderer()?.getState());},openElements:()=>setPanel('elements'),openDisplay:()=>setPanel('display'),openCamera:()=>setPanel('camera'),openPicture,openMap,close:()=>setPanel(null),rendererChanged:()=>{$('universe').addEventListener('pointerdown',()=>setPanel(null));lastSignature='';lastTargetSignature='';refresh();refreshVRSupport();},dispose:()=>{photoAbort?.abort();if(photoUrl)URL.revokeObjectURL(photoUrl);}};
 }

@@ -244,8 +244,13 @@ float warpStarElongation(){
 vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 nebulaColor,float starDensity,float brightness,float variety){
  if(uSpectrum==5)return vec3(0);
  vec3 dir=unit(direction),c=vec3(.0008,.0014,.0025);
+ // The isolated pilot sky fades diffuse clouds with the smoothed star
+ // motion, before recognizable streaking. No extra texture/noise samples.
+ ${warp?'float skyHaze=uWarpMotion.w>.5&&uBridge.x<.5?1.0-smoothstep(0.0,.006,uWarpMotion.y):1.0;':'float skyHaze=1.0;'}
+ nebulaParams.z*=skyHaze;
  vec2 uv=vec2(atan(dir.z,dir.x)/(2.0*PI)+.5,asin(clamp(dir.y,-1.0,1.0))/PI+.5);
  if(starDensity>0.0){
+  if(skyHaze>0.0){
   float dust=detailedFbm(dir*4.0+vec3(3.2,8.1,1.4));
   float band=exp(-pow((dir.y+.19*dir.x-.15*dir.z)*2.8,2.0));
   float backgroundBand=uSpectrum==2?.07:(uSpectrum==1?1.7:1.0);
@@ -254,7 +259,8 @@ vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 
   if(uSpectrum==2)milkyWay=vec3(.005,.015,.03)*pow(dust,7.0)*band;
   if(uSpectrum==3){milkyWay=mix(vec3(.016,.008,.024),vec3(.035,.021,.008),dust)*band*dust*dust;backgroundBand=.7;}
   if(uSpectrum==4){milkyWay=vec3(.024,.009,.039)*pow(dust,8.0)*band;backgroundBand=.15;}
-  c+=milkyWay*backgroundBand;
+  c+=milkyWay*backgroundBand*skyHaze;
+  }
   ${warp?'float elongation=warpStarElongation();':''}
   for(int j=0;j<3;j++){
    if(j==2&&uDetail<.5)break;
@@ -341,8 +347,8 @@ vec3 skyWithEnvironment(vec3 direction,vec4 parameters,vec3 tint,float density,f
 ${warp?`
 vec3 skyForWarpTravel(vec3 direction,vec3 original){
  // Only the open-space cinematic star chart unfolds toward the camera rays.
- // This keeps a readable cone inside the bubble. Nebulae, geometry and every
- // non-isolated scene retain the ordinary traced optical directions.
+ // This keeps a readable cone inside the bubble. Diffuse clouds fade with
+ // motion; every non-isolated scene retains ordinary traced optical directions.
  float unfold=uWarpMotion.w>.5&&uBridge.x<.5?smoothstep(10.07937,38.94074,uWarpMotion.z):0.0;
  vec3 stars=unit(mix(direction,original,unfold));
  return skyWithEnvironmentChart(direction,stars,vec4(uNebulaParams.xy,uNebulaParams.z*uFlags2.y,uNebulaParams.w),uNebulaColor,uFlags2.x>.5?uStars:0.0,uSkyParams.x,uSkyParams.y);

@@ -19,18 +19,18 @@ for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
   r.updateObject(actor.id,{height:0});assert.equal(actor.heightMeters,0,'The height slider must clear the actual meter-based height');
   r.updateObject(actor.id,{radius:r.minimumObjectRadiusRg(actor)});
   const reading=r.getObjectClock(actor.id);assert(reading.rateFactor>1000&&Number.isFinite(reading.rateFactor));
-  assert(reading.horizonGapMeters>0);assert.equal(reading.referenceSecondsPerDemoSecond,1);
+  assert(reading.horizonGapMeters>0);assert.equal(reading.properSecondsPerWallSecond,1);
   near(reading.referenceDistanceMeters,Math.hypot(...r.getFocusFrame(actor.id).position)*REFERENCE_RG_METERS);
   near(reading.horizonGapMeters,reading.referenceDistanceMeters-reading.horizonRadiusMeters);
   r.updateObject(actor.id,{heightMeters:.2*unit});near(r.getObjects().find(o=>o.id===actor.id).height,.2);
   r.updateObject(actor.id,{height:0,radius:5});
  }
  const rates=actors.map(o=>r.getObjectClock(o.id).rateFactor);rates.forEach(rate=>near(rate,rates[0]));
- let now=1000;r.lastTime=now;r.state.paused=false;r.state.speed=1;
- function tick(){const before=actors.map(o=>o.clock.coordinateSeconds);now+=100;r.advanceSimulation(now);actors.forEach((o,i)=>near(o.clock.coordinateSeconds-before[i],.1));}
+ let now=1000;r.lastTime=now;r.sceneLoad?.complete(r.sceneLoad.revision);r.state.paused=false;r.state.speed=1;
+ function tick(){const before=actors.map(o=>o.clock.properSeconds);now+=100;r.advanceSimulation(now);actors.forEach((o,i)=>near(o.clock.properSeconds-before[i],.1));}
  tick();const ship=actors.find(o=>o.type==='shuttle'),beforeDrive=structuredClone(ship.clock);
  r.setFreeDrive(ship.id,true);assert.deepEqual(ship.clock,beforeDrive);tick();
- r.setFreeDrive(ship.id,false);tick();r.state.speed=2;const before=ship.clock.coordinateSeconds;now+=100;r.advanceSimulation(now);near(ship.clock.coordinateSeconds-before,.2);
+ r.setFreeDrive(ship.id,false);tick();r.state.speed=2;const before=ship.clock.properSeconds;now+=100;r.advanceSimulation(now);near(ship.clock.properSeconds-before,.1);
  r.state.paused=true;const paused=structuredClone(ship.clock);now+=100;r.advanceSimulation(now);assert.deepEqual(ship.clock,paused);
  const nearMass=r.getObjectClock(actors[0].id);r.update({mass:r.state.mass*.5});const farMass=r.getObjectClock(actors[0].id);assert(farMass.rateFactor<nearMass.rateFactor,'Meter-based orbit responds immediately to central mass edits');
  for(const actor of actors){const reading=r.getObjectClock(actor.id);near(reading.properSeconds+reading.lagSeconds,reading.coordinateSeconds);assert(reading.lagSeconds<=reading.coordinateSeconds);}

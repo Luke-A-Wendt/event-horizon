@@ -64,7 +64,7 @@ for(const spectrum of ['radio','gamma']){document.querySelector(`[data-spectrum=
 $('viewportScenes').click();assert.equal($('atlasDialog').open,true);
 const initialLoads=host.calls.filter(call=>call[0]==='loadScene').length;
 document.querySelector('[data-scene="empty-space"]').click();
-assert.equal($('atlasDialog').open,false,'Gallery dismisses in the tap task');assert.equal($('loading').hidden,false,'Loading appears in the tap task');assert($('loadingReason').textContent.startsWith('Opening '));
+assert.equal($('atlasDialog').open,false,'Gallery dismisses in the tap task');assert.equal($('loading').hidden,false,'Loading appears in the tap task');assert.equal($('loadingReason').textContent,SCENE_PRESETS.find(p=>p.id==='empty-space').title);
 assert.equal(host.calls.filter(call=>call[0]==='loadScene').length,initialLoads,'No scene construction before a paint opportunity');
 const oldRevision=host.getState().sceneLoadRevision;
 sandbox.handleStats({...host.getState(),sceneLoadRevision:oldRevision-1,sceneLoadState:'ready',renderReady:true,renderBusy:false});advance(500);assert.equal($('loading').hidden,false,'Old completed frames cannot clear the new loader');

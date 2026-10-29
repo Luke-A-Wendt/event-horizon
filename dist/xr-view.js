@@ -65,10 +65,10 @@ export class XRViewController {
  }
  recenter(){this.originInverse=null;}
  updateLayer(now){
-  const r=this.renderer,p=r.profile(),key=`${r.quality}:${r.budget.effectiveQuality}`;
+  const r=this.renderer,p=r.profile(),key=`${r.quality}:${r.budget.effectiveQuality}:${p.scale}`;
   if(key===this.lastLayerKey||r.gpuFence||now-this.lastLayerAt<1000&&this.lastLayerKey)return;
   const factor=Math.min(1.25,p.scale,Math.sqrt(p.pixels/Math.max(1,this.nominalWidth*this.nominalHeight)),(r.maxSize||4096)/this.nominalWidth,(r.maxSize||4096)/this.nominalHeight);
-  const layer=new XRWebGLLayer(this.session,r.gl,{alpha:false,antialias:false,depth:false,stencil:false,ignoreDepthValues:true,framebufferScaleFactor:Math.max(.1,factor)});
+  const layer=new XRWebGLLayer(this.session,r.gl,{alpha:false,antialias:false,depth:false,stencil:false,ignoreDepthValues:true,framebufferScaleFactor:Math.max(.04,factor)});
   if('fixedFoveation' in layer)layer.fixedFoveation=r.quality==='ultra'?0:.5;
   this.layer=layer;this.session.updateRenderState({baseLayer:layer});this.lastLayerKey=key;this.lastLayerAt=now;r.budget.resetTiming(now,'Measuring stereo rendering');
  }
@@ -93,17 +93,19 @@ export class XRViewController {
   const base=r.cameraFrame,focused=r.getFocusFrame();
   const conformal=r.state.bridge?bridgeConformal(Math.hypot(...base.observer),r.configCache.bridgeRadius):1,metersToWorld=1/(REFERENCE_RG_METERS*conformal);
   g.bindFramebuffer(g.FRAMEBUFFER,layer.framebuffer);
-  const started=r.now();let drawn=0;
-  for(const view of pose.views){
+  const started=r.now();let drawn=0,query=null;if(r.completionQuery){query=r.completionQuery.createQueryEXT();if(query)r.completionQuery.beginQueryEXT(r.completionQuery.TIME_ELAPSED_EXT,query);}
+  try{for(const view of pose.views){
    const viewport=layer.getViewport(view);if(!viewport||viewport.width<1||viewport.height<1)continue;
    const eye=composeEyeFrame(base,multiply4(this.originInverse,view.transform.matrix),metersToWorld,focused);
    g.viewport(viewport.x,viewport.y,viewport.width,viewport.height);
    r.drawScene(eye,{width:viewport.width,height:viewport.height,viewport:[viewport.x,viewport.y,viewport.width,viewport.height],projectionMode:1,inverseProjection:inverse4(view.projectionMatrix)});drawn++;
   }
+  }finally{if(query)r.completionQuery.endQueryEXT(r.completionQuery.TIME_ELAPSED_EXT);}
+  if(!drawn&&query)r.completionQuery.deleteQueryEXT(query);
   if(drawn){
    const warmup=r.warmupFrames>0;if(warmup)r.warmupFrames--;
-   if(r.canFence){const sync=g.fenceSync(g.SYNC_GPU_COMMANDS_COMPLETE,0);if(sync){r.gpuFence={sync,started:now,generation:r.budget.generation,warmup,polls:0};g.flush();}else r.canFence=false;}
-   if(!r.canFence){r.frames++;r.budget.noteCompletion(now,{eligible:!warmup});const interval=1000/30;r.nextSubmit=r.nextSubmit&&now-r.nextSubmit<interval*2?r.nextSubmit+interval:now+interval;}
+   if(r.canFence){const sync=r.nativeFence?g.fenceSync(g.SYNC_GPU_COMMANDS_COMPLETE,0):null;if(sync||query){r.gpuFence={sync,query,started:now,generation:r.budget.generation,warmup,polls:0};g.flush();}else r.canFence=false;}
+   if(!r.canFence){r.frames++;r.budget.noteCompletion(now,{eligible:!warmup});const interval=1000/40;r.nextSubmit=r.nextSubmit&&now-r.nextSubmit<interval*2?r.nextSubmit+interval:now+interval;}
    r.lastSubmit=now;r.budget.noteSubmit(now,r.now()-started);
   }
   r.emitStats(now);

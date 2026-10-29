@@ -35,9 +35,13 @@ export const HEIGHLINER_PASSAGE=Object.freeze({hullRadius:.305,halfLength:.9,thr
 export function bridgeJourney(time,throatRadius,lifecycle='steady'){
  const t=Math.max(0,Number(time)||0),smooth=x=>{const q=Math.max(0,Math.min(1,x));return q*q*(3-2*q);};
  if(lifecycle!=='open-transit-close')return {...bridgePath(t,throatRadius),open:1,phase:'Open bridge',far:false};
- const departure=7,arrival=departure+Math.PI/.12,closed=arrival+5;
- const phaseTime=Math.max(0,Math.min(Math.PI/.12,t-departure)),l=(HEIGHLINER_PASSAGE.endpoint/HEIGHLINER_PASSAGE.throatRadius)*throatRadius*Math.cos(phaseTime*.12),path={l,r:bridgeIsotropicRadius(l,throatRadius)};
- return {...path,inward:true,open:t<departure?smooth((t-2)/5):t<arrival?1:1-smooth((t-arrival)/5),far:l<0,phase:t<2?'Preparing passage':t<departure?'Opening bridge':t<arrival?'Crossing to Arakas':t<closed?'Closing bridge':'Arrived at Arakas'};
+ const departure=7,arrival=departure+Math.PI/.12,closed=arrival+5,legDuration=closed+5;
+ // The existing outward passage is repeated in reverse. Turn only after the
+ // gate is fully closed; use a smooth in-place half-turn, with no position jump.
+ const leg=Math.floor(t/legDuration),local=t-leg*legDuration,returning=leg%2===1,direction=returning?-1:1;
+ const phaseTime=Math.max(0,Math.min(Math.PI/.12,local-departure)),l=direction*(HEIGHLINER_PASSAGE.endpoint/HEIGHLINER_PASSAGE.throatRadius)*throatRadius*Math.cos(phaseTime*.12),path={l,r:bridgeIsotropicRadius(l,throatRadius)};
+ const destination=returning?'Caladan':'Arakas',turn=smooth((local-closed)/3),headingAngle=(returning?Math.PI:0)+Math.PI*turn;
+ return {...path,inward:!returning,headingAngle,open:local<departure?smooth((local-2)/5):local<arrival?1:1-smooth((local-arrival)/5),far:l<0,phase:local<2?'Preparing passage':local<departure?'Opening bridge':local<arrival?'Crossing to '+destination:local<closed?'Closing bridge':turn<1?'Turning for the return':'Arrived at '+destination};
 }
 
 // One vehicle-relative orbit eye for ship bridge presets.

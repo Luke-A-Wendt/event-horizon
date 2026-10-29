@@ -11,7 +11,7 @@ const load=new SceneLoadLifecycle({cpu:true,now:()=>now});
 const first=load.revision;now=14000;assert.equal(load.check(),false);
 now=64000;assert.equal(load.check(true),false,'A hidden tab does not spend its render deadline');
 assert.equal(load.complete(first-1),false);assert.equal(load.state,'loading');
-now=65001;assert.equal(load.check(),false,'Resuming excludes the hidden transition interval');now=66002;assert.equal(load.check(),true);assert.equal(load.state,'failed');
+now=65001;assert.equal(load.check(),false,'Resuming excludes the hidden transition interval');now=66002;assert.equal(load.check(),false,'CPU initial load gets the full 60 second window');now+=45001;assert.equal(load.check(),true);assert.equal(load.state,'failed');
 assert.equal(load.complete(first),false,'Late work cannot erase a visible failure');
 load.begin();assert(load.complete(load.revision));now+=14000;assert.equal(load.check(),false);
 assert(load.complete(load.revision));now+=15001;assert(load.check());assert.match(load.error,/stopped producing/);

@@ -5,7 +5,7 @@ import { DEFAULTS, SCENE_PRESETS } from './config.js';
 import { OBJECT_CLASS, OBJECT_KIND, compactSatellite } from './objects.js';
 import { snapshotRenderer } from './render-state.js';
 import { FLIGHT_LIGHT_SPEED } from './flight-dynamics.js';
-export const SCENE_FILE_VERSION='1.33.0';
+export const SCENE_FILE_VERSION='1.35.0';
 export const MAX_SCENE_FILE_BYTES=4*1024*1024;
 const FORMAT='event-horizon-scene',MAX_OBJECTS=1024,MAX_DEPTH=48;
 const forbidden=new Set(['__proto__','prototype','constructor']);
@@ -58,10 +58,12 @@ function objectProperties(p,path){
   else if(k==='referenceId'){if(v!==null)id(v,q);}else if(k==='color'||k==='surfaceTint')check(typeof v==='string'&&/^#[\da-f]{6}$/i.test(v),`${q} must use #rrggbb.`);
   else if(k==='shapeAxes'){vector(v,q);v.forEach(x=>number(x,q,.05,5));}
   else if(k==='clock'){
-   fields(v,['coordinateSeconds','lagSeconds','coordinateCompensation','lagCompensation'],q);
-   for(const key of ['coordinateSeconds','lagSeconds']){check(own(v,key),q+'.'+key+' is required');number(v[key],q+'.'+key,0,1e25);}
-   for(const key of ['coordinateCompensation','lagCompensation'])if(own(v,key))number(v[key],q+'.'+key,-1e12,1e12);
+   fields(v,['properSeconds','coordinateSeconds','lagSeconds','properCompensation','coordinateCompensation','lagCompensation','rapidityVector'],q);
+   for(const key of ['properSeconds','coordinateSeconds','lagSeconds']){check(own(v,key),q+'.'+key+' is required');number(v[key],q+'.'+key,0,1e300);}
+   if(own(v,'rapidityVector')){vector(v.rapidityVector,q+'.rapidityVector');check(Math.hypot(...v.rapidityVector)<=300.000001,q+'.rapidityVector is too large');}
+   for(const key of ['properCompensation','coordinateCompensation','lagCompensation'])if(own(v,key))number(v[key],q+'.'+key,-1e300,1e300);
    check(v.lagSeconds<=v.coordinateSeconds,q+'.lagSeconds cannot exceed coordinate time');
+   check(v.properSeconds<=v.coordinateSeconds,q+'.properSeconds cannot exceed coordinate time');
   }
   else if(k==='flight'){if(own(v,'mode'))enumeration(v.mode,['warp','impulse'],q+'.mode');if(own(v,'warpSetting'))number(v.warpSetting,q+'.warpSetting',0,9.9999);if(own(v,'starBeta'))number(v.starBeta,q+'.starBeta',0,200000);if(own(v,'gridPhase'))number(v.gridPhase,q+'.gridPhase',0,4096);if(own(v,'impulseVelocity')){vector(v.impulseVelocity,q+'.impulseVelocity');check(Math.hypot(...v.impulseVelocity)<FLIGHT_LIGHT_SPEED,q+'.impulseVelocity must remain below light speed');}if(own(v,'thrust')){number(v.thrust,q+'.thrust',0,1000);check(Number.isInteger(v.thrust*2),q+'.thrust must use 0.5 g steps');}if(own(v,'velocity'))vector(v.velocity,q+'.velocity');for(const key of ['coordinateTimeSeconds','timeLagSeconds'])if(own(v,key))number(v[key],q+'.'+key,0,1e20);for(const key of ['coordinateTimeCompensation','timeLagCompensation'])if(own(v,key))number(v[key],q+'.'+key,-1e5,1e5);if(own(v,'timeLagSeconds')&&own(v,'coordinateTimeSeconds'))check(v.timeLagSeconds<=v.coordinateTimeSeconds,q+'.timeLagSeconds cannot exceed coordinate time');for(const key of ['brakeSpeed','brakeTurn'])if(own(v,key))check(typeof v[key]==='boolean',q+'.'+key+' must be boolean');if(own(v,'travelDirection'))enumeration(v.travelDirection,[-1,1],q+'.travelDirection');if(own(v,'brakeInitialSpeed'))number(v.brakeInitialSpeed,q+'.brakeInitialSpeed',0,1e14);for(const key of ['headingAngle','headingTarget'])if(own(v,key))number(v[key],q+'.'+key,-1e12,1e12);if(own(v,'starPhase'))number(v.starPhase,q+'.starPhase',0,1024);fields(v,['mode','warpSetting','impulseVelocity','starBeta','gridPhase','starPhase','headingAngle','headingTarget','speed','curvature','torsion','angularVelocity','position','basis','travelCompression','travelDirection','brakeSpeed','brakeTurn','brakeInitialSpeed','thrust','velocity','coordinateTimeSeconds','timeLagSeconds','coordinateTimeCompensation','timeLagCompensation'],q);number(v.speed,q+'.speed',0,1e14);if(own(v,'angularVelocity'))number(v.angularVelocity,q+'.angularVelocity',-.65,.65);number(v.curvature,q+'.curvature',-1e12,1e12);number(v.torsion,q+'.torsion',-1e12,1e12);vector(v.position,q+'.position');basis(v.basis,q+'.basis');if(own(v,'travelCompression'))number(v.travelCompression,q+'.travelCompression',1e-15,1);}
   else if(k==='driveRestore'){fields(v,['warp','warpObjectId','warpFactor','warpScenario','warpTravelWorld','warpTravelPosition','warpTravelTime'],q);check(typeof v.warp==='boolean',q+'.warp must be boolean');if(v.warpObjectId!==null)id(v.warpObjectId,q+'.warpObjectId');number(v.warpFactor,q+'.warpFactor',0,10);enumeration(v.warpScenario,['isolated','orbit','excursion'],q+'.warpScenario');number(v.warpTravelWorld,q+'.warpTravelWorld',-1e25,1e25);optionalVector(v.warpTravelPosition,q+'.warpTravelPosition');number(v.warpTravelTime,q+'.warpTravelTime',0,1e20);}
