@@ -1,3 +1,4 @@
+import {warpGridSurface} from './warp-glsl.js';
 // An Ellis wormhole optical chart, compiled only for the bridge experiment.
 // The vacuum Einstein–Rosen bridge cannot be traversed; the UI and math guide
 // explicitly identify this exotic-matter comparison model instead.
@@ -16,7 +17,7 @@ export function bridgeFlatWorldSphere(observer,throat=1,axis=[0,0,1]){
  const farObserver=observer.map(x=>x*scale),delta=axis.map((x,i)=>x*BRIDGE_WORLD_LAYOUT.distance*throat-farObserver[i]),along=delta.reduce((sum,x,i)=>sum+x*n[i],0);
  return {center:observer.map((x,i)=>x+(delta[i]-2*n[i]*along)/scale),radius:BRIDGE_WORLD_LAYOUT.radius*throat/scale,other:true};
 }
-export function bridgeGLSL({ultra=false,photo=false,photoSteps=3072,probe=false,attachments=false,bodyGravity=false}={}) {
+export function bridgeGLSL({grid=true,ultra=false,photo=false,photoSteps=3072,probe=false,attachments=false,bodyGravity=false,nebulaVolume=false}={}) {
  return `
 float bridgeMetricScale(){float radius=max(uBridgeStage.x,.0001);return uBridgeStage.y>.5?1.0/radius:radius;}
 float bridgeConformalAt(vec3 p){float throat=bridgeMetricScale();return 1.0+.25*throat*throat/max(dot(p,p),1e-12);}
@@ -39,7 +40,7 @@ vec3 bridgeRayForce(vec3 p,vec3 v){
 
 // Meridians and equal proper-radial intervals on the equatorial chart.
 // These are annotations sampled where the INTEGRATED ray crosses the sheet.
-vec4 bridgeGridAtAxis(vec3 p,vec3 ray,float travelled,float pixelAngle,vec3 axis){
+vec4 bridgeGridAtAxis(vec3 p,vec3 ray,float travelled,float pixelAngle,vec3 axis,vec3 center){
  vec3 chart=localPoint(p,axis);
  float radius=max(length(chart.xz),1e-6),throatRadius=bridgeMetricScale(),l=radius-.25*throatRadius*throatRadius/radius;
  float angle=atan(chart.z,chart.x),incidence=abs(dot(ray,axis));
@@ -51,24 +52,53 @@ vec4 bridgeGridAtAxis(vec3 p,vec3 ray,float travelled,float pixelAngle,vec3 axis
  float throat=1.0-smoothstep(footprint*.4,footprint*1.6,abs(l));
  float resolved=1.0-smoothstep(.025,.09,footprint/max(throatRadius,sqrt(l*l+throatRadius*throatRadius)));
  float intensity=(line*.34+throat*.35)*smoothstep(.015,.08,incidence)*resolved;
+ ${grid?`if(uBridgeBubble.w>0.0)intensity*=1.0-max(warpPatchCoverage,warpPatchWeight(length((p+center)*uBridge.y-uBridgeBubble.xyz)/uBridgeBubble.w));`:''}
  return vec4(vec3(.11,.57,.89)*intensity*(uSpectrum==5?1.4:1.0),intensity*.08);
 }
-vec4 bridgeGridAt(vec3 p,vec3 ray,float travelled,float pixelAngle){return bridgeGridAtAxis(p,ray,travelled,pixelAngle,uBridgeGridAxis);}
-vec4 bridgeGridSegmentAxis(vec3 a,vec3 b,float travelled,float pixelAngle,vec3 axis){
+vec4 bridgeGridAt(vec3 p,vec3 ray,float travelled,float pixelAngle){return bridgeGridAtAxis(p,ray,travelled,pixelAngle,uBridgeGridAxis,vec3(0));}
+vec4 bridgeGridSegmentAxis(vec3 a,vec3 b,float travelled,float pixelAngle,vec3 axis,vec3 center){
  float first=dot(a,axis),second=dot(b,axis);
  if(uFlags.x<.5||first*second>0.0||abs(first-second)<1e-12)return vec4(0);
  float t=first/(first-second);
  if(t<=.000001||t>1.0)return vec4(0);
  vec3 delta=b-a;
- return bridgeGridAtAxis(mix(a,b,t),unit(delta),travelled+length(delta)*t,pixelAngle,axis);
+ return bridgeGridAtAxis(mix(a,b,t),unit(delta),travelled+length(delta)*t,pixelAngle,axis,center);
 }
 vec4 bridgeGridSegment(vec3 a,vec3 b,float travelled,float pixelAngle){
- vec4 first=bridgeGridSegmentAxis(a,b,travelled,pixelAngle,uBridgeGridAxis);
+ vec4 first=bridgeGridSegmentAxis(a,b,travelled,pixelAngle,uBridgeGridAxis,vec3(0));
  if(uSceneOptions.y<.5)return first;
- vec3 offset=bridgeSecondCenter();vec4 other=bridgeGridSegmentAxis(a-offset,b-offset,travelled,pixelAngle,bridgeSecondAxis());
+ vec3 offset=bridgeSecondCenter();vec4 other=bridgeGridSegmentAxis(a-offset,b-offset,travelled,pixelAngle,bridgeSecondAxis(),offset);
  other.rgb*=vec3(1.3,.65,1.35);
  return vec4(first.rgb+(1.0-first.a)*other.rgb,first.a+(1.0-first.a)*other.a);
 }
+${bodyGravity&&grid?`
+// The traveler's guide is a Cartesian sheet in its motion plane, independent
+// of the throat's polar chart. Sample the same integrated, body-clipped rays:
+// lensing bends its rectangular lines without turning them into radial labels.
+vec4 bridgeBodyGridAt(vec3 point,vec3 direction,float travelled,float pixelAngle){
+ vec3 chart=coordinateGridChart(point)/coordinateGridScale();
+ float nativeWeight=uBridgeBubble.w>0.0?1.0-max(warpPatchCoverage,warpPatchWeight(length(point-uBridgeBubble.xyz)/uBridgeBubble.w)):1.0;
+ return nativeWeight*coordinateGridStroke(vec3(chart.x+uGridAnchor.x,chart.z+uGridAnchor.y,1.0),direction,travelled,pixelAngle);
+}
+vec4 bridgeBodyGridSegment(vec3 start,vec3 end,float travelled,float pixelAngle){
+ if(uFlags.x<.5)return vec4(0);
+ float a=coordinateGridSheet(start),b=coordinateGridSheet(end);
+ if(a*b>0.0||abs(a-b)<1e-14)return vec4(0);
+ float fraction=a/(a-b);
+ if(fraction<=.000001||fraction>1.0)return vec4(0);
+ vec3 delta=end-start;float distance=length(delta);
+ if(distance<1e-14)return vec4(0);
+ return bridgeBodyGridAt(mix(start,end,fraction),delta/distance,travelled+distance*fraction,pixelAngle);
+}
+vec4 bridgeBodyGridEscape(vec3 point,vec3 direction,float travelled,float pixelAngle){
+ if(uFlags.x<.5)return vec4(0);
+ float denominator=dot(direction,coordinateGridNormal());
+ if(abs(denominator)<1e-7)return vec4(0);
+ float distance=-coordinateGridSheet(point)/denominator;
+ if(distance<=max(1e-12,coordinateGridScale()*.000001))return vec4(0);
+ return bridgeBodyGridAt(point+direction*distance,direction,travelled+distance,pixelAngle);
+}
+`:''}
 // Finite worlds in both mouths' outward directions. The traveler stays on
 // the common axis and turns around well before either planetary surface.
 vec3 bridgeMouthAxis(){
@@ -76,6 +106,11 @@ vec3 bridgeMouthAxis(){
  return cross(unit(cross(uPrimaryAxis,helper)),uPrimaryAxis);
 }
 vec3 bridgeDepartureCenter(){return bridgeMouthAxis()*${BRIDGE_WORLD_LAYOUT.distance.toFixed(1)};}
+// A thin mechanical annulus in the same optical chart as the traveler.
+// Segment intersections reuse the curved ray: no screen-space portal decal,
+// sphere tracing, shadow rays, texture fetches, or new shader variants.
+
+
 vec3 bridgeWorldMaterial(vec3 normal,vec3 ray,bool other){
  // Reuse the same rocky material and tint as the Proxima b catalog scene.
  // Its geography is unknown; it must not inherit Arakas's dune texture.
@@ -165,10 +200,25 @@ vec3 bridgeRegionSky(vec3 direction,bool other){
 vec3 bridgeOtherSky(vec3 direction){return bridgeRegionSky(direction,true);}
 // The local flat view is used only while the fictional gate opens/closes.
 // Craft and endpoint surfaces remain present when the connecting radius is zero.
+${nebulaVolume?`
+// Each side samples a finite material chart. Inversion maps the destination
+// positions and path lengths as well as the sky, so warm/cool clouds parallax.
+vec3 bridgeNebulaChart(vec3 p,bool other){
+ if(!other)return p*uBridge.y;
+ float gate=bridgeMetricScale();return p*(gate*gate*uBridge.y/(4.0*max(dot(p,p),1e-12)));
+}
+void bridgeNebulaSegment(vec3 a,vec3 b,inout float distance,inout float sampleIndex,inout vec4 cached,inout vec3 color,inout float transmission){
+ vec3 center=vec3(0);if(uSceneOptions.y>.5&&length((a+b)*.5-bridgeSecondCenter())<length((a+b)*.5))center=bridgeSecondCenter();
+ a-=center;b-=center;bool other=length((a+b)*.5)<.5*bridgeMetricScale();
+ nebulaVolumeSegment(bridgeNebulaChart(a,other),bridgeNebulaChart(b,other),other,distance,sampleIndex,cached,color,transmission);
+}
+`:''}
+vec4 bridgeBubbleGrid(vec3 start,vec3 end,float travelled,float pixelAngle);
 vec3 bridgeFlatTrace(vec3 camera,vec3 original,float pixelAngle){
  float throat=max(uBridge.y,1e-20);vec3 p=camera/throat,v=original;
  bool far=uBridgeStage.y>.5;vec3 skyDirection=far?unit(v-2.0*unit(p)*dot(unit(p),v)):v;
  float span=far?max(length(p)*3.0,.1):50.0,fraction=1.0,mask=0.0,planetFraction=1.0;
+ ${nebulaVolume?'float flatCloudDistance=1e30;':''}
  vec4 body=objectHit((p+v*span)*throat,p*throat,v,fraction,mask),planet=vec4(0);
  if(far&&uBridge.z>.5){
   // At closure the arrival sky and finite world share one flat chart. A
@@ -177,9 +227,15 @@ vec3 bridgeFlatTrace(vec3 camera,vec3 original,float pixelAngle){
   vec3 arrival=p/(4.0*max(dot(p,p),1e-12)),offset=arrival-bridgeDepartureCenter();
   float along=dot(offset,skyDirection),radius=${BRIDGE_WORLD_LAYOUT.radius.toFixed(1)},discriminant=radius*radius-dot(cross(offset,skyDirection),cross(offset,skyDirection));
   if(discriminant>=0.0){float distance=-along-sqrt(discriminant);if(distance>0.0){vec3 normal=unit(offset+skyDirection*distance);planet=vec4(uSpectrum==5?vec3(.20+.55*max(0.0,dot(normal,-skyDirection))):bridgeWorldMaterial(normal,skyDirection,true),1);}}
-  if(body.a<=0.0)body=planet;
+  if(body.a<=0.0){body=planet;${nebulaVolume?'if(planet.a>.5)flatCloudDistance=max(0.0,-along-sqrt(max(0.0,discriminant)))*throat;':''}}
  }else{planet=bridgeDepartureHit(p,p+v*span,planetFraction);if(planet.a>.5&&(body.a<=0.0||planetFraction<fraction))body=planet;}
- return mix(bridgeRegionSky(skyDirection,far),body.rgb,body.a);
+ vec3 result=mix(bridgeRegionSky(skyDirection,far),body.rgb,body.a);
+ ${nebulaVolume?`float nebulaDistance=0.0,nebulaSample=-1.0,cloudTransmission=1.0;vec4 nebulaCached=vec4(0);vec3 foreground=vec3(0),cloudStart=bridgeNebulaChart(p,far);
+ float cloudStop=body.a>.999?min(flatCloudDistance,length(bridgeNebulaChart(p+v*span*min(fraction,planetFraction),far)-cloudStart)):nebulaVolumeRange();
+ nebulaVolumeSegment(cloudStart,cloudStart+skyDirection*min(cloudStop,nebulaVolumeRange()),far,nebulaDistance,nebulaSample,nebulaCached,foreground,cloudTransmission);
+ result=foreground+cloudTransmission*result;`:''}
+ ${grid?`vec4 localSheet=bridgeBubbleGrid(p,p+v*span*min(fraction,planetFraction),0.0,pixelAngle);result=localSheet.rgb+(1.0-localSheet.a)*result;`:''}
+ return result;
 }
 vec4 bridgeBubbleAppearance(vec3 a,vec3 b){
  if(uBridgeBubble.w<=0.0||uWarpFlags.y<.5||uSpectrum==5)return vec4(0);
@@ -191,39 +247,43 @@ vec4 bridgeBubbleAppearance(vec3 a,vec3 b){
 }
 // The ship carries its own planar chart through the perpendicular mouth chart.
 // Both are intersected by the same integrated ray; neither is a screen overlay.
-vec3 bridgeBubbleFrame(vec3 q){vec3 x=unit(uBridgeBubbleAxis),y=unit(uPrimaryAxis-x*dot(uPrimaryAxis,x));return vec3(dot(q,x),dot(q,y),dot(q,cross(x,y)));}
-float bridgeBubbleSheet(vec3 q){float r=length(q.xz),wall=exp(-pow((r-1.0)*max(1.0,uWarpThickness)*.7,2.0));return q.y+.35+.34*uWarpStrength*q.x*wall*(1.0-smoothstep(2.0,2.5,r));}
+vec3 bridgeBubbleFrame(vec3 q){
+ vec3 x=unit(uBridgeBubbleAxis),reference=dot(uDriveUp,uDriveUp)>.5?uDriveUp:uPrimaryAxis,up=reference-x*dot(reference,x);
+ if(dot(up,up)<.0001){reference=abs(x.y)<.9?vec3(0,1,0):vec3(1,0,0);up=reference-x*dot(reference,x);}
+ vec3 y=unit(up);return vec3(dot(q,x),dot(q,y),dot(q,cross(x,y)));
+}
+${grid?`
+float bridgeSoftTanh(float x){return 2.0/(1.0+exp(-2.0*clamp(x,-12.0,12.0)))-1.0;}
+float bridgeBubbleShape(float r){float s=max(1.0,uWarpThickness);return (bridgeSoftTanh(s*(r+1.0))-bridgeSoftTanh(s*(r-1.0)))/(2.0*bridgeSoftTanh(s));}
+${warpGridSurface('bridgeBubbleShape(radial)').replaceAll('warpGrid','bridgeWarpGrid').replaceAll('warpSheet','bridgeWarpSheet')}
 vec4 bridgeBubbleGrid(vec3 start,vec3 end,float travelled,float pixelAngle){
  if(uFlags.x<.5||uBridgeBubble.w<=0.0)return vec4(0);
  float scale=uBridge.y/uBridgeBubble.w;vec3 a=bridgeBubbleFrame((start*uBridge.y-uBridgeBubble.xyz)/uBridgeBubble.w),b=bridgeBubbleFrame((end*uBridge.y-uBridgeBubble.xyz)/uBridgeBubble.w);
- // Cheap rejection keeps the extra chart out of distant ray steps.
- vec3 middle=(a+b)*.5;if(length(middle)>2.8+length(b-a)*.5)return vec4(0);
- float ha=bridgeBubbleSheet(a),hb=bridgeBubbleSheet(b);if(ha*hb>0.0||abs(ha-hb)<1e-10)return vec4(0);
+ vec3 delta=b-a,middle=(a+b)*.5;if(length(middle)>4.1+length(delta)*.5)return vec4(0);
+ float ha=bridgeWarpSheet(a),hb=bridgeWarpSheet(b);if(ha*hb>0.0||abs(ha-hb)<1e-10)return vec4(0);
  float t=clamp(ha/(ha-hb),0.0,1.0),lo=0.0,hi=1.0;vec3 hit=mix(a,b,t);
- for(int j=0;j<3;j++){float h=bridgeBubbleSheet(hit);if(abs(h)<.00001)break;if(ha*h<=0.0){hi=t;hb=h;}else{lo=t;ha=h;}t=mix(lo,hi,clamp(ha/(ha-hb),0.0,1.0));hit=mix(a,b,t);}
- float radius=length(hit.xz),fade=1.0-smoothstep(1.8,2.5,radius);if(fade<=0.0)return vec4(0);
- vec3 direction=unit(b-a);float footprint=max(.002,(travelled*scale+length(b-a)*t)*pixelAngle/max(.08,abs(direction.y)));
- float spacing=.25*exp2(floor(max(0.0,log2(max(1.0,footprint*20.0/.25)))));
- // The manual-drive chart shares the bounded rolling phase of the ship grid.
- vec2 phase=uWarpGridOffset;
- vec2 cell=abs(fract((hit.xz+phase)/spacing+.5)-.5)*spacing;
- float line=1.0-smoothstep(footprint*.45,footprint,min(cell.x,cell.y));
- vec3 hue=mix(vec3(1.0,.36,.075),vec3(.075,.62,1.15),smoothstep(-.18,.18,hit.x));
- return vec4(hue*line*fade*.46,line*fade*.05);
-}
+ for(int j=0;j<3;j++){float h=bridgeWarpSheet(hit);if(abs(h)<.00001)break;if(ha*h<=0.0){hi=t;hb=h;}else{lo=t;ha=h;}t=mix(lo,hi,clamp(ha/(ha-hb),0.0,1.0));hit=mix(a,b,t);}
+ float blend=warpPatchWeight(length(hit.xz));if(blend<=0.0)return vec4(0);warpPatchCoverage=max(warpPatchCoverage,blend);
+ return blend*bridgeWarpGridAt(hit,a,unit(delta),travelled*scale+length(delta)*t);
+}`:`vec4 bridgeBubbleGrid(vec3 a,vec3 b,float d,float p){return vec4(0);}`}
 vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
  if(uBridgeStage.x<.001)return bridgeFlatTrace(camera,original,pixelAngle);
  float throat=max(uBridge.y,1e-20),gate=bridgeMetricScale();
  vec3 p=camera/throat,v=original,color=vec3(0),metricColor=vec3(0);float transmission=1.0,travelled=0.0,transparentMask=0.0;
  bool otherSide=false,object=false;
+ ${nebulaVolume?'float nebulaDistance=0.0,nebulaSample=-1.0;vec4 nebulaCached=vec4(0);':''}
  // Skip asymptotically empty space, exactly as in the black-hole integrator.
  if(length(p)>18.0){
   float projection=dot(p,v),discriminant=projection*projection-dot(p,p)+324.0;
-  if(discriminant<0.0||projection>=0.0)return bridgeRegionSky(v,false);
+  if(discriminant<0.0||projection>=0.0){
+   ${nebulaVolume?'nebulaVolumeSegment(camera,camera+v*nebulaVolumeRange(),false,nebulaDistance,nebulaSample,nebulaCached,color,transmission);return color+transmission*bridgeRegionSky(v,false);':'return bridgeRegionSky(v,false);'}
+  }
   float entry=-projection-sqrt(max(0.0,discriminant));
   if(entry>0.0){
    vec3 next=p+v*entry;vec4 guide=bridgeGridSegment(p,next,0.0,pixelAngle);
-   color+=guide.rgb;transmission*=1.0-guide.a;travelled+=entry;p=next;
+   ${bodyGravity&&grid?'vec4 bodyGuide=bridgeBodyGridSegment(p*throat,next*throat,0.0,pixelAngle);guide.rgb+=(1.0-guide.a)*bodyGuide.rgb;guide.a+=(1.0-guide.a)*bodyGuide.a;':''}
+   ${nebulaVolume?'bridgeNebulaSegment(p,next,nebulaDistance,nebulaSample,nebulaCached,color,transmission);':''}
+   color+=transmission*guide.rgb;transmission*=1.0-guide.a;travelled+=entry;p=next;
   }
  }
  for(int i=0;i<${photo?photoSteps:ultra?768:288};i++){
@@ -243,18 +303,23 @@ vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
    float bodyRadius=max(uObjects[j].w/throat,1e-12),distance=length(p-uObjects[j].xyz/throat);
    step=min(step,max(bodyRadius*.03,distance*.08)*288.0/float(uSteps));
   }`:''}
-  vec3 previous=p,acceleration=bridgeRayForce(p,v),midV=unit(v+acceleration*step*.5),midP=p+v*step*.5;
-  v=unit(v+bridgeRayForce(midP,midV)*step);p+=midV*step;
+  ${photo?`vec3 previous=p,k1=bridgeRayForce(p,v),v2=unit(v+k1*(step*.5));
+  vec3 k2=bridgeRayForce(p+v*(step*.5),v2),v3=unit(v+k2*(step*.5));
+  vec3 k3=bridgeRayForce(p+v2*(step*.5),v3),v4=unit(v+k3*step);
+  vec3 k4=bridgeRayForce(p+v3*step,v4);
+  p+=(v+2.0*v2+2.0*v3+v4)*(step/6.0);v=unit(v+(k1+2.0*k2+2.0*k3+k4)*(step/6.0));`:`vec3 previous=p,acceleration=bridgeRayForce(p,v),midV=unit(v+acceleration*step*.5),midP=p+v*step*.5;
+  v=unit(v+bridgeRayForce(midP,midV)*step);p+=midV*step;`}
   float fraction=1.0;vec4 body=vec4(0);
   if(uObjectCount>0)body=objectHit(p*throat,previous*throat,v,fraction,transparentMask);
   float planetFraction=1.0;vec4 planet=bridgeDepartureHit(previous,p,planetFraction);
   if(planet.a>.5&&(body.a<=0.0||planetFraction<fraction)){body=planet;fraction=planetFraction;}
   p=mix(previous,p,fraction);
+  ${nebulaVolume?'bridgeNebulaSegment(previous,p,nebulaDistance,nebulaSample,nebulaCached,color,transmission);':''}
   metricColor=max(metricColor,transmission*diagnosticSegment(previous*throat,p*throat,travelled*throat,pixelAngle));
   vec4 bubble=bridgeBubbleAppearance(previous,p);color+=transmission*bubble.rgb;transmission*=1.0-bubble.a;
-  vec4 guide=bridgeGridSegment(previous,p,travelled,pixelAngle);
-  vec4 bubbleGuide=bridgeBubbleGrid(previous,p,travelled,pixelAngle);guide.rgb+=(1.0-guide.a)*bubbleGuide.rgb;guide.a+=(1.0-guide.a)*bubbleGuide.a;
-  ${bodyGravity?'vec4 bodyGuide=coordinateGridSegment(previous*throat,p*throat,travelled*throat,pixelAngle);guide.rgb+=(1.0-guide.a)*bodyGuide.rgb;guide.a+=(1.0-guide.a)*bodyGuide.a;':''}
+  vec4 bubbleGuide=bridgeBubbleGrid(previous,p,travelled,pixelAngle);
+  vec4 guide=bridgeGridSegment(previous,p,travelled,pixelAngle);guide.rgb+=(1.0-guide.a)*bubbleGuide.rgb;guide.a+=(1.0-guide.a)*bubbleGuide.a;
+  ${bodyGravity&&grid?'vec4 bodyGuide=bridgeBodyGridSegment(previous*throat,p*throat,travelled*throat,pixelAngle);guide.rgb+=(1.0-guide.a)*bodyGuide.rgb;guide.a+=(1.0-guide.a)*bodyGuide.a;':''}
   color+=transmission*guide.rgb;transmission*=1.0-guide.a;travelled+=length(p-previous);
   ${probe?'color+=transmission*probeEmissionSegment(previous*throat,p*throat);':''}
   ${attachments?'vec4 attachment=attachmentEmissionSegment(previous*throat,p*throat,pixelAngle);color+=transmission*attachment.rgb;transmission*=1.0-attachment.a;':''}
@@ -275,9 +340,12 @@ vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
    // flat circular portal pasted over the first universe.
    vec3 radial=chartPoint/radius;v=unit(v-2.0*radial*dot(radial,v));
    if(secondary)v=unit(vec3(v.x,-v.z,v.y));
+   ${nebulaVolume?'vec3 cloudStart=bridgeNebulaChart(chartPoint,true);nebulaVolumeSegment(cloudStart,cloudStart+v*max(0.0,nebulaVolumeRange()-nebulaDistance),true,nebulaDistance,nebulaSample,nebulaCached,color,transmission);':''}
    color+=transmission*bridgeOtherSky(v);
   }else{
    if(uFlags.x>.5&&abs(dot(v,uBridgeGridAxis))>1e-7){float distance=-dot(p,uBridgeGridAxis)/dot(v,uBridgeGridAxis);if(distance>0.0){vec4 guide=bridgeGridAt(p+v*distance,v,travelled+distance,pixelAngle);color+=transmission*guide.rgb;transmission*=1.0-guide.a;}}
+   ${bodyGravity&&grid?'vec4 bodyGuide=bridgeBodyGridEscape(p*throat,v,travelled*throat,pixelAngle);color+=transmission*bodyGuide.rgb;transmission*=1.0-bodyGuide.a;':''}
+   ${nebulaVolume?'vec3 cloudStart=p*throat;nebulaVolumeSegment(cloudStart,cloudStart+v*max(0.0,nebulaVolumeRange()-nebulaDistance),false,nebulaDistance,nebulaSample,nebulaCached,color,transmission);':''}
    color+=transmission*bridgeRegionSky(v,false);
   }
  }

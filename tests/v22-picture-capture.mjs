@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {BlackHoleRenderer} from '../dist/renderer.js';
+import {QUALITY_PROFILES} from '../dist/performance-controller.js';
 import {fixture} from './render-fixture.mjs';
 import {installRenderWorker} from '../dist/render-worker.js';
 
@@ -33,7 +34,7 @@ for(const mode of ['never','reject','empty']){
 {
  const {f,r}=make({parallelCompile:true});f.control.compileComplete=false;r.setQuality('ultra');
  assert((await r.captureImage({allowPreview:true,timeoutMs:500})).size>0,'Quick captures the live compatible image while the optional Ultra shader prepares');
- assert.equal(f.control.lastCapture.steps,256,'The baseline uses the complete live High preview, not an unfinished Ultra program');
+ assert.equal(f.control.lastCapture.steps,QUALITY_PROFILES.high.steps,'The baseline uses the complete live High preview, not an unfinished Ultra program');
  assert.equal(r.quality,'ultra');assert.equal(r.activeProgram.features.ultra,false);r.dispose();
 }
 {

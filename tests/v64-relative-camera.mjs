@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {guideRouteCamera} from '../dist/travel-routes.js';
+const basis=[[1,0,0],[0,1,0],[0,0,1]],turned=[[0,0,-1],[0,1,0],[1,0,0]],dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+const r={target:{yaw:0,pitch:0,lookYaw:0,lookPitch:0,focusDistance:4},focusId:'ship',focusMode:'track',focusReferenceFrame:{id:'ship',basis}},t={cameraBasis:basis,cameraEye:[0,0,-1],elapsed:3,wallSeconds:10},craft={id:'ship'};
+guideRouteCamera(r,t,craft,[0,0,0],basis);
+const local=r.focusReferenceFrame.basis.map(v=>basis.map(a=>dot(v,a)));
+r.target={yaw:.6,pitch:.2,lookYaw:.3,lookPitch:-.1,focusDistance:7};const controls={...r.target};t.elapsed=4;
+guideRouteCamera(r,t,craft,[2,0,0],turned);
+for(let i=0;i<3;i++)for(let j=0;j<3;j++)assert(Math.abs(dot(r.focusReferenceFrame.basis[i],turned[j])-local[i][j])<1e-12);
+assert.deepEqual(r.target,controls);assert.deepEqual(t.cameraPathUp,turned[1]);assert.notDeepEqual(r.focusReferenceFrame.basis,basis);
+console.log('PASS: user camera offsets remain in the moving path frame; turn, look and zoom controls are preserved');

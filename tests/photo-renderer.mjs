@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { PHOTO_PRESETS,PHOTO_TILE_SIZE,photoBatchSize,photoDimensions,photoSampleOffset,photoProgressiveSampleOffset,mergePhotoTile,photoTilePlan,photoAdaptivePlan,accumulatePhotoSample,resolvePhotoTile,createPhotoRender } from '../dist/photo-renderer.js';
 
 assert.deepEqual(PHOTO_PRESETS.map(p=>p.id),['quick','high','maximum']);
-assert.deepEqual(PHOTO_PRESETS.map(p=>p.samples),[1,4,16]);
-assert.deepEqual(PHOTO_PRESETS.map(p=>p.budgetMs),[0,10000,120000]);
+assert.deepEqual(PHOTO_PRESETS.map(p=>p.samples),[1,8,32]);
+assert.deepEqual(PHOTO_PRESETS.map(p=>p.budgetMs),[0,60000,360000]);
 assert.deepEqual(photoDimensions(1600,900,1920),{width:1920,height:1080});
 assert.deepEqual(photoDimensions(900,1600,3840),{width:2160,height:3840});
-assert(photoDimensions(1,1,3840).width**2<=3840*2160,'Square outputs must respect the same memory budget');
+assert.deepEqual(photoDimensions(16,9,5120),{width:5120,height:2880});
+assert.deepEqual(photoDimensions(9,16,5120),{width:2880,height:5120});
+assert(photoDimensions(1,1,5120).width**2<=5120*2880,'Square outputs must respect the same memory budget');
 assert.throws(()=>photoDimensions(0,1));
 for(const samples of [4,8,16]){
  const offsets=Array.from({length:samples},(_,i)=>photoSampleOffset(i,samples));
@@ -22,8 +24,8 @@ for(const [width,height] of [[1920,1080],[3840,2160],[173,107],[1080,1920]]){
  assert(hit.every(x=>x===1),'Every output pixel is covered exactly once, including edge tiles');
 }
 {
- const high=PHOTO_PRESETS[1],fast=photoAdaptivePlan(1600,900,high,.1,9000,1280),slow=photoAdaptivePlan(1600,900,high,2,9000,1280);
- assert.equal(fast.width,2560);assert(slow.width<fast.width&&slow.width>=1280);
+ const high=PHOTO_PRESETS[1],fast=photoAdaptivePlan(1600,900,high,.1,9000,1280),slow=photoAdaptivePlan(1600,900,high,.8,9000,1280);
+ assert.equal(fast.width,3840);assert(slow.width<fast.width&&slow.width>=1280);
  assert.equal(photoAdaptivePlan(1600,900,high,100,9000,1280),null,'Do not start a pass predicted to miss the budget or reduce a completed image');
  assert(slow.estimatedMs<=9000*.72,'Resolution reserves time for variable scene cost and encoding');
 }
@@ -73,12 +75,12 @@ function fixture({webgl2=true,compileFail=false,readFail=false,fencePending=fals
 async function withClock(fn){const saved=globalThis.performance;let clock=0;Object.defineProperty(globalThis,'performance',{configurable:true,value:{now:()=>clock}});try{return await fn(ms=>clock+=ms);}finally{Object.defineProperty(globalThis,'performance',{configurable:true,value:saved});}}
 for(const webgl2 of [true,false])await withClock(async advance=>{
  const f=fixture({webgl2,onDraw:()=>advance(12)}),progress=[],result=await createPhotoRender(f.renderer,{budgetMs:999999,onProgress:p=>progress.push(p)});
- assert.equal(result.width,2560);assert.equal(result.height,1);assert(result.samples>4,'Remaining time improves beyond the old fixed four-sample ceiling');assert.equal(result.blob.type,'image/png');
+ assert.equal(result.width,3840);assert.equal(result.height,2);assert(result.samples>4,'Remaining time improves beyond the old fixed four-sample ceiling');assert.equal(result.blob.type,'image/png');
  assert(f.calls.readPixels<=f.calls.draws&&f.calls.readPixels>=f.calls.draws-4);assert(webgl2?f.calls.readbacks<=f.calls.readPixels&&f.calls.readbacks>=f.calls.readPixels-4:f.calls.readbacks===0);
- assert.deepEqual(f.calls.resolution,[2560,1],'Every tile sees the full export dimensions');
- assert(result.elapsedMs>=9900&&result.elapsedMs<=10000,'Useful rendering spends the work budget without an idle timer');
+ assert.deepEqual(f.calls.resolution,[3840,2],'Every tile sees the full export dimensions');
+ assert(result.elapsedMs>=59900&&result.elapsedMs<=60000,'Useful rendering spends the work budget without an idle timer');
  assert.equal(result.complete,true);assert(result.completedPasses>2);assert.equal(result.fallback,false);
- assert.equal(result.workBudgetMs,10000,'Callers cannot increase the Higher resolution budget');
+ assert.equal(result.workBudgetMs,60000,'Callers cannot increase the Higher resolution budget');
  assert(progress.every((p,i)=>!i||p.progress>=progress[i-1].progress),'Progress never reverses between complete passes');
  assert.equal(progress.at(-1).progress,1);assert.equal(progress.at(-1).phase,'Picture ready');
  assert.equal(f.calls.finish,0);assert.equal(f.calls.begin,1);assert.equal(f.calls.end,1);assert.equal(f.calls.deletePrograms,1);assert.equal(f.calls.deleteTextures,1);assert.equal(f.calls.deleteFramebuffers,1);
@@ -86,8 +88,8 @@ for(const webgl2 of [true,false])await withClock(async advance=>{
 });
 await withClock(async advance=>{
  const f=fixture({onDraw:()=>advance(40)}),result=await createPhotoRender(f.renderer,{presetId:'maximum'});
- assert.equal(result.width,3840);assert.equal(result.height,2);assert(result.samples>16,'Maximum continues with new rays beyond16samples');assert(result.samplesMax>=result.samples);
- assert(result.elapsedMs>=119900&&result.elapsedMs<=120000);assert(f.calls.draws>1000);
+ assert.equal(result.width,5120);assert.equal(result.height,2);assert(result.samples>16,'Maximum continues with new rays beyond16samples');assert(result.samplesMax>=result.samples);
+ assert(result.elapsedMs>=359900&&result.elapsedMs<=360000);assert(f.calls.draws>1000);
 });
 {
  const offsets=Array.from({length:4097},(_,i)=>photoProgressiveSampleOffset(i));
@@ -101,7 +103,7 @@ await withClock(async advance=>{
 await withClock(async advance=>{
  const f=fixture({onDraw:()=>advance(12)}),baseline={blob:new Blob(['retina baseline']),width:3840,height:2};
  const result=await createPhotoRender(f.renderer,{presetId:'high',baseline});
- assert(result.elapsedMs>=9900);assert(!result.fallback,'A large live screenshot must not suppress procedural photo refinement');assert.equal(result.width,2560);assert(result.samples>4);
+ assert(result.elapsedMs>=9900);assert(!result.fallback,'A large live screenshot must not suppress procedural photo refinement');assert.equal(result.width,3840);assert(result.samples>4);
 });
 {
  const controller=new AbortController(),f=fixture({onDraw:()=>controller.abort()});
@@ -155,5 +157,5 @@ for(const failure of ['compileFail','readFail']){
  assert.equal(result.blob,blob);assert.equal(result.complete,true);assert.equal(result.samples,1);assert.equal(result.steps,0);assert.equal(result.width,800);
 }
 assert.deepEqual(PHOTO_PRESETS.map(photoBatchSize),[1,4,2]);
-assert.deepEqual(PHOTO_PRESETS.map(p=>p.steps),[0,1024,3072]);
+assert.deepEqual(PHOTO_PRESETS.map(p=>p.steps),[0,1536,3072]);
 console.log('PASS: bounded tiled high-resolution pictures, genuine extensible centered samples and full active time budgets, linear-light accumulation, correct row orientation and complete tile coverage, nonblocking WebGL2 readback, WebGL1 compatibility, cancellation/error cleanup, and unchanged live quality/time.');

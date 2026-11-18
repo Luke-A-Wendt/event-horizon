@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {fixture} from './render-fixture.mjs';
+import {REFERENCE_RG_METERS} from '../dist/objects.js';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {SCENE_PRESETS,makePreset} from '../dist/config.js';
 const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
@@ -30,7 +31,7 @@ for(const [width,height] of [[1440,900],[900,650],[390,740],[360,640],[740,340]]
  }
  r.dispose();
 }
-const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});r.loadScene('radiant-descent');const traveler=r.objects[0],size=r.objectRadius(traveler),stop=r.configCache.horizon[0]*1.035+size*2;
+const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});r.loadScene('radiant-descent');const traveler=r.objects[0],stop=r.configCache.horizon[0]+15/REFERENCE_RG_METERS;
 let previousDistance=Infinity,previousSpeed=Infinity;
 for(let step=0;step<=100;step++){
  r.time=step/10;r.fillObjects();r.updateCameraFrame();const body=r.getFocusFrame(traveler.id),distance=Math.hypot(...body.position),speed=Math.hypot(...body.velocity);
@@ -39,7 +40,7 @@ for(let step=0;step<=100;step++){
  if(step===0)assert(distance>180*r.massScale);
  if(step===50)assert(distance/r.massScale>20&&distance/r.massScale<27,'Outer rings arrive near halfway');
 }
-near(previousDistance,stop,1e-10);near(previousSpeed,0,1e-12);
+near(previousDistance,stop,1e-10);assert(previousSpeed>0,'freeze on the incoming velocity');
 r.time=30;r.fillObjects();near(Math.hypot(...r.getFocusFrame(traveler.id).position),stop,1e-10);
 assert.equal(SCENE_PRESETS.find(s=>s.id==='radiant-descent').title,'Falling into blue fire');
 assert.equal(SCENE_PRESETS.find(s=>s.id==='horizon-watch').title,'Looking out from the edge');

@@ -22,6 +22,7 @@ const {parentPort,workerData}=require('node:worker_threads');
  const {installRenderWorker}=await import(workerData.url);let controller;
  class RecordingRenderer{
   constructor(canvas,options){this.canvas=canvas;this.gl={};this.ready=true;this.cpu=false;this.state={mass:4};this.objects=[];this.quality='adaptive';this.budget={noteFrame(){return false;}};this.lastTime=0;this.onStats=options.onStats;this.onError=options.onError;this.gpuFence=null;}
+  shaderFeatures(){return {};} programSupports(){return true;}
   getState(){return {fps:30,effectiveQuality:'medium',adaptiveLevel:1,webgl:2};}
   now(){return performance.now();}resize(){}refreshConfiguration(){}fillHoles(){}fillObjects(){}updateCameraFrame(){}
   setQuality(value){this.quality=value;}setPresentationPaused(value){this.presentationPaused=value;}
@@ -102,7 +103,7 @@ await assert.rejects(host.renderPicture({presetId:'quick'}),/already/,'A second 
 const capture=await captureRequest;assert(!browserWorker.messages.some(m=>m.type==='photo'),'Do not refine until a complete fallback exists');
 const photoRequest=browserWorker.next('photo');pictureClock=1250;browserWorker.emit({type:'result',id:capture.id,value:pngBlob});const request=await photoRequest;
 assert.equal(request.options.presetId,'maximum');assert.equal(request.options.baseline.blob,pngBlob);assert.equal(request.options.baseline.width,1280);assert.equal(request.options.baseline.height,720);
-assert.equal(request.options.budgetMs,119750,'Baseline capture spends the same total budget');
+assert.equal(request.options.budgetMs,359750,'Baseline capture spends the same total budget');
 browserWorker.emit({type:'progress',id:request.id,progress:{progress:.4,elapsedMs:25}});assert.equal(progress.at(-1).progress,.4);assert.equal(progress.at(-1).elapsedMs,275,'Reported progress includes baseline capture time');
 abort.abort();assert(browserWorker.messages.some(m=>m.type==='cancel-photo'));browserWorker.emit({type:'error',id:request.id,name:'AbortError',message:'Cancelled'});await assert.rejects(picture,{name:'AbortError'});assert.equal(host.photoRunning,false);
 const quickRequest=browserWorker.next('capture'),quickPicture=host.renderPicture({presetId:'quick'}),quickCapture=await quickRequest;

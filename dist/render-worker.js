@@ -14,6 +14,12 @@ export function installRenderWorker(scope,dependencies={}){
  let bitmapFrame=null,bitmapSerial=0,bitmapPresentation=false;
  let renderer=null,viewport={width:640,height:400,dpr:1},signature='',lastReport=0,frameReported=false,photoAbort=null,photoRequestId=null,captureAbort=null,captureRequestId=null,deferredState=null,presentationIntent=false,commandCanvas=null,commandFrame=null,commandSerial=0;
  const send=(message,transfer=[])=>scope.postMessage(message,transfer);
+ let lastPhaseKey='';
+ const phase=stage=>{
+  if(!renderer)return;
+  const key=JSON.stringify([signature,renderer.sceneRevision,stage]);if(key===lastPhaseKey)return;lastPhaseKey=key;
+  send({type:'render-phase',phase:stage,signature,sceneRevision:renderer.sceneRevision});
+ };
  // The rendering core shares lightweight event interfaces with the Window
  // version; graphics and Canvas APIs still come from the actual worker.
  globalThis.window={...eventTarget,devicePixelRatio:1};globalThis.document={...eventTarget,hidden:false};
@@ -31,27 +37,38 @@ export function installRenderWorker(scope,dependencies={}){
   completed(signatureAtDraw,now,sceneRevision=this.sceneRevision,annotationFrame=null){
    if(annotationFrame?.annotations&&!commandCanvas&&typeof this.canvas.transferToImageBitmap==='function'){
     if(bitmapFrame)return;const bitmap=this.canvas.transferToImageBitmap();bitmapFrame={serial:++bitmapSerial,signature:signatureAtDraw,sceneRevision};bitmapPresentation=true;
-    send({type:'bitmap-frame',...bitmapFrame,bitmap,frame:annotationFrame},[bitmap]);return;
+    phase('presenting');send({type:'bitmap-frame',...bitmapFrame,bitmap,frame:annotationFrame},[bitmap]);return;
    }
    if(bitmapPresentation){bitmapPresentation=false;send({type:'direct-frame',signature:signatureAtDraw,sceneRevision});}
+   if(signatureAtDraw===signature)phase('ready');
    if(!frameReported||now-lastReport>250){frameReported=signatureAtDraw===signature;lastReport=now;status({renderedSignature:signatureAtDraw,sceneRevision,frameReady:true});}if(annotationFrame)send({type:'annotation-frame',signature:signatureAtDraw,sceneRevision,frame:annotationFrame});}
   gpuAvailable(now){const fence=this.gpuFence,available=super.gpuAvailable(now);if(fence&&available&&!this.gpuFence&&!fence.presented)this.completed(fence.renderedSignature||signature,now,fence.sceneRevision,fence.annotationFrame);return available;}
   render(now=this.now(),fromFrame=false,...rest){
    if(commandCanvas&&commandFrame||bitmapFrame)return false;
+   // Send a real stage before entering a driver call that may be slow. The
+   // loading UI never infers shader progress from elapsed time or warmup flags.
+   if(!this.presentationPaused&&!document.hidden&&!this.photoActive){
+    if(!this.cpu&&(this.pendingProgram||!this.programSupports(this.shaderFeatures())))phase('compiling');
+    else if(!frameReported)phase('drawing');
+   }
    if(commandCanvas)commandCanvas.beginFrame();
    const capturing=!!this.captureRequest;
    let drawn;try{drawn=super.render(now,fromFrame,...rest);}catch(error){if(capturing){this.cancelCapture(error);return false;}this.setPresentationPaused(true);send({type:'render-error',signature,sceneRevision:this.sceneRevision,message:'This scene could not render: '+(error?.message||error)});return false;}
    // Encoding owns this freshly drawn buffer until it settles. It must not be
    // transferred to a diagnostic ImageBitmap in the same task.
    if(capturing)return drawn;
-   if(drawn&&commandCanvas){commandFrame={serial:++commandSerial,signature,sceneRevision:this.sceneRevision,startedAt:now};send({type:'cpu-frame',serial:commandSerial,signature,sceneRevision:this.sceneRevision,frame:commandCanvas.takeFrame(),annotationFrame:captureAnnotationFrame(this)});return true;}
+   if(drawn&&commandCanvas){commandFrame={serial:++commandSerial,signature,sceneRevision:this.sceneRevision,startedAt:now};phase('presenting');send({type:'cpu-frame',serial:commandSerial,signature,sceneRevision:this.sceneRevision,frame:commandCanvas.takeFrame(),annotationFrame:captureAnnotationFrame(this)});return true;}
+   if(drawn&&this.gpuFence&&!frameReported)phase('drawing');
    if(drawn){const annotationFrame=captureAnnotationFrame(this);if(annotationFrame?.annotations&&typeof this.canvas.transferToImageBitmap==='function'){if(this.gpuFence)this.gpuFence.presented=true;this.completed(signature,now,this.sceneRevision,annotationFrame);}else if(this.gpuFence){this.gpuFence.renderedSignature=signature;this.gpuFence.sceneRevision=this.sceneRevision;this.gpuFence.annotationFrame=annotationFrame;}else this.completed(signature,now,this.sceneRevision,annotationFrame);}
    return drawn;
   }
  };
  function apply(snapshot,nextViewport){
   if(!renderer)return;
-  if(nextViewport){const changed=viewport.width!==nextViewport.width||viewport.height!==nextViewport.height||viewport.dpr!==nextViewport.dpr;viewport=nextViewport;window.devicePixelRatio=viewport.dpr;window.innerWidth=viewport.cssWidth||viewport.width;window.innerHeight=viewport.cssHeight||viewport.height;if(changed)renderer.resize(true);}
+  // Publish new CSS dimensions before restoring its camera, but leave buffer
+  // allocation to the next draw. Scene and Drive changes retain fidelity;
+  // completed-frame measurements adjust it to the new view's workload.
+  if(nextViewport){const changed=viewport.width!==nextViewport.width||viewport.height!==nextViewport.height||viewport.dpr!==nextViewport.dpr;viewport=nextViewport;window.devicePixelRatio=viewport.dpr;window.innerWidth=viewport.cssWidth||viewport.width;window.innerHeight=viewport.cssHeight||viewport.height;if(changed){renderer.resizeMeasurePending=true;renderer.resizePending=true;}}
   if(snapshot)restoreRenderer(renderer,snapshot);
  }
  async function handle(message){
@@ -89,7 +106,7 @@ export function installRenderWorker(scope,dependencies={}){
     send({type:'ack',serial:message.serial});return;
    }
    if(message.type==='bitmap-presented'){
-    if(bitmapFrame?.serial===message.serial){const frame=bitmapFrame;bitmapFrame=null;if(!message.cancelled){frameReported=frame.signature===signature;lastReport=renderer.now();status({renderedSignature:frame.signature,sceneRevision:frame.sceneRevision,frameReady:true});}}return;
+    if(bitmapFrame?.serial===message.serial){const frame=bitmapFrame;bitmapFrame=null;if(!message.cancelled){frameReported=frame.signature===signature;if(frameReported)phase('ready');lastReport=renderer.now();status({renderedSignature:frame.signature,sceneRevision:frame.sceneRevision,frameReady:true});}}return;
    }
    if(message.type==='cpu-presented'){
     if(commandFrame?.serial===message.serial){if(!message.cancelled)renderer.noteCpuCost?.(Math.max(message.costMs||0,renderer.now()-commandFrame.startedAt),renderer.now(),'frame');if(!message.cancelled)renderer.completed(commandFrame.signature,renderer.now(),commandFrame.sceneRevision);commandFrame=null;}return;

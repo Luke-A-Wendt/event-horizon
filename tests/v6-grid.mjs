@@ -59,8 +59,8 @@ for(const features of [{},{craft:true},{warp:true},{ultra:true,warp:true}]){
  const main=shader.slice(shader.lastIndexOf('void main()'));
  assert(!/uFlags\.x[^;\n{}]*!localWarp\b|!localWarp\b[^;\n{}]*uFlags\.x/.test(main),'Inspecting a local warp field must retain the black-hole grid behind it');
  if(features.warp){
-  assert(shader.includes('grid*=1.0-smoothstep(1.6,2.5,length(hit.xz))'),'The local warp guide must be bounded when combined with the global black-hole guide');
-  assert(main.includes('else if(uWarpFlags.w<.5)miss=true;'),'Only an isolated warp view may skip the black-hole ray continuation');
+  assert(shader.includes('warpPatchWeight(length(hit.xz))'),'The local warp guide must be bounded when combined with the global black-hole guide');
+  assert(main.includes('else if(uWarpFlags.w<.5&&uObjectCount<=1&&uWarpGridLocalPatch<.5)miss=true;'),'A local warp view may skip the scene only if no surrounding bodies or grid remain');
  }
 }
 const shaderSource=readFileSync(new URL('../dist/shaders.js',import.meta.url),'utf8');

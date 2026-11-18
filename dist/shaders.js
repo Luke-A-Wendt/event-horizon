@@ -1,13 +1,16 @@
 import { ANOMALY_GLSL } from './anomaly-glsl.js';
 import { DYSON_GLSL } from './dyson-glsl.js';
 import { createCraftGLSL } from './craft-glsl.js';
-import { warpFieldGLSL, WARP_TRACE_GLSL } from './warp-glsl.js';
+import { WARP_PATCH_GLSL, warpFieldGLSL, warpTraceGLSL } from './warp-glsl.js';
 import { coordinateGridGLSL } from './grid-glsl.js';
 import { bridgeGLSL } from './bridge-glsl.js';
 import { TIDAL_STREAM_GLSL } from './tidal-stream.js';
+import { nebulaVolumeGLSL } from './nebula-volume-glsl.js';
+import { CLUSTER_GLSL } from './cluster-glsl.js';
 
-import { planetMaterialGLSL } from './planet-glsl.js';
+import { planetMaterialGLSL, planetAtmosphereGLSL } from './planet-glsl.js';
 import { METRIC_GLSL } from './metric-glsl.js';
+import { weakFieldMain,weakFieldHitGLSL,pruneUnreachableGLSL } from './weak-field-glsl.js';
 // All visual assets and ray integration are generated on the visitor's GPU.
 // The metric-inspired ray and emission fields are educational approximations.
 export const VERTEX = `
@@ -19,7 +22,7 @@ void main(){gl_Position=vec4(aPosition,0.0,1.0);}
 // Feature variants are created on demand; normal modes never compile Ultra's
 // 768-step loop or its extra turbulence octaves.
 const SPHERE_GLSL = `
-struct CraftSurface { float t; vec3 normal; vec3 albedo; float material; };
+struct CraftSurface { float t; vec3 normal; vec3 albedo; float material; float detail; };
 vec4 ellipsoidHit(vec3 ro,vec3 rd,vec3 center,vec3 radii){
  vec3 q=(ro-center)/radii,d=rd/radii;
  // Cross-product form avoids subtracting two almost equal squared distances.
@@ -31,7 +34,7 @@ vec4 ellipsoidHit(vec3 ro,vec3 rd,vec3 center,vec3 radii){
 }
 CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
  vec4 hit=ellipsoidHit(ro,rd,vec3(0),vec3(1));
- CraftSurface s;s.t=hit.w>=0.0?hit.w:maximum+max(.001,abs(maximum)*.00001);s.normal=hit.xyz;s.albedo=vec3(.7,.76,.8);s.material=0.0;return s;
+ CraftSurface s;s.t=hit.w>=0.0?hit.w:maximum+max(.001,abs(maximum)*.00001);s.normal=hit.xyz;s.albedo=vec3(.7,.76,.8);s.material=0.0;s.detail=uDetail;return s;
 }
 vec3 shadeCraft(CraftSurface s,vec3 hit,vec3 rd,vec3 light,vec3 environment){return s.albedo*(.1+.9*max(0.0,dot(s.normal,light)));}
 `;
@@ -47,7 +50,7 @@ const NO_GRID_GLSL = `
 vec4 coordinateGridSegment(vec3 start,vec3 end,float travelled,float pixelAngle){return vec4(0);}
 vec4 coordinateGridEscape(vec3 start,vec3 direction,float travelled,float pixelAngle){return vec4(0);}
 `;
-export function createFragment({anomaly=false,ultra=false,photo=false,photoSteps=3072,craft=false,craftMask=15,warp=false,grid=false,bridge=false,probe=false,stellar=false,rings=false,bodyGravity=false,planetary=false,attachments=false,dyson=false,diagnostics=false,derivatives=false,derivativeExtension=false,objectSlots=12}={}) {
+export function createFragment({nebulaVolume=false,cluster=false,weakField=false,warpLocal=false,warpOnly=false,warpLocalOnlyCraft=false,anomaly=false,ultra=false,photo=false,photoSteps=3072,craft=false,craftMask=15,warp=false,grid=false,bridge=false,probe=false,stellar=false,rings=false,bodyGravity=false,planetary=false,attachments=false,dyson=false,diagnostics=false,derivatives=false,derivativeExtension=false,objectSlots=12}={}) {
  const slots=[2,4,6,8,12].includes(objectSlots)?objectSlots:12;
  const photoBudget=[1024,1536,3072].includes(photoSteps)?photoSteps:3072;
  craft=craft||warp||bridge;
@@ -55,14 +58,19 @@ export function createFragment({anomaly=false,ultra=false,photo=false,photoSteps
  // A bridge can carry any supported traveler. Only a warp field intrinsically
  // requires Enterprise geometry; do not compile an unused ship for the bridge.
  if(warp)craftMask|=8;
- return `
+ // Live Ultra uses the same local-coordinate fast paths as every live tier.
+ // Higher sample/detail budgets do not require reintroducing the unused world
+ // integrator or duplicating craft intersections inside its loop. Stills retain
+ // their independent full photographic path.
+ const specializeWarp=warp&&!photo;
+ let source = `
 ${derivativeExtension?'#extension GL_OES_standard_derivatives : enable':''}
 precision highp float;
 uniform vec2 uResolution,uPhotoOffset,uPhotoJitter;
 uniform vec4 uRayViewport,uBridge;
 uniform mat4 uInverseProjection;
 uniform int uProjectionMode;
-uniform float uWhiteHole;
+uniform float uWhiteHole,uCraftFocusType;
 uniform vec3 uBridgeSkyColor,uBridgeGridAxis,uBridgeStage,uBridgeBubbleAxis;
 uniform vec4 uBridgeBubble;
 uniform vec4 uBridgeSkyParams;
@@ -76,6 +84,8 @@ uniform vec4 uHoles[2];
 uniform vec4 uFlags,uFlags2,uDiskParams,uNebulaParams,uJets,uTidal;
 uniform vec3 uDiskColor,uNebulaColor,uJetColor,uStarColor,uDiskSecondaryColor,uJetSecondaryColor;
 uniform vec4 uDiskSecondaryParams,uJetSecondaryParams;
+uniform vec2 uNebulaMulticolor;
+uniform vec3 uNebulaSecondaryColor;
 uniform vec4 uMetricOptions,uSceneOptions,uFlightMetrics;
 uniform vec2 uJetStructure;
 uniform int uSpectrum,uBinary,uSteps,uObjectCount,uGravityCount;
@@ -94,8 +104,11 @@ uniform vec3 uDriveRight,uDriveUp,uDriveForward;
 uniform vec3 uInspectCamera,uInspectForward,uInspectRight,uInspectUp;
 uniform vec3 uWarpCenter,uWarpAxis,uWarpObserver;
 uniform vec2 uWarpGridOffset,uWarpGridRotation;
+uniform float uWarpGridLocalPatch;
+uniform float uLabNebulaVisibility;
+${grid&&(warp||bridge)?WARP_PATCH_GLSL:''}
 uniform float uWarpRadius,uWarpStrength,uWarpThickness;
-uniform vec4 uWarpFlags,uWarpMotion;
+uniform vec4 uWarpFlags,uWarpMotion,uWarpStarStyle;
 const float PI=3.141592653589793;
 
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
@@ -139,6 +152,26 @@ vec3 thermalPalette(float temperature){
  float t=clamp(temperature,0.0,1.0);
  vec3 cold=mix(vec3(.06,.015,.19),vec3(.65,.06,.23),smoothstep(.05,.45,t));
  return mix(cold,mix(vec3(1,.34,.055),vec3(1,.95,.63),smoothstep(.65,1.0,t)),smoothstep(.40,.75,t));
+}
+vec3 nebulaPalette(vec3 primary,float structure){
+ if(uNebulaMulticolor.x<.5)return primary;
+ float amount=clamp(uNebulaMulticolor.y,0.0,1.0);
+ float blend=amount<.0001?0.0:amount>.9999?1.0:smoothstep(1.0-amount-.14,1.0-amount+.14,structure);
+ return mix(primary,uNebulaSecondaryColor,blend);
+}
+// Independent warm/cold bridge charts retain their own palette. Detail only
+// adds ember or icy highlights; a shared secondary hue never paints both skies.
+vec3 nebulaCloudTint(vec3 primary,float structure,float detail){
+ vec3 palette=nebulaPalette(primary,structure);
+ ${nebulaVolume?`if(uBridge.x>.5&&uNebulaMulticolor.x<.5){
+  float peak=max(.001,max(primary.r,max(primary.g,primary.b)));
+  float warm=smoothstep(.70,.90,(primary.r-max(primary.g,primary.b))/peak);
+  float cold=smoothstep(.65,.85,(primary.b-max(primary.r,primary.g))/peak);
+  float crest=smoothstep(.30,.82,detail);
+  palette=mix(palette,mix(primary,vec3(1.0,.28,.025),crest),warm*.62);
+  palette=mix(palette,mix(primary,vec3(.38,.78,1.0),crest),cold*.65);
+ }`:''}
+ return palette;
 }
 vec3 surfaceSpectrum(vec3 visible,float illumination,float heat,float metallic){
  if(uSpectrum==5)return vec3(0);
@@ -222,8 +255,8 @@ ${warp?`
 // Layer renewal happens only at zero opacity, staggered across the existing
 // layers. Zero phase is exactly the ordinary sky, with no folded-pole rings.
 vec4 warpStarSampleDirection(vec3 direction,float layer){
- if(uWarpMotion.w<.5||uBridge.x>.5)return vec4(direction,1);
- float initial=.25+.25*layer,phase=fract(uWarpMotion.x+initial),shift=(phase-initial)*3.0;
+ if(uWarpMotion.w<.00001||uBridge.x>.5)return vec4(direction,1);
+ float initial=.25+.25*layer,phase=fract(uWarpMotion.x+initial),shift=(phase-initial)*3.0*clamp(uWarpMotion.w,0.0,1.0);
  float k=exp(-shift),mu=clamp(dot(direction,uDriveForward),-1.0,1.0);
  float denominator=max(1e-6,1.0+mu+k*k*(1.0-mu));
  float mapped=(1.0+mu-k*k*(1.0-mu))/denominator;
@@ -231,14 +264,48 @@ vec4 warpStarSampleDirection(vec3 direction,float layer){
  // Wider high-speed renewal fades span several frames even near 15 Hz.
  float edge=mix(.10,.18,smoothstep(.05,.65,uWarpMotion.y));
  float visibility=smoothstep(0.0,edge,phase)*(1.0-smoothstep(1.0-edge,1.0,phase));
- return vec4(unit(sampleDirection),visibility);
+ return vec4(unit(sampleDirection),mix(1.0,visibility,clamp(uWarpMotion.w,0.0,1.0)));
 }
 float warpStarElongation(){
- if(uWarpMotion.w<.5||uBridge.x>.5)return 0.0;
- // Stretch begins between warp 2 and 3, then grows gently on a logarithmic
- // scale. The vehicle's actual speed is not altered by this display mapping.
- float beta=max(0.0,uWarpMotion.z);
- return smoothstep(10.07937,38.94074,beta)*clamp(log(1.0+beta/38.94074)/8.542,0.0,1.0);
+ if(uWarpMotion.w<.00001||uBridge.x>.5)return 0.0;
+ return uWarpStarStyle.x*clamp(uWarpMotion.w,0.0,1.0);
+}
+// A high-speed polar chart gives trails real angular length. Three radial
+// candidates cover each Gaussian's support across cell boundaries, so trails
+// are not clipped to the tiny square cells of the ordinary static star map.
+// Two layers and three candidates stay constant at every speed and quality.
+vec3 warpStreakSky(vec3 ray,float density,float brightness,float variety){
+ vec3 direction=unit(ray),forward=unit(uDriveForward);
+ float theta=acos(clamp(dot(direction,forward),-1.0,1.0));
+ float azimuth=atan(dot(direction,uDriveUp),dot(direction,uDriveRight))/(2.0*PI)+.5;
+ float pixelAngle=.83*max(1.0,1.35*uResolution.y/uResolution.x)/max(uResolution.y,1.0);
+ vec3 color=vec3(0);
+ for(int layer=0;layer<2;layer++){
+  float columns=384.0+float(layer)*127.0,angular=fract(azimuth+float(layer)*.381966)*columns;
+  float column=floor(angular),radial=theta/.38-uWarpMotion.x*8.0-float(layer)*.37,row=floor(radial);
+  for(int candidate=0;candidate<3;candidate++){
+   vec3 seed=vec3(column,mod(row+float(candidate)-1.0,64.0),71.3+float(layer)*23.7);
+   float gate=step(1.0-min(.85,.28*density),starHash(seed));
+   float angularCenter=.15+.70*starHash(seed+11.7),radialCenter=.15+.70*starHash(seed+67.9);
+   float across=(fract(angular)-angularCenter)*(2.0*PI/columns)*max(.015,sin(theta));
+   float along=(radial-(row+float(candidate)-1.0+radialCenter))*.38;
+   float width=pixelAngle*(.35+.50*starHash(seed+5.9))+.00015;
+   float lengthSigma=max(pixelAngle*.9,uWarpStarStyle.y*(.70+.60*starHash(seed+8.2))*.25);
+   float longAxis=along/max(lengthSigma,.00001),shortAxis=across/max(width,.00001);
+   float core=exp(-.5*(shortAxis*shortAxis+longAxis*longAxis));
+   float halo=exp(-.5*(shortAxis*shortAxis/6.25+longAxis*longAxis))*.09;
+   float temperature=starHash(seed+17.81),bandWeight=1.0;
+   vec3 tint=mix(vec3(.42,.64,1),vec3(1,.55,.24),temperature);
+   tint=mix(vec3(.85,.9,1),tint,clamp(variety,0.0,1.0));
+   if(uSpectrum==1){tint=mix(vec3(.9,.24,.08),vec3(1,.77,.35),temperature);bandWeight=.4+temperature*.65;}
+   if(uSpectrum==2){tint=vec3(.32,.65,1.0);bandWeight=starHash(seed+43.0)>.978?1.7:.006;}
+   if(uSpectrum==3){tint=mix(vec3(.24,.68,.90),vec3(1,.48,.15),temperature);bandWeight=starHash(seed+43.0)>.987?.9:.002;}
+   if(uSpectrum==4){tint=vec3(.70,.48,1);bandWeight=starHash(seed+43.0)>.997?1.4:.0001;}
+   if(uSpectrum==0)tint=mix(tint,vec3(.96,.98,1.0),uWarpStarStyle.z);
+   color+=tint*(core+halo)*gate*(.35+pow(starHash(seed+3.8),5.0)*2.2)*bandWeight*brightness*smoothstep(.012,.08,theta);
+  }
+ }
+ return color;
 }
 `:''}
 vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 nebulaColor,float starDensity,float brightness,float variety){
@@ -246,7 +313,7 @@ vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 
  vec3 dir=unit(direction),c=vec3(.0008,.0014,.0025);
  // The isolated pilot sky fades diffuse clouds with the smoothed star
  // motion, before recognizable streaking. No extra texture/noise samples.
- ${warp?'float skyHaze=uWarpMotion.w>.5&&uBridge.x<.5?1.0-smoothstep(0.0,.006,uWarpMotion.y):1.0;':'float skyHaze=1.0;'}
+ ${warp?'float skyHaze=uLabNebulaVisibility>=0.0?uLabNebulaVisibility:uWarpMotion.w>.00001&&uBridge.x<.5?1.0-smoothstep(0.0,.006,uWarpMotion.y)*clamp(uWarpMotion.w,0.0,1.0):1.0;':'float skyHaze=1.0;'}
  nebulaParams.z*=skyHaze;
  vec2 uv=vec2(atan(dir.z,dir.x)/(2.0*PI)+.5,asin(clamp(dir.y,-1.0,1.0))/PI+.5);
  if(starDensity>0.0){
@@ -261,7 +328,7 @@ vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 
   if(uSpectrum==4){milkyWay=vec3(.024,.009,.039)*pow(dust,8.0)*band;backgroundBand=.15;}
   c+=milkyWay*backgroundBand*skyHaze;
   }
-  ${warp?'float elongation=warpStarElongation();':''}
+  ${warp?'float elongation=warpStarElongation(),streakBlend=uWarpMotion.w>.00001&&uBridge.x<.5?smoothstep(3.5,7.0,uWarpStarStyle.w)*clamp(uWarpMotion.w,0.0,1.0):0.0; if(streakBlend<.9999){':''}
   for(int j=0;j<3;j++){
    if(j==2&&uDetail<.5)break;
    ${warp?'vec4 starChart=warpStarSampleDirection(starRay,float(j));vec3 sd=starChart.xyz;float starOpacity=starChart.w;':'vec3 sd=starRay;float starOpacity=1.0;'}sd.xz=rot(float(j)*1.934)*sd.xz;sd.xy=rot(float(j)*.791)*sd.xy;
@@ -280,11 +347,11 @@ vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 
     vec2 flow=vec2((sd.x*axis.z-sd.z*axis.x)/(horizontal*horizontal),(axis.y-projection*sd.y)/horizontal);
     flow/=max(length(flow),.00001);
     float across=dot(q,vec2(-flow.y,flow.x)),along=dot(q,flow);
-    float width=max(.018,rad*.6+pix*.75),lengthSigma=width+.25*elongation+.10*smoothstep(.05,.65,uWarpMotion.y);
+    float width=max(.018,rad*.6+pix*.75),lengthSigma=width+.42*elongation+.12*smoothstep(.05,.80,uWarpMotion.y)*clamp(uWarpMotion.w,0.0,1.0);
     float gaussian=exp(-.5*(across*across/(width*width)+along*along/(lengthSigma*lengthSigma)));
     // A soft edge window prevents clipped rectangular tails at a seed cell.
     vec2 edge=min(fract(p),1.0-fract(p));float taper=smoothstep(0.0,.055,edge.x)*smoothstep(0.0,.055,edge.y);
-    float blend=smoothstep(10.07937,38.94074,uWarpMotion.z);
+    float blend=smoothstep(10.07937,38.94074,uWarpMotion.z)*clamp(uWarpMotion.w,0.0,1.0);
     star=mix(star,gaussian*taper*1.7,blend);halo=mix(halo,gaussian*.13*taper,blend);
    }`:''}
    float gate=step(1.0-(.0065+float(j)*.0007)*starDensity*max(.08,sqrt(1.0-sd.y*sd.y)),h);
@@ -295,8 +362,10 @@ vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 
    if(uSpectrum==2){tint=vec3(.32,.65,1.0);bandWeight=starHash(seed+43.0)>.978?1.7:.006;}
    if(uSpectrum==3){tint=mix(vec3(.24,.68,.90),vec3(1,.48,.15),temperature);bandWeight=starHash(seed+43.0)>.987?.9:.002;}
    if(uSpectrum==4){tint=vec3(.70,.48,1);bandWeight=starHash(seed+43.0)>.997?1.4:.0001;}
-   c+=tint*(star+halo)*gate*(.10+pow(starHash(seed+3.8),8.0)*3.2)*bandWeight*brightness*starOpacity;
+   ${warp?'if(uSpectrum==0)tint=mix(tint,vec3(.94,.97,1.0),uWarpStarStyle.z*clamp(uWarpMotion.w,0.0,1.0));':''}
+   c+=tint*(star+halo)*gate*(.10+pow(starHash(seed+3.8),8.0)*3.2)*bandWeight*brightness*starOpacity${warp?'*(1.0-streakBlend)':''};
   }
+  ${warp?'} if(streakBlend>0.00001)c+=warpStreakSky(starRay,starDensity,brightness,variety)*streakBlend;':''}
  }
  if(nebulaParams.z>0.0){
   vec3 nd=dir;nd.xz=rot(nebulaParams.w)*nd.xz;
@@ -310,15 +379,16 @@ vec3 skyWithEnvironmentChart(vec3 direction,vec3 starRay,vec4 nebulaParams,vec3 
    float shell=exp(-pow((angular-.75/sqrt(scl))*(8.0+scl*3.0),2.0));
    cloud=shell*(.15+n*.85)+.06*n;
   }else if(shape>1.5&&shape<2.5){
-   float ridges=pow(1.0-abs(noise(nd*7.0*scl+vec3(n*3.0))-0.5)*2.0,7.0);
-   cloud=ridges*(.2+.8*n)*.7;
+   ${nebulaVolume?`float wisps=smoothstep(.31,.74,noise(nd*7.0*scl+vec3(n*3.0)));
+   cloud=pow(smoothstep(.34,.74,n),1.6)*(.16+wisps*.84);`:`float ridges=pow(1.0-abs(noise(nd*7.0*scl+vec3(n*3.0))-0.5)*2.0,7.0);
+   cloud=ridges*(.2+.8*n)*.7;`}
   }else if(shape>2.5){
    float phi=atan(nd.z,nd.x),lat=asin(clamp(nd.y,-1.0,1.0));
    float arms=pow(.5+.5*cos(phi*3.0+lat*12.0*scl+n*4.0),5.0);
    cloud=arms*exp(-lat*lat*3.0)*(.15+n*.6);
   }
   float filaments=pow(1.0-abs(noise(cloudPosition*5.0+vec3(n*2.0))-.5)*2.0,5.0);
-  vec3 nebulaHue=mix(nebulaColor*.65,vec3(.7,.85,1),pow(n,5.0));
+  vec3 nebulaHue=mix(nebulaCloudTint(nebulaColor,n*.7+filaments*.3,filaments)*.65,vec3(.7,.85,1),pow(n,5.0));
   float bandWeight=1.0;
   if(uDetail>1.5){cloud*=.70+.65*filaments;nebulaHue=mix(nebulaHue,nebulaColor*vec3(1.25,.85,1.35),filaments*.22);}
   ${ultra?'if(uDetail>2.5){float lace=pow(noise(cloudPosition*19.0+vec3(n)),3.0);cloud*=.87+.60*lace;}':''}
@@ -384,6 +454,17 @@ vec3 force(vec3 p,vec3 v){
  return total;
 }
 
+// Exact mean of exp(-abs(y)/H) over one already-bent ray segment.
+// Midpoint sampling turns a grazing, magnified disc into horizontal bands;
+// the plane-crossing width override also made Low brighter than higher tiers.
+// This bounded column integral stays continuous when a segment crosses y=0.
+float diskVerticalMean(float y0,float y1,float thickness){
+ float a=abs(y0)/thickness,b=abs(y1)/thickness;
+ if(y0*y1<0.0){float span=a+b;if(span<.001)return 1.0-(a*a+b*b)/(2.0*span)+(a*a*a+b*b*b)/(6.0*span);return (2.0-exp(-a)-exp(-b))/span;}
+ float nearest=min(a,b),span=abs(a-b);
+ if(span<.001)return exp(-nearest)* (1.0-span*.5+span*span/6.0);
+ return exp(-nearest)*(1.0-exp(-span))/span;
+}
 vec4 discAt(vec3 p,vec3 previous,vec3 tangent,float dt){
  if(uSpectrum==5||(uFlags.y<.5&&uDiskSecondaryParams.w<.5)||uWarpFlags.w<.5)return vec4(0);
  vec3 color=vec3(0);float alpha=0.0;
@@ -397,12 +478,11 @@ vec4 discAt(vec3 p,vec3 previous,vec3 tangent,float dt){
   vec3 q=(q0+q1)*.5;float sampleDt=dt;
   if(q0.y*q1.y<0.0){
    q=mix(q0,q1,q0.y/(q0.y-q1.y));
-   ${photo?'sampleDt=dt;':'sampleDt=max(dt,.14*m*diskParams.y/max(abs(dot(unit(tangent),axis)),.12));'}
   }
   float r=length(q.xz)/m;
   if(r<inner||r>outer)continue;
   float thick=.075*diskParams.y*(1.0+r*.06)*m;
-  if(abs(q.y)>thick*5.0)continue;
+  if(q0.y*q1.y>=0.0&&min(abs(q0.y),abs(q1.y))>thick*5.0)continue;
   float angle=-atan(q.z,q.x),orbit=uTime*(1.2+spinFor(k)*.5)/pow(max(r*.35,.1),1.5);
   vec3 tex=vec3(q.x/m,-q.z/m,r*.5);tex.xy=rot(orbit*.4)*tex.xy;
   float turbulence=detailedFbm(tex*1.9);
@@ -425,14 +505,27 @@ vec4 discAt(vec3 p,vec3 previous,vec3 tangent,float dt){
   float edge=min(.55,(outer-inner)*.18),fade=min(3.5,(outer-inner)*.55);
   float rim=smoothstep(inner,inner+max(.01,edge),r)*(1.0-smoothstep(outer-fade,outer,r));
   float radial=pow(inner/r,1.7),hot=clamp(radial*.9+.10,0.0,1.0);
-  float vertical=exp(-abs(q.y)/thick);
-  ${ultra?'if(uDetail>2.5&&q0.y*q1.y>=0.0){vertical=(exp(-abs(q0.y)/thick)+4.0*vertical+exp(-abs(q1.y)/thick))/6.0;}':''}
+  float vertical=diskVerticalMean(q0.y,q1.y,thick);
   float density=vertical*rim*(.5+turbulence)*streak*diskParams.z;
   ${photo?'density*=.62+.8*plasma.x;':''}
   // Two editable procedural emission studies, sampled along the same bent rays
   // as every other disc. Their structure is world-space, not a screen overlay.
   float ribbon=0.0,ribbonFine=0.0;
-  if(diskParams.x>5.5){
+  if(diskParams.x>6.5){
+   // Folded auroral curtains, not concentric painted rings. Angular folds
+   // modulate thin radial sheets; vertically coherent rays remain smooth
+   // through time and are sampled by the same lensed rays as the disc.
+   float curtainAngle=angle-orbit*.045;
+   float fold=sin(curtainAngle*3.0+.55*sin(curtainAngle*7.0))*.85+.22*sin(curtainAngle*11.0);
+   float sheet=r*.52+fold;
+   float pixelWidth=length(p-uObserver)/max(m,1e-12)*.83/max(uResolution.y,1.0);
+   float sheetWidth=clamp(.13+pixelWidth*.5,.13,.48);
+   ribbon=exp(-pow(sin(sheet)/sheetWidth,2.0));
+   float rays=.52+.28*sin(curtainAngle*59.0+fold*3.0)+.20*sin(curtainAngle*113.0+fold*7.0);
+   ribbonFine=rays*rays;
+   float heightFade=1.0-smoothstep(.5,1.4,abs(q.y)/max(thick*2.3,.001));
+   density=vertical*rim*diskParams.z*ribbon*(.24+.66*ribbonFine)*heightFade;
+  }else if(diskParams.x>5.5){
    // Long sheared arcs: cylindrical coordinates keep the noise continuous at
    // the angular seam while its radial drift prevents ruler-spaced rings.
    vec2 flowAngle=vec2(cos(angle),sin(angle));flowAngle=rot(r*.12-orbit*.10)*flowAngle;
@@ -461,6 +554,12 @@ vec4 discAt(vec3 p,vec3 previous,vec3 tangent,float dt){
   else if(diskParams.x>4.5)hue=mix(diskColor*vec3(.45,.9,1.25),vec3(.92,.98,1),smoothstep(.08,.75,hot)*.75+.2);
   if((k==0?uSceneOptions.z:uSceneOptions.w)>.5)hue=diskColor*(.35+1.1*hot)+vec3(.07)*pow(hot,8.0);
   if((k==0?uSceneOptions.z:uSceneOptions.w)>1.5)hue=(.52+.48*cos(6.28318530718*(vec3(0,.333,.667)+r*.11-sin(angle)*.12-orbit*.025)))*(.55+hot);
+  if(diskParams.x>6.5){
+   float altitude=clamp(abs(q.y)/max(thick*2.0,.001),0.0,1.0);
+   hue=mix(vec3(.20,1.15,.36),vec3(.12,.88,1.10),smoothstep(.12,.55,altitude));
+   hue=mix(hue,vec3(.77,.20,1.04),smoothstep(.48,.95,altitude));
+   hue*=mix(vec3(1),diskColor/vec3(.275,.898,.792),.22);
+  }
   vec3 localV=localPoint(tangent,axis),orbital=unit(vec3(q.z,0,-q.x));
   float beta=min(.65,sqrt(1.0/max(r,2.0)));
   float doppler=1.0/(1.0+beta*dot(orbital,unit(localV)));
@@ -473,9 +572,22 @@ vec4 discAt(vec3 p,vec3 previous,vec3 tangent,float dt){
   // false-color copy of the entire optical disc or its cold outer dust.
   if(uSpectrum==4){spectral=.0004+2.4*pow(hot,9.0)*pow(turbulence,2.0);hue=mix(vec3(.40,.10,.72),vec3(.92,.84,1),hot);if(diskParams.x>2.5&&diskParams.x<4.5)spectral*=.015;}
   vec3 emit=hue*(.58+radial*2.4)*pow(doppler,2.8)*redshift*spectral;
-  if(diskParams.x>5.5)emit*=.8+2.0*ribbon+.8*ribbonFine;
+  if(diskParams.x>6.5)emit*=1.25+1.8*ribbonFine;
+  else if(diskParams.x>5.5)emit*=.8+2.0*ribbon+.8*ribbonFine;
   else if(diskParams.x>4.5)emit*=3.4+.9*turbulence;
   ${photo?`// Local turbulent heating survives optically thick sight lines.
+  if(uSpectrum==0&&diskParams.x<.5&&(k==0?uSceneOptions.z:uSceneOptions.w)<.5){
+   // Illustrative thermal disk: T follows radius and local turbulent heating.
+   // Frequency-shifting a Planck spectrum gives B_nu(g*T). Sample three
+   // visible bands relative to a 6500 K white to retain the user's tint.
+   float g=redshift*sqrt(1.0-beta*beta)*doppler;
+   float T=clamp(8500.0*pow(inner/r,.75)*(.84+.30*plasma.x)*g,900.0,30000.0);
+   vec3 bands=vec3(22135.0,26160.0,31973.0);
+   vec3 spectrum=(exp(bands/6500.0)-1.0)/(exp(bands/T)-1.0);
+   float lum=dot(spectrum,vec3(.2126,.7152,.0722));
+   vec3 thermal=spectrum/max(lum,.00001);
+   emit*=mix(vec3(1),thermal,.65)*mix(.72,1.35,lum/(1.0+lum));
+  }
   emit*=.25+1.25*pow(plasma.x,1.5)+.22*plasma.y;
   emit=mix(emit,emit*vec3(1.08,.97,.84),plasma.z*.22);`:''}
   color+=emit*absorb*(1.0-alpha);alpha+=(1.0-alpha)*absorb;
@@ -708,6 +820,7 @@ vec3 bodySurface(vec3 normal,vec3 rd,vec3 tint,float type,vec4 properties,vec3 l
  return surfaceSpectrum(surface,light,.12+.14*detail,.05);
 }
 ${planetary?planetMaterialGLSL({photo}):''}
+${bodyGravity||planetary?planetAtmosphereGLSL({photo}):''}
 ${rings?`
 vec4 annulusHit(vec3 ro,vec3 rd,vec3 tint,float type,vec4 properties,float maximum){
  if(abs(rd.y)<1e-8)return vec4(0,0,0,-1);
@@ -837,6 +950,21 @@ vec4 planetShapeHit(vec3 ro,vec3 rd,vec3 shape,float kind){
  }
  return ellipsoidHit(ro,rd,vec3(0),shape);
 }
+// The water-cap frame has +X toward the attracting body. Wave crests
+// advance toward +X instead of following arbitrary world latitude/spin.
+vec3 tidalWaterSurface(vec3 point,vec3 normal,vec3 rd,vec3 lightDirection){
+ float phase=point.x*38.0-uTime*.35;
+ float wave=.5+.5*sin(phase+.35*sin(atan(point.z,point.y)*4.0));
+ float smallWave=.5+.5*sin(phase*2.1+point.y*3.0);
+ float light=max(dot(normal,lightDirection),0.0),grain=noise(point*24.0);
+ vec3 water=vec3(.025,.25,.46)*(.58+.18*grain+.20*wave+.04*smallWave);
+ float glint=pow(max(dot(normal,unit(lightDirection-rd)),0.0),110.0);
+ water+=vec3(.62,.84,1.0)*glint*1.3;
+ water=mix(water,vec3(.63,.84,.91),pow(wave,18.0)*.045);
+ water*=.14+.86*light;
+ water+=vec3(.13,.32,.6)*pow(1.0-max(dot(normal,-rd),0.0),3.0)*.22;
+ return surfaceSpectrum(water,light,.12+.14*grain,.05);
+}
 vec3 planetShade(vec3 localHit,vec3 shape,vec3 normal,vec3 rd,vec3 tint,float type,vec4 properties,vec4 profile,vec3 light){
  if(type>1.5&&type<2.5&&properties.z<0.0)return bodySurface(normal,rd,tint,type,properties,light);
  vec3 point=unit(localHit/shape);
@@ -848,6 +976,7 @@ vec3 planetShade(vec3 localHit,vec3 shape,vec3 normal,vec3 rd,vec3 tint,float ty
  }
  vec3 grid=metricSurfaceGrid(point,normal,rd);
  if(uSpectrum==5)return geometrySurface(normal,rd);
+ if(profile.w>2.5&&properties.x>2.5)return grid+tidalWaterSurface(point,normal,rd,light);
  ${planetary?'if(type<.5&&profile.x>.5)return grid+namedPlanetSurface(point,normal,rd,tint,properties,profile,light);':''}
  return grid+bodySurface(normal,rd,tint,type,properties,light)+(profile.w>2.5&&properties.x<.5&&uSpectrum==0?tint*.16:vec3(0));
 }
@@ -877,7 +1006,7 @@ ${diagnostics?METRIC_GLSL:`
 vec3 diagnosticSegment(vec3 a,vec3 b,float travelled,float pixelAngle){return vec3(0);}
 vec3 flightGuideSegment(vec3 a,vec3 b,float travelled,float pixelAngle){return vec3(0);}
 `}
-${warp?WARP_TRACE_GLSL.replaceAll('__WARP_TRACE_STEPS__',photo?'384':ultra?'192':'96').replaceAll('__WARP_TRACE_BUDGET__',photo?'384':ultra?'192':'96'):NO_WARP_TRACE_GLSL}
+${warp?warpTraceGLSL({nebulaVolume:nebulaVolume&&warpOnly}).replaceAll('__WARP_TRACE_STEPS__',photo?'384':ultra?'192':'96').replaceAll('__WARP_TRACE_BUDGET__',photo?'384':ultra?'192':'96'):NO_WARP_TRACE_GLSL}
 
 vec3 rayFromFrame(vec3 forward,vec3 right,vec3 up,vec2 uv,float fov){
  vec3 eye=vec3(uv*fov,-1.0);
@@ -910,6 +1039,7 @@ vec4 astronomicalInspector(vec3 worldRay,vec4 focus){
   nearest=distance;solidColor=color;solid=true;
  }
  if(uMetricOptions.x>.5){float end=solid?nearest:max(focus.w*6.0,length(relativeEye)+focus.w*5.0);solidColor+=diagnosticSegment(uObserver,uObserver+worldRay*end,0.0,.83/uResolution.y);}
+ ${bodyGravity||planetary?(photo?'if(solid){vec3 haze=vec3(0),bend=vec3(0);float transmission=1.0;photoAtmosphere(uObserver,uObserver+worldRay*nearest,haze,transmission,bend);solidColor=haze+transmission*solidColor;}':'if(solid)solidColor+=planetAtmosphereSegment(uObserver,uObserver+worldRay*nearest);'):''}
  if(ringFound&&ringNearest<nearest)return vec4(mix(solid?solidColor:sky(worldRay),ringColor,ringAlpha),1);
  return solid?vec4(solidColor,1):vec4(0);
 }
@@ -1131,7 +1261,9 @@ vec3 thrusterSegment(vec3 from,vec3 to){
 }
 `:''}
 
-${bridge?bridgeGLSL({ultra,photo,photoSteps:photoBudget,probe,attachments,bodyGravity}):''}
+${cluster?CLUSTER_GLSL:''}
+${nebulaVolume?nebulaVolumeGLSL({warp,bodyGravity,attachments,cluster,photo}):''}
+${bridge?bridgeGLSL({grid,ultra,photo,photoSteps:photoBudget,probe,attachments,bodyGravity,nebulaVolume}):''}
 void main(){
  vec2 uv=(gl_FragCoord.xy-uRayViewport.xy+uPhotoOffset+uPhotoJitter-.5*uResolution)/uResolution.y;
  vec3 camera=uObserver,forward=unit(uForward),right=unit(uRight),up=unit(uUp);
@@ -1139,10 +1271,15 @@ void main(){
 
  vec3 original=rayFromFrame(forward,right,up,uv,fov),v=original,p=camera,color=vec3(0),metricColor=vec3(0);
  float trans=1.0,nearRadius=100000.0,travelled=0.0,transparentMask=0.0;
+ ${nebulaVolume?'float nebulaDistance=0.0,nebulaSample=-1.0;vec4 nebulaCached=vec4(0);':''}
  float pixelAngle=uProjectionMode==1?length(rayFromFrame(forward,right,up,uv+vec2(0,1.0/uResolution.y),fov)-original):fov/uResolution.y;
  bool swallowed=false,object=false,miss=false,localWarp=${bridge?'false':'localWarpPass()'};
  vec4 inspected=vec4(0);if(uInspectIndex>=0)inspected=inspector(uv,fov);
- if(inspected.a>.5){color=inspected.rgb;object=true;miss=true;}
+ if(inspected.a>.5){
+  ${nebulaVolume?`float stop=0.0;for(int j=0;j<12;j++){if(j==uInspectIndex)stop=max(0.0,length(camera-uObjects[j].xyz)-uObjects[j].w);}
+  nebulaVolumeSegment(camera,camera+original*stop,false,nebulaDistance,nebulaSample,nebulaCached,color,trans);color+=trans*inspected.rgb;`:'color=inspected.rgb;'}
+  object=true;miss=true;
+ }
  ${bridge?`
   if(!object)color=bridgeTrace(camera,original,pixelAngle);
   ${probe?'color+=probeInspectorEmission(uv,fov);':''}
@@ -1154,8 +1291,11 @@ void main(){
  vec3 warpColor=vec3(0);float warpTrans=1.0;bool warpObject=false;
  if(!object&&localWarp){
   warpLocalTrace(original,v,warpColor,warpTrans,warpObject);
-  if(warpObject){color=warpColor;object=true;miss=true;}
-  else if(uWarpFlags.w<.5${anomaly?'&&uAnomalyCount==0':''})miss=true;
+  if(warpObject){
+   ${nebulaVolume?'nebulaVolumeSegment(camera,camera+original*max(0.0,length(camera-uWarpCenter)-uWarpRadius),false,nebulaDistance,nebulaSample,nebulaCached,color,trans);color+=trans*warpColor;':'color=warpColor;'}object=true;miss=true;
+  }
+  // A ray leaving the bubble can still hit a planet, ring, or star.
+  else if(uWarpFlags.w<.5&&uObjectCount<=1${warp&&grid?'&&uWarpGridLocalPatch<.5':''}${anomaly?'&&uAnomalyCount==0':''})miss=true;
  }
  // Only integrate the compact near field. Far observers skip empty space;
  // rays missing it take the sky fast path instead of exhausting ray steps.
@@ -1164,6 +1304,7 @@ void main(){
   if(disc<0.0)miss=true;
   else{float enter=-b-sqrt(max(0.0,disc));if(enter<0.0)miss=true;else p=camera+v*max(0.0,enter-(uWarpFlags.w>.5?uMass*.03:uBounds*.00001));}
  }
+ ${nebulaVolume?'if(!object&&!miss)nebulaVolumeSegment(camera,p,false,nebulaDistance,nebulaSample,nebulaCached,color,trans);':''}
  if(!miss&&uFlags.x>.5){
   vec4 entryGrid=coordinateGridSegment(camera,p,0.0,pixelAngle);
   color+=trans*entryGrid.rgb;trans*=1.0-entryGrid.a;travelled=length(p-camera);
@@ -1179,7 +1320,11 @@ void main(){
     float r=length(p-uHoles[k].xyz),m=uHoles[k].w;if(m<=0.0)continue;
     closest=min(closest,r);nearRadius=min(nearRadius,r/m);
     if(r<horizonFor(k)&&uMetricOptions.w<.5){
-     swallowed=true;break;
+     // A tracked exterior eye can lie just metres above a billion-metre
+     // horizon. GPU float rounding may put its first sample one ULP inside.
+     // March that sample once; the next actual interior point absorbs the ray.
+     bool roundedEye=i==0&&uInspectIndex>=0&&all(equal(p,camera))&&r>=horizonFor(k)*(1.0-4.0e-7);
+     if(!roundedEye){swallowed=true;break;}
     }
     float h=max(r*.065,.045*m)*320.0/float(uSteps);
     h=min(h,max(${photo?'.002':'.018'}*m,abs(r-horizonFor(k))*.35));
@@ -1201,15 +1346,27 @@ void main(){
    // Weak-field catalogs have straight rays at this pixel footprint. One
    // analytic segment still intersects every selected surface/transparent ring;
    // another segment continues behind a ring. No empty-space marching is needed.
-   if(uGravityCount==0&&uWarpFlags.w<.5&&uWarpFlags.x<.5${anomaly?'&&uAnomalyCount==0':''})stepLimit=max(stepLimit,length(p)+uBounds*2.1);
+   if(uGravityCount==0&&uWarpFlags.w<.5&&${warp?'(uWarpFlags.x<.5||(localWarp'+(grid?'&&uWarpGridLocalPatch<.5':'')+'))':'uWarpFlags.x<.5'}${anomaly?'&&uAnomalyCount==0':''})stepLimit=max(stepLimit,length(p)+uBounds*2.1);
    float dt=stepLimit;
-   vec3 previous=p,a=force(p,v),midV=v+a*dt*.5,midP=p+v*dt*.5;
-   v+=force(midP,midV)*dt;p+=midV*dt;
+   ${photo?`// RK4 advances position and tangent together through the same lens model.
+   vec3 previous=p,k1=force(p,v),v2=v+k1*(dt*.5);
+   vec3 k2=force(p+v*(dt*.5),v2),v3=v+k2*(dt*.5);
+   vec3 k3=force(p+v2*(dt*.5),v3),v4=v+k3*dt;
+   vec3 k4=force(p+v3*dt,v4);
+   p+=(v+2.0*v2+2.0*v3+v4)*(dt/6.0);v+=(k1+2.0*k2+2.0*k3+k4)*(dt/6.0);`:`vec3 previous=p,a=force(p,v),midV=v+a*dt*.5,midP=p+v*dt*.5;
+   v+=force(midP,midV)*dt;p+=midV*dt;`}
    float hitFraction=1.0;vec4 obj=vec4(0);
    if(uObjectCount>0)obj=objectHit(p,previous,v,hitFraction,transparentMask);
    p=mix(previous,p,hitFraction);dt*=hitFraction;
+   ${nebulaVolume?'nebulaVolumeSegment(previous,p,false,nebulaDistance,nebulaSample,nebulaCached,color,trans);':''}
    metricColor=max(metricColor,trans*diagnosticSegment(previous,p,travelled,pixelAngle));
    if(uFlags.x>.5){
+    ${warp&&grid?`// Unfocused ships are integrated in the world pass. Reuse the body-clipped
+    // segment and reject almost every segment before entering bubble coordinates.
+    if(!localWarp&&uWarpFlags.x>.5&&length((previous+p)*.5-uWarpCenter)<4.1*uWarpRadius+0.5*length(p-previous)){
+     vec4 localSheet=warpGridSegment((previous-uWarpCenter)/uWarpRadius,(p-uWarpCenter)/uWarpRadius,travelled/uWarpRadius);
+     color+=trans*localSheet.rgb;trans*=1.0-localSheet.a;
+    }`:''}
     vec4 grid=coordinateGridSegment(previous,p,travelled,pixelAngle);
     color+=trans*grid.rgb;trans*=1.0-grid.a;travelled+=length(p-previous);
    }
@@ -1220,6 +1377,7 @@ void main(){
    ${probe?'color+=trans*probeEmissionSegment(previous,p);':''}
    ${craft?'color+=trans*thrusterSegment(previous,p);':''}
    ${stellar?'color+=trans*stellarEmissionSegment(previous,p);':''}
+   ${bodyGravity||planetary?(photo?'vec3 airBend=vec3(0);photoAtmosphere(previous,p,color,trans,airBend);v+=length(v)*airBend;':'color+=trans*planetAtmosphereSegment(previous,p);'):''}
    color+=trans*whiteHoleEmission(sampleP,dt);
    vec4 tail=debris(sampleP,dt);color+=trans*tail.rgb;trans*=1.0-tail.a;
    vec4 warp=warpWorldAppearance(p,previous,dt);color+=trans*warp.rgb;trans*=1.0-warp.a;
@@ -1228,7 +1386,8 @@ void main(){
   }
  }
  if(!swallowed&&!object){
-  if(uFlags.x>.5&&!(localWarp&&uWarpFlags.w<.5${anomaly?'&&uAnomalyCount==0':''})){vec4 grid=coordinateGridEscape(p,unit(v),travelled,pixelAngle);color+=trans*grid.rgb;trans*=1.0-grid.a;}
+  ${nebulaVolume?'nebulaVolumeSegment(p,p+unit(v)*max(0.0,nebulaVolumeRange()-nebulaDistance),false,nebulaDistance,nebulaSample,nebulaCached,color,trans);':''}
+  if(uFlags.x>.5&&!(localWarp&&uWarpFlags.w<.5${warp&&grid?'&&uWarpGridLocalPatch<.5':''}${anomaly?'&&uAnomalyCount==0':''})){vec4 grid=coordinateGridEscape(p,unit(v),travelled,pixelAngle);color+=trans*grid.rgb;trans*=1.0-grid.a;}
   color+=${warp?'skyForWarpTravel(unit(v),original)':'sky(unit(v))'}*trans;
  }
  if(uSpectrum!=5&&!swallowed&&!object&&uFlags.y>.5&&uWarpFlags.w>.5){float glow=exp(-abs(nearRadius-3.05)*2.2)*.045;vec3 glowHue=uSpectrum==2?vec3(.3,.6,1):uSpectrum==1?vec3(.6,.12,.035):uSpectrum==3?vec3(.95,.35,.08):uSpectrum==4?vec3(.06,.015,.09):vec3(1,.56,.22);color+=glowHue*glow;}
@@ -1247,6 +1406,72 @@ void main(){
  `}
 }
 `.replaceAll('[12]',`[${slots}]`).replaceAll('j<12',`j<${slots}`).replaceAll('k<12',`k<${slots}`);
+ if(specializeWarp&&warpLocal){
+  // The precision bubble pass owns this field. Do not ask the driver's loop
+  // optimizer to discover this from several unrelated dynamic uniforms.
+  source=source.replace('bool localWarpPass(){return uWarpObjectIndex>=0&&(uWarpFlags.w<.5||uInspectIndex==uWarpObjectIndex||uHideObjectIndex==uWarpObjectIndex);}',
+   'bool localWarpPass(){return true;}');
+  if(warpLocalOnlyCraft){
+   // The sole craft is already intersected by the local pass. Removing this
+   // branch before compilation prevents its geometry/sky from being inlined
+   // again inside every iteration of the surrounding astronomical ray loop.
+   const objectStart=source.indexOf('vec4 objectHit('),start=source.indexOf('if(type>2.5){',objectStart);
+   if(objectStart>=0&&start>=objectStart){let end=start+source.slice(start).indexOf('{')+1,depth=1;for(;depth&&end<source.length;end++){if(source[end]==='{')depth++;else if(source[end]==='}')depth--;}
+    source=source.slice(0,start)+'if(type>2.5){continue;}'+source.slice(end);
+   }
+  }
+ }
+ if(specializeWarp&&warpOnly){
+  // An isolated Enterprise has no astronomical objects to march. Keep the
+  // same curved local field, sky, grid, exposure and vignette, with no hidden
+  // 288/768-iteration world path in the driver's first-draw program.
+  source=source.slice(0,source.lastIndexOf('\nvoid main(){'))+`
+void main(){
+ vec2 uv=(gl_FragCoord.xy-uRayViewport.xy+uPhotoOffset+uPhotoJitter-.5*uResolution)/uResolution.y;
+ float fov=.83*max(1.0,1.35*uResolution.y/uResolution.x);
+ vec3 original=rayFromFrame(unit(uForward),unit(uRight),unit(uUp),uv,fov),direction=original,color=vec3(0);
+ float transmission=1.0;bool hit=false;
+ warpLocalTrace(original,direction,color,transmission,hit);
+ if(!hit)color+=transmission*skyForWarpTravel(unit(direction),original);
+ color=pow(vec3(1)-exp(-max(color*uExposure,vec3(0))),vec3(.92));
+ color*=1.0-.22*smoothstep(.35,1.3,length(uv));gl_FragColor=vec4(color,1);
+}
+`;
+ }
+ if(cluster&&!warp&&!bridge){
+  source=source.slice(0,source.lastIndexOf('\nvoid main(){'))+`
+void main(){
+ vec2 uv=(gl_FragCoord.xy-uRayViewport.xy+uPhotoOffset+uPhotoJitter-.5*uResolution)/uResolution.y;
+ float fov=.83*max(1.0,1.35*uResolution.y/uResolution.x);
+ vec3 ray=rayFromFrame(unit(uForward),unit(uRight),unit(uUp),uv,fov);float surfaceDistance=1e30;vec3 backgroundRay=ray;
+ vec3 color=clusterTrace(uObserver,ray,fov/uResolution.y,surfaceDistance,backgroundRay);
+ ${craft||planetary?`// A single analytic foreground pass keeps added craft / mapped planets
+ // available without restoring the compact-object world marcher.
+ if(uObjectCount>0){float extent=min(surfaceDistance,max(1e-8,length(uObserver)+uBounds*2.1)),fraction=1.0,mask=0.0;
+  vec4 body=objectHit(uObserver+ray*extent,uObserver,ray,fraction,mask);
+  if(body.a>0.0){color=mix(color,body.rgb,body.a);if(body.a>.999)surfaceDistance=extent*fraction;}
+ }
+ if(uInspectIndex>=0){vec4 inspected=inspector(uv,fov);float depth=1e30;
+  for(int j=0;j<${slots};j++){if(j==uInspectIndex)depth=max(0.0,length(uObserver-uObjects[j].xyz)-uObjects[j].w);}
+  if(inspected.a>.5&&depth<surfaceDistance){color=inspected.rgb;surfaceDistance=depth;}
+ }`:''}
+ ${nebulaVolume?`float nebulaDistance=0.0,nebulaSample=-1.0;vec4 nebulaCached=vec4(0);vec3 foreground=vec3(0);float transmission=1.0;
+ nebulaVolumeSegment(uObserver,uObserver+(surfaceDistance<1e29?ray:backgroundRay)*min(surfaceDistance,nebulaVolumeRange()),false,nebulaDistance,nebulaSample,nebulaCached,foreground,transmission);color=foreground+transmission*color;`:''}
+ color=pow(vec3(1)-exp(-max(color*uExposure,vec3(0))),vec3(.92));
+ color*=1.0-.22*smoothstep(.35,1.3,length(uv));gl_FragColor=vec4(color,1);
+}
+`;
+  source=pruneUnreachableGLSL(source);
+ }
+ if(weakField&&!cluster&&!warp&&!bridge&&!anomaly&&!attachments&&!dyson){
+  source=source.slice(0,source.lastIndexOf('\nvoid main(){'))+'\n'+weakFieldHitGLSL(source)+'\n'+weakFieldMain({photo,stellar,craft,probe,nebulaVolume,atmosphere:bodyGravity||planetary,objectSlots:slots});
+  source=pruneUnreachableGLSL(source);
+ }
+ // Bridge scenes have their own ray integrator. Remove unreachable strong-field
+ // and unused material functions before handing the source to a mobile driver;
+ // this is the same dependency pass used by the solar-system/cluster programs.
+ if(bridge)source=pruneUnreachableGLSL(source);
+ return source;
 }
 
 export const FRAGMENT=createFragment();

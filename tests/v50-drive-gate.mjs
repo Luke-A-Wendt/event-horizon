@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {advanceRoute} from '../dist/travel-routes.js';
+const r=new BlackHoleRenderer(fixture({width:390,height:720}).canvas,{autoStart:false,bindControls:false});
+r.loadScene('solar-system');
+const craft=r.objects.find(o=>o.type==='shuttle'),moon=r.objects.find(o=>o.name==='Moon');
+assert(craft&&moon);r.selectedId=craft.id;r.focusTarget(craft.id,'track');
+assert.equal(r.getManualDriveEligibility(craft.id).allowed,false);
+assert.equal(r.setFreeDrive(craft.id,true),false,'A first transfer is required in Traveling our Solar System');
+assert(r.startTravel(moon.id,{craftId:craft.id}));
+assert.equal(r.getManualDriveEligibility(craft.id).allowed,false,'Guidance owns the controls during a transfer');
+for(let i=0;i<60;i++)advanceRoute(r,1);
+assert(craft.completedTransfer);assert.equal(craft.parentId,moon.id);
+assert.equal(r.getManualDriveEligibility(craft.id).allowed,true);
+const radius=craft.orbitMeters;r.fillObjects();const before=r.getFocusFrame(craft.id),heading=[...before.frame[2]],position=[...before.position];
+assert(r.setFreeDrive(craft.id,true));assert(craft.flight.orbitHold);assert.equal(craft.flight.thrust,0);assert.equal(craft.orbitMeters,radius);
+const after=r.getFocusFrame(craft.id);
+for(let j=0;j<3;j++){assert(Math.abs(after.position[j]-position[j])<1e-8);assert(Math.abs(after.frame[2][j]-heading[j])<1e-8);}
+const flight=r.getFlightState();assert(flight.speedMetersPerSecond>0,'Taking the helm keeps the parking orbit velocity');
+r.setFlightHeading(5);assert(craft.flight.orbitHold,'Heading adjustments alone keep the orbit');
+r.setFlightPower(1);assert(!craft.flight.orbitHold);assert.equal(craft.flight.thrust,1);
+r.dispose();
+console.log('PASS: initial manual Drive gate, transfer arrival, zero-thrust orbital handoff, preserved pose/speed, and thrust release.');

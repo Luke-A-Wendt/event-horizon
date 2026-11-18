@@ -12,7 +12,7 @@ const orbitFrames=branch=>Array.from({length:81},(_,i)=>{const [x,y,opacity]=loa
 export const LOADING_VISUAL_WORKER_SOURCE=`
 const orbitSample=${loadingOrbitSample.toString()};
 let canvas,ctx,timer=null,base=0,stamp=0,running=false,suspended=false,revision=-1,reduced=false;
-const elapsed=()=>Math.min(60000,base+(running&&!suspended?Math.max(0,performance.now()-stamp):0));
+const elapsed=()=>base+(running&&!suspended?Math.max(0,performance.now()-stamp):0);
 function drawPath(start,end,branch,color){
  ctx.strokeStyle=color;ctx.lineWidth=.8;ctx.beginPath();
  for(let i=0;i<=80;i++){const [x,y]=orbitSample(start+(end-start)*i/80)[branch];if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);}ctx.stroke();
@@ -25,7 +25,7 @@ function draw(){
  drawPath(0,.5,0,'#6c96b0');
  ctx.fillStyle='#ddf4ff';ctx.shadowBlur=6;ctx.shadowColor='#84caff';
  for(const [x,y,alpha] of orbitSample(phase)){if(alpha<.001)continue;ctx.globalAlpha=alpha;ctx.beginPath();ctx.arc(x,y,2,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;ctx.shadowBlur=0;
- ctx.fillStyle='#cde6ff';ctx.font='500 17px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(Math.floor(ms/600)+'%',64,87);
+ ctx.fillStyle='#cde6ff';ctx.font='500 14px monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(Math.floor(ms/1000)+' s elapsed',64,87);
 }
 function tick(){timer=null;if(!running)return;draw();timer=setTimeout(tick,reduced||suspended?250:50);}
 self.onmessage=event=>{const m=event.data;if(m.type==='init'){canvas=m.canvas;ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw Error('Loading canvas unavailable');draw();return;}
@@ -37,11 +37,11 @@ export function createLoadingVisual(element,clock=globalThis){
  const document=element.ownerDocument||clock.document;
  if(!document?.createElement||!element.querySelector?.('.loading-card'))return null;
  const card=element.querySelector('.loading-card'),visual=document.createElement('span');visual.className='loading-visual';visual.setAttribute('aria-hidden','true');
- visual.innerHTML='<span class="loading-visual-fallback">'+loadingSymbolMarkup+'<span class="loading-percent-window"><span class="loading-percent-strip">'+Array.from({length:101},(_,i)=>'<span>'+i+'%</span>').join('')+'</span></span></span>';
+ visual.innerHTML='<span class="loading-visual-fallback">'+loadingSymbolMarkup+'<span class="loading-elapsed-window"><span class="loading-elapsed-strip">'+Array.from({length:61},(_,i)=>'<span>'+i+(i===60?'+':'')+' s elapsed</span>').join('')+'</span></span></span>';
  card.querySelector('.loading-bootstrap')?.remove();element.classList.remove('loading-bootstrap-active');card.prepend(visual);element.classList.add('has-independent-loader');
- const strip=visual.querySelector('.loading-percent-strip'),turn=visual.querySelector('.loading-symbol-turn'),secondary=visual.querySelector('.loading-symbol-secondary');
+ const strip=visual.querySelector('.loading-elapsed-strip'),turn=visual.querySelector('.loading-symbol-turn'),secondary=visual.querySelector('.loading-symbol-secondary');
  const reduced=!!clock.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
- const progress=strip.animate?.([{transform:'translate3d(0,0,0)'},{transform:'translate3d(0,-2200px,0)'}],{duration:60000,easing:'steps(100,end)',fill:'forwards'});progress?.pause();
+ const counter=strip.animate?.([{transform:'translate3d(0,0,0)'},{transform:'translate3d(0,-1320px,0)'}],{duration:60000,easing:'steps(60,end)',fill:'forwards'});counter?.pause();
  const orbits=[turn,secondary].map((node,branch)=>node.animate?.(orbitFrames(branch),{duration:4000,iterations:Infinity}));for(const orbit of orbits){orbit?.pause();if(reduced&&orbit)orbit.currentTime=720;}
  let worker=null,url=null,canvas=null,disposed=false,lastRevision=null;
  try{canvas=document.createElement('canvas');if(typeof canvas.transferControlToOffscreen==='function'&&typeof clock.Worker==='function'&&typeof clock.URL?.createObjectURL==='function'){
@@ -51,9 +51,9 @@ export function createLoadingVisual(element,clock=globalThis){
    worker.postMessage({type:'init',canvas:offscreen},[offscreen]);
   }}catch{worker?.terminate();worker=null;canvas?.remove();if(url){clock.URL.revokeObjectURL(url);url=null;}}
  return {update({running,elapsedMs,suspended,revision}){
-  if(disposed)return;const time=Math.max(0,Math.min(60000,elapsedMs||0));
-  if(progress){progress.currentTime=time;if(running&&!suspended&&time<60000)progress.play();else progress.pause();}else if(strip.style)strip.style.transform='translate3d(0,'+(-22*Math.floor(time/600))+'px,0)';
+  if(disposed)return;const elapsed=Math.max(0,elapsedMs||0),time=Math.min(60000,elapsed);
+  if(counter){counter.currentTime=time;if(running&&!suspended&&time<60000)counter.play();else counter.pause();}else if(strip.style)strip.style.transform='translate3d(0,'+(-22*Math.floor(time/1000))+'px,0)';
   for(const orbit of orbits)if(orbit){if(lastRevision!==revision)orbit.currentTime=reduced?720:0;if(running&&!suspended&&!reduced)orbit.play();else orbit.pause();}
-  lastRevision=revision;worker?.postMessage({type:'state',running,elapsedMs:time,suspended,revision,reduced,sentAt:Date.now()});
- },dispose(){if(disposed)return;disposed=true;progress?.cancel();for(const orbit of orbits)orbit?.cancel();worker?.terminate();if(url)clock.URL.revokeObjectURL(url);visual.remove();element.classList.remove('has-independent-loader');}};
+  lastRevision=revision;worker?.postMessage({type:'state',running,elapsedMs:elapsed,suspended,revision,reduced,sentAt:Date.now()});
+ },dispose(){if(disposed)return;disposed=true;counter?.cancel();for(const orbit of orbits)orbit?.cancel();worker?.terminate();if(url)clock.URL.revokeObjectURL(url);visual.remove();element.classList.remove('has-independent-loader');}};
 }

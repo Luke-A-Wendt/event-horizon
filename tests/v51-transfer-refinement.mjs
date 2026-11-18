@@ -1,0 +1,38 @@
+import './fixtures/shuttle-bridge.mjs';
+import assert from 'node:assert/strict';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {fixture} from './render-fixture.mjs';
+import {beginRoute,advanceRoute,routeState,previewRoute,cancelRoute} from '../dist/travel-routes.js';
+import {advanceAutopilot,advanceBridgeAutopilot} from '../dist/autopilot.js';
+import {captureTransferPath,renderTransferPath} from '../dist/transfer-path.js';
+import {REFERENCE_RG_METERS as RG} from '../dist/objects.js';
+import {BRIDGE_WORLD_LAYOUT} from '../dist/bridge-glsl.js';
+const dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),sub=(a,b)=>a.map((v,i)=>v-b[i]),unit=a=>a.map(v=>v/Math.hypot(...a));
+const close=(a,b,epsilon=1e-8)=>assert(Math.abs(a-b)<=epsilon*Math.max(1,Math.abs(b)),`${a} != ${b}`);
+const f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false});r.loadScene('shuttle-earth-moon-loop');
+const craft=r.objects.find(o=>o.type==='shuttle'),moon=r.objects.find(o=>o.name==='Moon');r.selectedId=craft.id;
+const preview=previewRoute(r,moon.id);assert(!preview.error);assert(preview.orbitRadiusMeters>moon.radiusMeters*1.04);assert(preview.orbitRadiusMeters<moon.radiusMeters*1.3);
+assert(beginRoute(r,moon.id));assert(r.transfer.points.departureTurns<=2&&r.transfer.points.arrivalTurns<=2);
+advanceRoute(r,2);r.fillObjects();r.updateCameraFrame();
+const body=r.getFocusFrame(craft.id),target=r.getFocusFrame(moon.id),firstObserver=[...r.cameraFrame.observer];
+assert(dot(unit(sub(body.position,r.cameraFrame.observer)),r.cameraFrame.forward)>.98,'Local path framing retains shuttle near image center');
+close(Math.hypot(...sub(r.cameraFrame.observer,body.position)),body.radius*r.camera.focusDistance);
+r.camera.yaw=r.target.yaw+=.3;r.updateCameraFrame();assert(Math.hypot(...sub(firstObserver,r.cameraFrame.observer))>body.radius*.1,'Orbit gestures move the observer around the craft');
+assert(dot(unit(sub(body.position,r.cameraFrame.observer)),r.cameraFrame.forward)>.98,'Local path framing retains shuttle near image center');
+const beforeLook=[...r.cameraFrame.forward];r.camera.lookYaw=r.target.lookYaw=.25;r.updateCameraFrame();assert(dot(beforeLook,r.cameraFrame.forward)<.99,'Manual look remains available');
+advanceRoute(r,3);r.fillObjects();r.updateCameraFrame();r.setDrawUniforms();
+assert.equal(routeState(r).stage,'Flip and burn');assert.equal(f.uniforms.get('uFlightMetrics').args[0],0,'Main engines are visibly off during midpoint turn');assert.notEqual(f.uniforms.get('uFlightMetrics').args[1],0,'RCS remains visible during the turn');
+const state=routeState(r);close(state.progressPercent,50);close(state.remainingProperSeconds,state.properSeconds-state.properElapsedSeconds);assert(state.pathPoints.length<=240);
+advanceRoute(r,1.25);r.fillObjects();r.updateCameraFrame();r.setDrawUniforms();assert.equal(routeState(r).stage,'Decelerating');close(f.uniforms.get('uFlightMetrics').args[0],.1);
+const before=[...r.cameraFrame.forward],observer=[...r.cameraFrame.observer];cancelRoute(r);r.updateCameraFrame();close(dot(before,r.cameraFrame.forward),1);close(Math.hypot(...sub(observer,r.cameraFrame.observer)),0);r.dispose();
+
+const bf=fixture(),bridge=new BlackHoleRenderer(bf.canvas,{autoStart:false,bindControls:false});bridge.loadScene('test-shuttle-bridge');bridge.state.paused=false;
+const ship=bridge.objects.find(o=>o.type==='shuttle'),b=bridge.configCache.bridgeRadius,plane=bridge.configCache.primaryBasis,center=plane[2].map(v=>v*BRIDGE_WORLD_LAYOUT.distance*b),radius=BRIDGE_WORLD_LAYOUT.radius*b;
+bridge.fillObjects();const parkingDistance=Math.hypot(...sub(bridge.getFocusFrame(ship.id).position,center));assert(parkingDistance>radius);assert(parkingDistance<radius*1.2,'Bridge world uses the same tight parking orbit');
+for(let i=0;i<120;i++)advanceAutopilot(bridge,.1);assert(bridge.transfer?.active);advanceBridgeAutopilot(bridge,bridge.transfer.wallSeconds*.5);bridge.fillObjects();bridge.updateCameraFrame();bridge.setDrawUniforms();
+assert.equal(routeState(bridge).stage,'Flip through gate');assert.equal(bf.uniforms.get('uFlightMetrics').args[0],0);assert.notEqual(bf.uniforms.get('uFlightMetrics').args[1],0);assert(Number.isFinite(routeState(bridge).remainingProperSeconds));assert(dot(unit(sub(bridge.getFocusFrame(ship.id).position,bridge.cameraFrame.observer)),bridge.cameraFrame.forward)>.98);bridge.dispose();
+
+const optics={origin:[0,0,0],observer:[0,0,10],forward:[0,0,-1],right:[1,0,0],up:[0,1,0],aspect:1.5,fov:1,width:900,height:600,bodies:[],holes:[],occluders:[],lensing:false,hideIndex:-1};
+const fake={cameraFrame:optics,focusMode:'track',focusId:'ship',getFocusFrame:()=>({id:'ship',type:'shuttle',frame:[[1,0,0],[0,1,0],[0,0,1]],position:[0,0,0],radius:.2}),transfer:{active:true},getTravelState:()=>({craftId:'ship',pathPoints:[[0,0,0],[1,0,0],[10000,0,0]].map(p=>p.map(v=>v*RG))})};
+const path=captureTransferPath(fake,optics);assert(path.segments.length);assert(path.segments.flat().every(p=>p.opacity>=.34));assert.match(renderTransferPath(path,900,600),/transfer-craft-silhouette/);
+console.log('PASS: tight exterior parking, bounded two-turn spirals, craft-relative path camera with manual override/cancel continuity, complete clock telemetry, GPU main-engine cutoff/RCS in both route types, and distance-faded path masking.');

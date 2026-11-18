@@ -2,9 +2,9 @@
 
 Snapshot: **25 October 2026**. These files are bundled data; the website does not contact the source services.
 
-The expanded Solar System preset contains **518 selectable entries**: the Sun, eight planets, 24 selected dwarf planets and smaller heliocentric bodies, 461 planetary satellites from JPL's census and Cassini observations, 14 additional satellites of selected small bodies, five ring systems, two statistical belts, an ISS and NASA Shuttle in illustrative Earth orbits, and a fictional Enterprise in lunar orbit. The 461-entry planetary table includes 172 proper names and 289 provisional designations. It covers the Moon, Mars (2), Jupiter (115), Saturn (293), Uranus (29), Neptune (16), and Pluto (5).
+The **Our Solar System** preset contains **513 natural entries**: the Sun, eight planets, 24 selected dwarf planets and smaller heliocentric bodies, 461 planetary satellites from JPL's census and Cassini observations, 14 additional satellites of selected small bodies, and five ring systems. **Traveling our Solar System**, in Spacecraft, adds a NASA Shuttle in an illustrative Earth orbit for **514 selectable entries**. Two statistical belts remain available through Objects but are omitted from both presets. The 461-entry planetary table includes 172 proper names and 289 provisional designations. It covers the Moon, Mars (2), Jupiter (115), Saturn (293), Uranus (29), Neptune (16), and Pluto (5).
 
-This is a broad teaching catalog, **not every object in the Solar System**. It does not instantiate the millions of asteroids/comets individually, every small-body binary, the Oort cloud, or spacecraft. Belt populations are statistical displays. New discoveries after the snapshot are not automatically added.
+This is a broad teaching catalog, **not every object in the Solar System**. It does not instantiate the millions of asteroids/comets individually, every small-body binary, the Oort cloud, or every spacecraft. Belt populations are statistical displays. New discoveries after the snapshot are not automatically added.
 
 ## Known values and explicitly unknown sizes
 
@@ -48,3 +48,16 @@ The Solar System around a black hole is fictional. Its Sun is placed at ten mill
 18. [Gakis & Gourgouliatos (2022), Pluto–Charon moon orbits](https://arxiv.org/abs/2202.13319), for the circumbinary interpretation and limits of Keplerian orbital elements.
 
 The catalog itself contains numerical records and references, not downloaded shape meshes. Surface maps are bundled separately with their own attribution. Numerical facts and original procedural implementations remain separate from the source agencies' names and marks.
+
+## The Alpha Centauri family
+
+Planet dispositions were checked against the NASA Exoplanet Archive on **30 October 2026**. The Proxima scene contains confirmed **Proxima Centauri b** and **d**, and the visibly labeled **c candidate**. The Alpha Centauri scene also includes stars A and B, the **A b candidate**, and the distant Proxima subsystem. The refuted Alpha Centauri B b signal is excluded. Candidates are not presented as confirmed planets.
+
+Proxima b and d use the 2025 NIRPS periods and radial-velocity minimum masses: 11.18465 days / 1.055 Earth masses and 5.12338 days / 0.260 Earth masses, respectively. Proxima c retains the 2020 candidate solution, approximately 1.48 AU and 1900 days. Exoplanet radii, surface geography, cloud bands, orbit inclinations, and starting phases are illustrative; their exact appearance is unknown. The Alpha Centauri A candidate uses one possible 1.9-AU orbit with an explicitly illustrative giant-planet mass and radius.
+
+A/B follow a simplified eccentric binary. Proxima is displayed as a separate subsystem at a fixed illustrative separation of 12,947 AU; its very slow motion around the A/B barycenter is omitted. This keeps all known members accessible without claiming to solve the triple system. Its own planets retain parent-relative motion.
+
+- [NASA Exoplanet Archive: Alpha/Proxima Centauri architecture and dispositions](https://exoplanetarchive.ipac.caltech.edu/overview/proxima%20centauri).
+- [Suárez Mascareño et al. (2025), Proxima b and d with NIRPS](https://www.aanda.org/articles/aa/pdf/2025/08/aa53728-25.pdf): confirms d and finds inconclusive evidence for c.
+- [NASA Webb: new evidence for an Alpha Centauri A planet candidate](https://science.nasa.gov/missions/webb/nasas-webb-finds-new-evidence-for-planet-around-closest-solar-twin/). The archive and the dedicated Proxima paper determine the confirmation labels used here.
+- [Kervella, Thévenin & Lovis (2017), Proxima’s orbit around Alpha Centauri](https://doi.org/10.1051/0004-6361/201629930): the stars are bound; the approximately 550,000-year outer orbit is much slower than the scene’s planetary motion.

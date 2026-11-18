@@ -6,7 +6,7 @@ import {fixture} from './render-fixture.mjs';
 import {REFERENCE_RG_METERS} from '../dist/objects.js';
 import {SCENE_PRESETS} from '../dist/config.js';
 const objects=solarBodies();
-assert.equal(objects.length,518);
+assert.equal(objects.length,517);
 assert.equal(SOLAR_PLANETS.length,8);assert.equal(SOLAR_MOONS.length,461);assert.equal(SOLAR_MINOR_BODIES.length,24);assert.equal(SOLAR_MINOR_MOONS.length,14);assert.equal(SOLAR_RINGS.length,5);
 assert.deepEqual(SOLAR_CATALOG_COUNTS,{planets:8,minorBodies:24,planetaryMoons:461,minorMoons:14,rings:5,unknownRadiusProxies:232});
 assert.deepEqual(SOLAR_MOONS.reduce((a,o)=>(a[o.parentKey]=(a[o.parentKey]||0)+1,a),{}),{earth:1,mars:2,jupiter:115,saturn:293,uranus:29,neptune:16,pluto:5});
@@ -27,9 +27,9 @@ for(const moon of SOLAR_MOONS.filter(o=>!o.physicalRadiusKnown)){assert.equal(mo
 const again=solarBodies();again[1].shapeAxes[0]=99;assert.notEqual(SOLAR_PLANETS[0].shapeAxes[0],99,'Preset shape arrays never mutate catalog reference data');
 const hypothetical=solarBodies(true);assert.equal(hypothetical[0].parentId,'primary');assert.equal(hypothetical[0].radius,1e7);
 const hill=hypothetical[0].radius*(1.47662504e3*4.3e6)*Math.cbrt(1/(3*4.3e6)),sedna=byName('Sedna');assert(hill>sedna.orbitMeters*(1+sedna.eccentricity),'Hypothetical Hill radius exceeds Sedna aphelion');
-assert.equal(SCENE_PRESETS.find(s=>s.id==='solar-system').objects.length,518);assert(!SCENE_PRESETS.some(s=>s.id==='solar-system-blackhole'),'Removed gallery scene does not remove catalog or hierarchy support');
+assert.equal(SCENE_PRESETS.find(s=>s.id==='solar-system').objects.length,515);assert(!SCENE_PRESETS.some(s=>s.id==='solar-system-blackhole'),'Removed gallery scene does not remove catalog or hierarchy support');
 const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});r.loadScene('solar-system');r.render();
-assert.equal(r.objects.length,518,'The renderer retains the entire catalog');assert.equal(r.objectFrames.length,518);assert.equal(r.getObjects().length,518);assert.equal(r.getObjectTree().length,519);
+assert.equal(r.objects.length,515,'The renderer retains all named bodies and omits the optional statistical belts');assert.equal(r.objectFrames.length,515);assert.equal(r.getObjects().length,515);assert.equal(r.getObjectTree().length,516);
 const runtimeByName=name=>r.objects.find(o=>o.name===name);
 for(const name of ['Earth','Moon','Saturn','Pluto','Charon','S/2009 S 1','Sedna','Arrokoth','S/2023 S 1']){const body=runtimeByName(name);assert(body,`${name} exists in loaded catalog`);assert(r.focusTarget(body.id,'track'));r.render();assert(r.validateFrameGeometry(),`${name} inspection has finite geometry`);assert(r.getFocusFrame(body.id).index>=0,`${name} remains in the visible GPU selection`);assert(r.objectCount<=MAX_RENDER_OBJECTS);assert(r.focusTarget(body.id,'onboard'));r.render();assert(r.validateFrameGeometry(),`${name} surface camera has finite geometry`);}
 for(const moon of r.objects.filter(o=>o.type==='moon')){assert(r.getFocusFrame(moon.id),`${moon.name} has a world frame`);assert(moon.parentId&&moon.parentId!=='space',`${moon.name} retains its actual parent`);}
@@ -38,4 +38,4 @@ assert.equal(runtimeByName('Charon').parentId,runtimeByName('Pluto').id);assert.
 const pluto=runtimeByName('Pluto'),charon=runtimeByName('Charon');
 for(const name of ['Styx','Nix','Kerberos','Hydra']){const moon=runtimeByName(name);r.updateObject(moon.id,{phase:0});r.fillObjects();const pp=r.getFocusFrame(pluto.id).position,pc=r.getFocusFrame(charon.id).position,bary=pp.map((v,i)=>(v*pluto.massSolar+pc[i]*charon.massSolar)/(pluto.massSolar+charon.massSolar));const radius=Math.hypot(...r.getFocusFrame(moon.id).position.map((v,i)=>v-bary[i]))*REFERENCE_RG_METERS;assert(Math.abs(radius-moon.orbitMeters*(1-moon.eccentricity))<.005,`${name} orbits the Pluto–Charon barycenter`);}
 const ariel=runtimeByName('Ariel'),uranus=runtimeByName('Uranus'),basis=r.configCache.primaryBasis,tilt=uranus.axialTilt*Math.PI/180,north=basis[1].map((v,i)=>v*Math.cos(tilt)+basis[2][i]*Math.sin(tilt));r.fillObjects();const delta=r.getFocusFrame(ariel.id).position.map((v,i)=>v-r.getFocusFrame(uranus.id).position[i]);assert(Math.abs(delta.reduce((a,v,i)=>a+v*north[i],0))/Math.hypot(...delta)<1e-8,'Ariel orbit uses Uranus equator');r.dispose();
-console.log('PASS: 518-entry offline catalog, 461 unique planetary moons from JPL and Cassini, parent closure, all five Pluto moons, physical profiles/shapes, explicit unknown-size proxies, outer-orbit consistency, all 518 renderer objects, bounded GPU slots, and finite inspected cameras.');
+console.log('PASS: 517-entry offline catalog, 461 unique planetary moons from JPL and Cassini, parent closure, all five Pluto moons, physical profiles/shapes, explicit unknown-size proxies, outer-orbit consistency, all 515 default renderer objects, bounded GPU slots, and finite inspected cameras.');

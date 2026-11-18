@@ -1,5 +1,55 @@
 // Compact Alcubierre-shape-inspired optical visualization, not a null-geodesic
 // solution of the metric. The physical warp factor is not used as a ray speed.
+// One surface definition for the precision, world, and wormhole charts.
+export const warpGridSurface=(shape='warpShape(radial).x')=>`
+float warpGridHeight(vec3 q){
+ float r=length(q.xz),s=max(1.0,uWarpThickness);
+ return -.34*uWarpStrength*q.x*exp(-pow((r-1.0)*s*.70,2.0))*(1.0-smoothstep(2.0,2.5,r));
+}
+vec2 warpGridGradient(vec3 q){
+ float r=max(length(q.xz),1e-5),b=.70*max(1.0,uWarpThickness);
+ float e=exp(-pow((r-1.0)*b,2.0)),t=clamp((r-2.0)*2.0,0.0,1.0);
+ float cut=1.0-t*t*(3.0-2.0*t),dc=-12.0*t*(1.0-t);
+ float radial=e*(-2.0*b*b*(r-1.0)*cut+dc);
+ return -.34*uWarpStrength*(vec2(e*cut,0)+q.x*radial*q.xz/r);
+}
+vec4 warpGridAt(vec3 q,vec3 ro,vec3 rd,float travel){
+ float radial=length(q.xz),f=${shape};
+ vec2 local=q.xz;local.x+=.20*uWarpStrength*q.x*f;
+ vec2 orientation=uWarpGridRotation;
+ vec2 position=mat2(orientation.x,orientation.y,-orientation.y,orientation.x)*local+uWarpGridOffset;
+ float footprint=max(.0005,travel/uResolution.y*.55);
+ vec2 gradient=warpGridGradient(q);vec3 normal=vec3(-gradient.x,1,-gradient.y);
+ float incidence=dot(normal,rd),denom=abs(incidence)<.035?(incidence<0.0?-.035:.035):incidence;
+ vec3 ex=vec3(orientation.x,0,-orientation.y),ez=vec3(orientation.y,0,orientation.x);
+ vec2 widths=footprint*vec2(length(ex-normal*dot(ex,rd)/denom),length(ez-normal*dot(ez,rd)/denom));
+ float projected=max(widths.x,widths.y);
+ // Dyadic line spacing makes distant cells readable without a separate patch.
+ // Cross-fading adjacent resolutions prevents abrupt scale changes on zoom.
+ float level=max(0.0,log2(max(1.0,projected*24.0/.25)));
+ float spacing=.25*exp2(floor(level)),blend=fract(level);
+ vec2 cell0=abs(fract(position/spacing+.5)-.5)*spacing;
+ vec2 cell1=abs(fract(position/(spacing*2.0)+.5)-.5)*(spacing*2.0);
+ vec2 width=max(vec2(.0018),widths*.80);
+ vec2 fineAxes=vec2(1)-smoothstep(width,width*2.1,cell0);
+ vec2 coarseAxes=vec2(1)-smoothstep(width,width*2.1,cell1);
+ float fine=max(fineAxes.x,fineAxes.y),coarse=max(coarseAxes.x,coarseAxes.y);
+ float line=mix(fine,coarse,smoothstep(.15,.85,blend));
+ // Fade the exterior sheet as its displacement and slope settle back to zero.
+ float deformation=max(abs(warpGridHeight(q)),length(gradient));
+ line*=mix(1.0,smoothstep(.012,.10,deformation),smoothstep(.98,1.02,radial));
+ float horizonFade=smoothstep(.015,.10,abs(incidence)/length(normal));
+ vec3 hue=mix(vec3(1.0,.36,.075),vec3(.075,.62,1.15),smoothstep(-.18,.18,q.x));
+ float wall=exp(-pow((radial-1.0)*2.5,2.0))*min(1.0,uWarpStrength);
+ hue=mix(vec3(.17,.28,.41),hue,wall);
+ return vec4(hue*line*horizonFade*.43,line*horizonFade*.07);
+}
+float warpSheet(vec3 q){return q.y+.35-warpGridHeight(q);}
+`;
+export const WARP_PATCH_GLSL=`
+float warpPatchCoverage=0.0;
+float warpPatchWeight(float radius){return 1.0-smoothstep(2.5,4.0,radius);}
+`;
 export const WARP_FIELD_GLSL = `
 bool localWarpPass(){return uWarpObjectIndex>=0&&(uWarpFlags.w<.5||uInspectIndex==uWarpObjectIndex||uHideObjectIndex==uWarpObjectIndex);}
 float safeTanh(float x){return 2.0/(1.0+exp(-2.0*clamp(x,-12.0,12.0)))-1.0;}
@@ -27,17 +77,7 @@ vec3 warpFrame(vec3 q){
  if(length(up)<.01)up=vec3(0,1,0)-x*x.y;
  vec3 y=unit(up),z=unit(cross(x,y));return vec3(dot(q,x),dot(q,y),dot(q,z));
 }
-float warpGridHeight(vec3 q){
- float r=length(q.xz),s=max(1.0,uWarpThickness);
- return -.34*uWarpStrength*q.x*exp(-pow((r-1.0)*s*.70,2.0))*(1.0-smoothstep(2.0,2.5,r));
-}
-vec2 warpGridGradient(vec3 q){
- float r=max(length(q.xz),1e-5),b=.70*max(1.0,uWarpThickness);
- float e=exp(-pow((r-1.0)*b,2.0)),t=clamp((r-2.0)*2.0,0.0,1.0);
- float cut=1.0-t*t*(3.0-2.0*t),dc=-12.0*t*(1.0-t);
- float radial=e*(-2.0*b*b*(r-1.0)*cut+dc);
- return -.34*uWarpStrength*(vec2(e*cut,0)+q.x*radial*q.xz/r);
-}
+
 vec4 warpAppearance(vec3 a,vec3 b,float travel){
  vec3 q=(a+b)*.5;float radius=length(q);if(radius>2.5)return vec4(0);
  vec3 oriented=warpFrame(q);float front=dot(q,unit(uWarpAxis))/max(radius,.001);
@@ -55,37 +95,8 @@ vec4 warpAppearance(vec3 a,vec3 b,float travel){
 }
 // One connected reference surface extends through the bubble to the flat far
 // field. Only its local displacement moves with the ship: grid coordinates
-// remain anchored in the world through a CPU-double phase offset. Manual
-// Drive uses a bounded, integrated rolling phase to avoid aliasing at warp.
-vec4 warpGridAt(vec3 q,vec3 ro,vec3 rd,float travel){
- float radial=length(q.xz),f=warpShape(radial).x;
- vec2 local=q.xz;local.x+=.20*uWarpStrength*q.x*f;
- vec2 orientation=uWarpGridRotation;
- vec2 position=mat2(orientation.x,orientation.y,-orientation.y,orientation.x)*local+uWarpGridOffset;
- float footprint=max(.0005,travel/uResolution.y*.55);
- vec2 gradient=warpGridGradient(q);vec3 normal=vec3(-gradient.x,1,-gradient.y);
- float incidence=dot(normal,rd),denom=abs(incidence)<.035?(incidence<0.0?-.035:.035):incidence;
- vec3 ex=vec3(orientation.x,0,-orientation.y),ez=vec3(orientation.y,0,orientation.x);
- vec2 widths=footprint*vec2(length(ex-normal*dot(ex,rd)/denom),length(ez-normal*dot(ez,rd)/denom));
- float projected=max(widths.x,widths.y);
- // Dyadic line spacing makes distant cells readable without a separate patch.
- // Cross-fading adjacent resolutions prevents abrupt scale changes on zoom.
- float level=max(0.0,log2(max(1.0,projected*24.0/.25)));
- float spacing=.25*exp2(floor(level)),blend=fract(level);
- vec2 cell0=abs(fract(position/spacing+.5)-.5)*spacing;
- vec2 cell1=abs(fract(position/(spacing*2.0)+.5)-.5)*(spacing*2.0);
- vec2 width=max(vec2(.0018),widths*.80);
- vec2 fineAxes=vec2(1)-smoothstep(width,width*2.1,cell0);
- vec2 coarseAxes=vec2(1)-smoothstep(width,width*2.1,cell1);
- float fine=max(fineAxes.x,fineAxes.y),coarse=max(coarseAxes.x,coarseAxes.y);
- float line=mix(fine,coarse,smoothstep(.15,.85,blend));
- float horizonFade=smoothstep(.015,.10,abs(incidence)/length(normal));
- vec3 hue=mix(vec3(1.0,.36,.075),vec3(.075,.62,1.15),smoothstep(-.18,.18,q.x));
- float wall=exp(-pow((radial-1.0)*2.5,2.0))*min(1.0,uWarpStrength);
- hue=mix(vec3(.17,.28,.41),hue,wall);
- return vec4(hue*line*horizonFade*.43,line*horizonFade*.07);
-}
-float warpSheet(vec3 q){return q.y+.35-warpGridHeight(q);}
+// use the laboratory phase, independent of astronomical translation.
+${warpGridSurface()}
 // Sample the sheet along the same curved ray segments as the field. The
 // former independent 128-sample straight overlay was both costly and unlensed.
 vec4 warpGridSegment(vec3 start,vec3 end,float travelled){
@@ -104,19 +115,25 @@ vec4 warpGridSegment(vec3 start,vec3 end,float travelled){
  vec4 grid=warpGridAt(hit,a,direction,travelled+length(end-start)*t);
  // In a combined scene the common BH chart supplies the distant grid. Keep
  // this precision chart local to the bubble rather than drawing two planes.
- if(uWarpFlags.w>.5)grid*=1.0-smoothstep(1.6,2.5,length(hit.xz));
+ if(uWarpGridLocalPatch>.5){
+  float weight=warpPatchWeight(length(hit.xz));warpPatchCoverage=max(warpPatchCoverage,weight);grid*=weight;
+ }
  return grid;
 }
 vec4 warpGridExterior(vec3 camera,vec3 direction,float minimum,float maximum,float travelled){
- if(uFlags.x<.5||uWarpFlags.w>.5)return vec4(0);
+ if(uFlags.x<.5)return vec4(0);
 
  vec3 ro=warpFrame(camera),rd=warpFrame(direction);
  if(abs(rd.y)<.00001)return vec4(0);
  float t=(-.35-ro.y)/rd.y;
  if(t<=minimum||t>=maximum)return vec4(0);
  vec3 q=ro+rd*t;
- if(length(q.xz)<2.499)return vec4(0);
- return warpGridAt(q,ro,rd,travelled+t);
+ // The flat sheet is handled here only outside the local ray-march sphere.
+ if(uWarpGridLocalPatch>.5?dot(q,q)<2.5*2.5:length(q.xz)<2.499)return vec4(0);
+ float weight=uWarpGridLocalPatch>.5?warpPatchWeight(length(q.xz)):1.0;
+ if(weight<=0.0)return vec4(0);
+ if(uWarpGridLocalPatch>.5)warpPatchCoverage=max(warpPatchCoverage,weight);
+ return weight*warpGridAt(q,ro,rd,travelled+t);
 }
 vec3 warpWorldForce(vec3 p,vec3 d){
  if(uWarpFlags.x<.5||localWarpPass()||uFlags.z<.5||uWarpRadius<1e-20)return vec3(0);
@@ -128,7 +145,11 @@ vec4 warpWorldAppearance(vec3 p,vec3 previous,float dt){
 }
 `;
 
-export const WARP_TRACE_GLSL = `
+export function warpTraceGLSL({nebulaVolume=false}={}){return `
+${nebulaVolume?`// The same fixed cloud bins follow the existing bent local ray.
+float nebulaVolumeRange();
+void nebulaVolumeSegment(vec3 start,vec3 end,bool other,inout float distance,inout float sampleIndex,inout vec4 cached,inout vec3 color,inout float transmission);`:''}
+
 // The tiny physical field is traced in bubble-radius coordinates. uWarpObserver
 // is calculated in CPU doubles, so a 300m ship near a million-solar-mass hole
 // does not disappear through subtraction of nearly equal shader floats.
@@ -136,15 +157,23 @@ void warpLocalTrace(vec3 original,out vec3 direction,out vec3 emission,out float
  direction=original;emission=vec3(0);transmission=1.0;hitShip=false;
  if(!localWarpPass())return;
  vec3 q=uWarpObserver,metricColor=vec3(0);
+ ${nebulaVolume?'float cloudDistance=0.0,cloudSample=-1.0;vec4 cloudCache=vec4(0);':''}
  float forward=-dot(q,direction),impact2=dot(cross(q,direction),cross(q,direction));
  float extent=2.5;
- if(impact2>extent*extent){vec4 grid=warpGridExterior(q,direction,0.0,1e20,0.0);emission=grid.rgb;transmission=1.0-grid.a;return;}
+ if(impact2>extent*extent){
+  ${nebulaVolume?'nebulaVolumeSegment(uObserver,uObserver+direction*nebulaVolumeRange(),false,cloudDistance,cloudSample,cloudCache,emission,transmission);':''}
+  vec4 grid=warpGridExterior(q,direction,0.0,1e20,0.0);emission+=transmission*grid.rgb;transmission*=1.0-grid.a;return;
+ }
  float halfChord=sqrt(max(0.0,extent*extent-impact2));
  float entry=forward-halfChord,leave=forward+halfChord;
- if(leave<0.0){vec4 grid=warpGridExterior(q,direction,0.0,1e20,0.0);emission=grid.rgb;transmission=1.0-grid.a;return;}
+ if(leave<0.0){
+  ${nebulaVolume?'nebulaVolumeSegment(uObserver,uObserver+direction*nebulaVolumeRange(),false,cloudDistance,cloudSample,cloudCache,emission,transmission);':''}
+  vec4 grid=warpGridExterior(q,direction,0.0,1e20,0.0);emission+=transmission*grid.rgb;transmission*=1.0-grid.a;return;
+ }
  float travelled=max(0.0,entry);
  if(entry>0.0){
-  vec4 grid=warpGridExterior(q,direction,0.0,entry,0.0);emission=grid.rgb;transmission=1.0-grid.a;
+  ${nebulaVolume?'nebulaVolumeSegment(uObserver,uObserver+direction*entry*uWarpRadius,false,cloudDistance,cloudSample,cloudCache,emission,transmission);':''}
+  vec4 grid=warpGridExterior(q,direction,0.0,entry,0.0);emission+=transmission*grid.rgb;transmission*=1.0-grid.a;
   q+=direction*(entry+.00001);
  }
  vec4 body=vec4(0),tint=vec4(0);vec2 heading=vec2(1,0);
@@ -173,6 +202,7 @@ void warpLocalTrace(vec3 original,out vec3 direction,out vec3 emission,out float
     if(uSpectrum==5)objectColor.rgb=vec3(.52,.88,1.35)*(1.0-smoothstep(.13,.32,abs(dot(surface.normal,rd))));
    }
   }
+  ${nebulaVolume?'nebulaVolumeSegment(uWarpCenter+previous*uWarpRadius,uWarpCenter+q*uWarpRadius,false,cloudDistance,cloudSample,cloudCache,emission,transmission);':''}
   vec4 appearance=warpAppearance(previous,q,dt);emission+=transmission*appearance.rgb;transmission*=1.0-appearance.a;
   vec4 grid=warpGridSegment(previous,q,travelled);emission+=transmission*grid.rgb;transmission*=1.0-grid.a;
   metricColor=max(metricColor,transmission*diagnosticSegment(uWarpCenter+previous*uWarpRadius,uWarpCenter+q*uWarpRadius,travelled*uWarpRadius,.83/uResolution.y));
@@ -180,14 +210,16 @@ void warpLocalTrace(vec3 original,out vec3 direction,out vec3 emission,out float
   if(hitShip){emission+=transmission*objectColor.rgb+metricColor;transmission=0.0;return;}
  }
  vec4 grid=warpGridExterior(q,direction,0.0,1e20,travelled);emission+=transmission*grid.rgb+metricColor;transmission*=1.0-grid.a;
+ ${nebulaVolume?'vec3 cloudExit=uWarpCenter+q*uWarpRadius;nebulaVolumeSegment(cloudExit,cloudExit+direction*max(0.0,nebulaVolumeRange()-cloudDistance),false,cloudDistance,cloudSample,cloudCache,emission,transmission);':''}
 }
-`;
+`;}
+export const WARP_TRACE_GLSL=warpTraceGLSL();
 
 // Grid work is absent from programs where the global grid is off. Replacing
 // this contiguous section also keeps the cold compiler from parsing its roots.
 export function warpFieldGLSL({grid=false}={}) {
  if(grid)return WARP_FIELD_GLSL;
- const start=WARP_FIELD_GLSL.indexOf('vec4 warpGridAt('),end=WARP_FIELD_GLSL.indexOf('vec3 warpWorldForce(');
+ const start=WARP_FIELD_GLSL.indexOf('float warpGridHeight('),end=WARP_FIELD_GLSL.indexOf('vec3 warpWorldForce(');
  return WARP_FIELD_GLSL.slice(0,start)+`
 vec4 warpGridSegment(vec3 start,vec3 end,float travelled){return vec4(0);}
 vec4 warpGridExterior(vec3 camera,vec3 direction,float minimum,float maximum,float travelled){return vec4(0);}

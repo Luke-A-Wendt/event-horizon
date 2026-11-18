@@ -1,5 +1,6 @@
+import './fixtures/shuttle-bridge.mjs';
 import assert from 'node:assert/strict';
-import {bridgeJourney,bridgeConformal,HEIGHLINER_PASSAGE,BRIDGE_VEHICLE_CAMERA} from '../dist/bridge-math.js';
+import {bridgeJourney,bridgeConformal,HEIGHLINER_PASSAGE} from '../dist/bridge-math.js';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {CpuRenderer} from '../dist/cpu-renderer.js';
 import {CpuCommandCanvas} from '../dist/cpu-commands.js';
@@ -21,13 +22,17 @@ for(const Cls of [BlackHoleRenderer,CpuRenderer]){
  const f=fixture(),canvas=Cls===CpuRenderer?new CpuCommandCanvas():f.canvas;
  if(Cls===CpuRenderer)canvas.getBoundingClientRect=f.canvas.getBoundingClientRect;
  const r=new Cls(canvas,{autoStart:false,bindControls:false});
- for(const scene of ['bridge','bridge-nebulae','bridge-earth-proxima']){
+ for(const scene of ['bridge','bridge-nebulae','test-shuttle-bridge']){
   r.loadScene(scene);assert.equal(r.state.viewMode,'orbit');assert.equal(r.focusMode,'track');
-  r.cameraFrame.inspectCamera.forEach((v,i)=>near(v,[0,1.44,-4.32][i]));
+  // Surface-world fixtures start in a parking orbit with their orbital limb view.
+  const initial=[...r.cameraFrame.inspectCamera];
+  if(scene==='test-shuttle-bridge')assert(initial[0]<-3&&initial[1]>0&&initial[2]>0);
+  const expected=scene==='bridge'?[0,0,-5.4]:scene==='bridge-nebulae'?[-5,0,0]:initial;
+  r.cameraFrame.inspectCamera.forEach((v,i)=>near(v,expected[i]));
   const eye=r.cameraFrame.inspectCamera,forward=r.cameraFrame.inspectForward;
-  near(eye.reduce((sum,v,i)=>sum+v*forward[i],0),-BRIDGE_VEHICLE_CAMERA.focusDistance);
-  r.rotate(.25,.1);assert.equal(r.focusMode,'track');assert(r.target.yaw!==BRIDGE_VEHICLE_CAMERA.yaw);
-  r.resetCamera();r.cameraFrame.inspectCamera.forEach((v,i)=>near(v,[0,1.44,-4.32][i]));
+  near(eye.reduce((sum,v,i)=>sum+v*forward[i],0),-Math.hypot(...expected));
+  const yaw=r.target.yaw;r.rotate(.25,.1);assert.equal(r.focusMode,'track');assert(r.target.yaw!==yaw);
+  r.resetCamera();r.cameraFrame.inspectCamera.forEach((v,i)=>near(v,expected[i]));
  }
  r.loadScene('bridge-blackhole');r.setBridgeTraveler('shuttle');
  assert.equal(r.focusId,r.bridgeObjectId);assert.equal(r.focusMode,'track');
@@ -45,4 +50,4 @@ for(const Cls of [BlackHoleRenderer,CpuRenderer]){
  for(const time of [0,4,7,20,34,40]){r.time=time;r.fillObjects();r.updateCameraFrame();assert(r.validateFrameGeometry());}
  r.dispose();
 }
-console.log('PASS: short symmetric Heighliner crossing; consistent behind-vehicle orbit camera, reset and traveler replacement on GPU/CPU.');
+console.log('PASS: short symmetric Heighliner crossing; scene-specific camera presets, reset and traveler replacement on GPU/CPU.');

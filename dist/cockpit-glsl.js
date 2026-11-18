@@ -66,7 +66,7 @@ vec3 cockpitSwitches(vec2 q,vec3 color){
 }
 vec4 shuttleCockpit(vec3 localEye,vec3 localRay,vec3 environment){
  vec3 ro=localEye,rd=unit(localRay);
- CraftSurface s;s.t=1000.0;s.normal=vec3(0);s.albedo=vec3(.30,.32,.29);s.material=30.0;
+ CraftSurface s;s.t=1000.0;s.normal=vec3(0);s.albedo=vec3(.30,.32,.29);s.material=30.0;s.detail=uDetail;
  vec4 enclosure=boxHit(ro,rd,vec3(0,.054,.460),vec3(.127,.091,.150));
  selectSurface(enclosure,vec3(.31,.33,.30),30.0,s);
  // Same sloped center and wraparound windscreen planes as the outer hull,

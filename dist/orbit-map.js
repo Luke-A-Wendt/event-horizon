@@ -1,5 +1,6 @@
 // An explicitly rescaled educational chart. It never changes scene geometry.
 import { REFERENCE_RG_METERS } from './objects.js';
+import { objectCategory,mapCategoryVisible } from './object-taxonomy.js';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
@@ -22,25 +23,39 @@ export function orbitSliderValue(radius,minimum,maximum,reference=1,logarithmic=
  const lo=Math.log1p(Math.max(0,minimum)/reference),hi=Math.log1p(Math.max(minimum,maximum)/reference);
  return hi>lo?clamp((Math.log1p(Math.max(0,radius)/reference)-lo)/(hi-lo),0,1):0;
 }
-export function mapModel(renderer,centerId){
+export function mapModel(renderer,centerId,{filters=null}={}){
  const nodes=renderer?.getObjectTree?.()||[],frames=renderer?.objectFrames||[],nodeMap=new Map(nodes.map(n=>[n.id,n])),frameMap=new Map(frames.map(f=>[f.id,f]));
  let id=centerId;
- if(!id)id=frames.find(f=>f.type==='star'&&nodeMap.get(f.id)?.parentId==='space')?.id||frames.find(f=>nodeMap.get(f.id)?.parentId==='space')?.id||(renderer?.state?.blackHole?'primary':'space');
+ if(!id)id='space';
  if(!nodeMap.has(id))id='space';
  const space={id:'space',position:[0,0,0],radius:1/REFERENCE_RG_METERS,type:'space',frame:[[1,0,0],[0,1,0],[0,0,1]]};
  const getFrame=key=>key==='space'?space:frameMap.get(key)||renderer?.getFocusFrame?.(key);
  const center=getFrame(id)||space;
  const allObjects=renderer?.objects||[],objectMap=new Map(allObjects.map(o=>[o.id,o]));
  const xAxis=center.frame?.[0]||[1,0,0],yAxis=center.frame?.[2]||[0,0,1];
- const body=frame=>{const original=objectMap.get(frame.id)||frame,node=nodeMap.get(frame.id),relative=frame.position.map((x,i)=>x-center.position[i]),velocity=frame.velocity?.map((x,i)=>x-(center.velocity?.[i]||0)),radius=Math.hypot(...relative)*REFERENCE_RG_METERS;let massSolar=frame.id==='planet'?(renderer.state.planetMass||1)*3.00349e-6:original.massSolar??(frame.type==='space'?0:renderer.objectMassSolar?.(original))??(frame.type==='star'?1:0);if(['primary','secondary'].includes(frame.id))massSolar=frame.massSolar??renderer.state.mass*1e6*(frame.id==='secondary'?renderer.state.binaryRatio:1);return{id:frame.id,parentId:node?.parentId,name:node?.label||original.name||frame.type,type:node?.type||frame.type,radiusMeters:original.radiusMeters?original.radiusMeters*(original.scale||1):(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS,distanceMeters:radius,x:dot(relative,xAxis)*REFERENCE_RG_METERS,y:dot(relative,yAxis)*REFERENCE_RG_METERS,vx:velocity?dot(velocity,xAxis)*REFERENCE_RG_METERS:null,vy:velocity?dot(velocity,yAxis)*REFERENCE_RG_METERS:null,color:original.color||(['star','blackhole','hole'].includes(frame.type)?'#ffe1a0':'#8ebfe6'),massSolar,dataNote:original.dataNote||'',eccentricity:original.eccentricity||0,innerRadiusRatio:original.innerRadiusRatio||.55};};
- const entries=nodes.filter(n=>n.parentId===id).map(n=>getFrame(n.id)).filter(Boolean).map(body),children=entries.filter(b=>!['disk','jets','belt','ring','dyson','warp','bridge'].includes(b.type)),attachments=entries.filter(b=>['ring','belt','disk','dyson'].includes(b.type)),host=body(center);
- return{centerId:id,parentId:nodeMap.get(id)?.parentId||null,host,children,attachments,entries,maximum:Math.max(host.radiusMeters*5,...children.map(b=>Math.max(b.distanceMeters*1.1,b.radiusMeters*3)),...attachments.map(b=>b.radiusMeters*1.1)),nodes};
+ const body=frame=>{
+  const original=objectMap.get(frame.id)||frame,node=nodeMap.get(frame.id);
+  const relative=frame.position.map((x,i)=>x-center.position[i]),velocity=frame.velocity?.map((x,i)=>x-(center.velocity?.[i]||0));
+  // Built-in discs and jets share their owner's tracking frame, not its mass or horizon.
+  const attachment=['disk','jets','ring','belt','dyson'].includes(frame.type);
+  const compact=frame.collapsed&&!attachment&&(frame.horizonRadius||frame.radius)>0;
+  let massSolar=attachment?(objectMap.get(frame.id)?.massSolar||0):frame.massSolar??original.massSolar;
+  if(massSolar==null)massSolar=frame.id==='planet'?(renderer.state.planetMass||1)*3.00349e-6:['space','waypoint','bridge'].includes(frame.type)?0:renderer.objectMassSolar?.(original)??(frame.type==='star'?1:0);
+  return {id:frame.id,parentId:node?.parentId,name:node?.label||original.name||frame.type,type:node?.type||frame.type,
+   horizonMeters:compact?(frame.horizonRadius||frame.radius)*REFERENCE_RG_METERS:null,category:objectCategory(original),
+   radiusMeters:original.radiusMeters?original.radiusMeters*(original.scale||1):(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS,
+   distanceMeters:Math.hypot(...relative)*REFERENCE_RG_METERS,x:dot(relative,xAxis)*REFERENCE_RG_METERS,y:dot(relative,yAxis)*REFERENCE_RG_METERS,
+   vx:velocity?dot(velocity,xAxis)*REFERENCE_RG_METERS:null,vy:velocity?dot(velocity,yAxis)*REFERENCE_RG_METERS:null,
+   color:original.color||(['star','blackhole','hole'].includes(frame.type)?'#ffe1a0':'#8ebfe6'),massSolar,dataNote:original.dataNote||'',eccentricity:original.eccentricity||0,innerRadiusRatio:original.innerRadiusRatio||.55};
+ };
+ const allEntries=nodes.filter(n=>n.parentId===id).map(n=>getFrame(n.id)).filter(Boolean).map(body),entries=allEntries.filter(b=>mapCategoryVisible(b,filters)),children=entries.filter(b=>!['disk','jets','belt','ring','dyson','warp','bridge'].includes(b.type)),attachments=entries.filter(b=>['ring','belt','disk','dyson'].includes(b.type)),host=body(center);
+ return{centerId:id,parentId:nodeMap.get(id)?.parentId||null,host,children,attachments,entries,allEntries,filters,hiddenCount:allEntries.length-entries.length,maximum:Math.max(host.radiusMeters*5,...children.map(b=>Math.max(b.distanceMeters*1.1,b.radiusMeters*3)),...attachments.map(b=>b.radiusMeters*1.1)),nodes};
 }
 export function renderOrbitMap(model,{logDistance=true,logSize=true,amplification=6,grid=true,annotations=true,metrics=annotations,selectedId=null,viewportWidth=900}={}){
  const {host,children,maximum}=model,width=clamp(viewportWidth,300,1000),height=width<600?Math.max(360,width):600,cx=width/2,cy=height/2,extent=Math.min(width*.32,height*.4),reference=Math.max(host.radiusMeters,maximum*1e-6,1),project=r=>extent*mapRadius(r,maximum,reference,logDistance);
  const majorPlanets=new Set(['Mercury','Venus','Earth','Mars','Jupiter','Saturn','Uranus','Neptune']);
  const prominent=new Set(children.filter(b=>!/^S\s*\//i.test(b.name)).sort((a,b)=>b.radiusMeters-a.radiusMeters).slice(0,children.length>60?8:14).map(b=>b.id));
- const priority=b=>b.id===selectedId?1000:majorPlanets.has(b.name)?100:prominent.has(b.id)?10:0;
+ const priority=b=>b.id===selectedId?1000:b.type==='waypoint'?110:majorPlanets.has(b.name)?100:prominent.has(b.id)?10:0;
  const f=n=>Number(n).toFixed(2),parts=[`<svg class="orbit-map-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Rescaled top-down orbit map around ${escape(host.name)}"><defs><radialGradient id="map-host-glow"><stop stop-color="${escape(host.color)}" stop-opacity=".36"/><stop offset="1" stop-color="${escape(host.color)}" stop-opacity="0"/></radialGradient><marker id="map-velocity-tip" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L9 5L0 10" fill="none" stroke="#edcc88" stroke-width="1.8"/></marker></defs>`];
  if(grid){
   for(let i=1;i<=5;i++){const radius=extent*i/5;parts.push(`<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="#284257" stroke-width=".8"/>`);}
@@ -62,9 +77,9 @@ export function renderOrbitMap(model,{logDistance=true,logSize=true,amplificatio
  const candidates=[];
  for(const b of [...children].sort((a,b)=>b.distanceMeters-a.distanceMeters)){
   const r=project(b.distanceMeters),a=Math.atan2(b.y,b.x),x=cx+Math.cos(a)*r,y=cy-Math.sin(a)*r,s=size(b)*(children.length>60?.65:1),selected=b.id===selectedId;
-  parts.push(`<circle cx="${cx}" cy="${cy}" r="${f(r)}" fill="none" stroke="${selected?'#9fd1f5':'#64819c'}" stroke-opacity="${selected?'.7':priority(b)>=10?'.24':'.045'}" stroke-width="${selected?'1.4':'.8'}" ${b.eccentricity>.03?'stroke-dasharray="3 5"':''}/>`);
-  if(metrics&&(priority(b)>=10||selected)){const v=mapProjectedVelocity(b.x,b.y,b.vx??-b.y,b.vy??b.x,maximum,reference,extent,logDistance),length=Math.hypot(...v),scale=(width<500?16:26)/Math.max(length,1e-25);if(length>1e-25)parts.push(`<path d="M${f(x)} ${f(y)}l${f(v[0]*scale)} ${f(v[1]*scale)}" fill="none" stroke="#edcc88" stroke-opacity=".78" stroke-width="1.2" marker-end="url(#map-velocity-tip)"/>`);}
-  parts.push(`<g class="map-body" data-map-object="${escape(b.id)}" role="button" tabindex="0" aria-label="Select ${escape(b.name)}"><title>${escape(b.name)} · ${(b.distanceMeters/149597870700).toPrecision(4)} AU from ${escape(host.name)}</title><circle cx="${f(x)}" cy="${f(y)}" r="${f(Math.max(12,s+4))}" fill="#000000" fill-opacity="0"/><circle cx="${f(x)}" cy="${f(y)}" r="${f(s)}" fill="${escape(b.color)}" stroke="${selected?'#eef7ff':'#d5e8f6'}" stroke-width="${selected?'2.4':'.7'}"/></g>`);
+  if(b.type!=='waypoint')parts.push(`<circle cx="${cx}" cy="${cy}" r="${f(r)}" fill="none" stroke="${selected?'#9fd1f5':'#64819c'}" stroke-opacity="${selected?'.7':priority(b)>=10?'.24':'.045'}" stroke-width="${selected?'1.4':'.8'}" ${b.eccentricity>.03?'stroke-dasharray="3 5"':''}/>`);
+  if(metrics&&b.type!=='waypoint'&&(priority(b)>=10||selected)){const v=mapProjectedVelocity(b.x,b.y,b.vx??-b.y,b.vy??b.x,maximum,reference,extent,logDistance),length=Math.hypot(...v),scale=(width<500?16:26)/Math.max(length,1e-25);if(length>1e-25)parts.push(`<path d="M${f(x)} ${f(y)}l${f(v[0]*scale)} ${f(v[1]*scale)}" fill="none" stroke="#edcc88" stroke-opacity=".78" stroke-width="1.2" marker-end="url(#map-velocity-tip)"/>`);}
+  parts.push(`<g class="map-body" data-map-object="${escape(b.id)}" role="button" tabindex="0" aria-label="Select ${escape(b.name)}"><title>${escape(b.name)} · ${(b.distanceMeters/149597870700).toPrecision(4)} AU from ${escape(host.name)}</title><circle cx="${f(x)}" cy="${f(y)}" r="${f(Math.max(12,s+4))}" fill="#000000" fill-opacity="0"/>${b.type==='waypoint'?`<path d="M${f(x)} ${f(y-s)}l${f(s)} ${f(s)} -${f(s)} ${f(s)} -${f(s)} -${f(s)}z" fill="#101d2c" stroke="#a9dfff" stroke-width="${selected?'2.4':'1.5'}"/>`:`<circle cx="${f(x)}" cy="${f(y)}" r="${f(s)}" fill="${escape(b.color)}" stroke="${selected?'#eef7ff':'#d5e8f6'}" stroke-width="${selected?'2.4':'.7'}"/>`}</g>`);
   candidates.push({b,x,y,s,selected});bodyBoxes.push({id:b.id,x:x-s-3,y:y-s-3,w:2*s+6,h:2*s+6});
  }
  if(annotations)for(const c of candidates.filter(c=>priority(c.b)>0||children.length<15).sort((a,b)=>priority(b.b)-priority(a.b)||b.b.radiusMeters-a.b.radiusMeters).slice(0,children.length>60?10:18)){

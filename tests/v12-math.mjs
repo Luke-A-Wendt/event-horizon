@@ -3,7 +3,7 @@ import {renderWormholeGuide,renderMathGuide} from '../dist/math.js';
 const node={innerHTML:'',querySelector(){return {addEventListener(){}};}};
 renderWormholeGuide(node);const wormhole=node.innerHTML;
 assert(wormhole.includes('cannot be crossed'));assert(wormhole.includes('Ellis'));assert(wormhole.includes('ρ = b/2'));
-assert.equal((wormhole.match(/<svg/g)||[]).length,2);assert.equal((wormhole.match(/<math /g)||[]).length,5);
+assert.equal((wormhole.match(/<svg class="diagram"/g)||[]).length,2);assert.equal((wormhole.match(/<math /g)||[]).length,5);
 renderMathGuide(node);assert(node.innerHTML.includes('four-dimensional spacetime'));assert(node.innerHTML.includes('Type-based placement restrictions'));
 for(const match of (wormhole+node.innerHTML).matchAll(/<math\b[^>]*>([\s\S]*?)<\/math>/g)){
  const stack=[{name:'math',count:0}];

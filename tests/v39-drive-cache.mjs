@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import {performance} from 'node:perf_hooks';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {fixture} from './render-fixture.mjs';
+import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
+const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});
+r.loadScene('solar-system');const ship=r.objects.find(o=>o.type==='shuttle'),moon=r.objects.find(o=>o.name==='Moon'),earth=r.objects.find(o=>o.name==='Earth');r.setFreeDrive(ship.id,true);r.fillObjects();
+const capture=()=>r.objectFrames.map(o=>({id:o.id,position:[...o.position],velocity:[...o.velocity],frame:o.frame.map(v=>[...v]),radius:o.radius}));
+function freshEquivalent(){const cached=capture();r.lastGeometryTime=NaN;r.fillObjects();assert.deepEqual(capture(),cached,'Drive cache and freshly resolved geometry agree');}
+let frames=r.objectFrames;for(let i=0;i<30;i++)r.fillObjects();assert.strictEqual(r.objectFrames,frames,'Repeated held-drive requests reuse the entire 518-body frame');freshEquivalent();
+r.time+=.15;r.fillObjects();assert.notStrictEqual(r.objectFrames,frames);freshEquivalent();
+r.releaseOrbitHold(ship);ship.drivePosition=ship.drivePosition.map((v,i)=>v+(i===1?.001:0));r.fillObjects();freshEquivalent();
+frames=r.objectFrames;ship.driveBasis=[ship.driveBasis[2],ship.driveBasis[1],ship.driveBasis[0].map(v=>-v)];r.fillObjects();assert.notStrictEqual(r.objectFrames,frames,'Heading updates invalidate even at fixed time');freshEquivalent();
+frames=r.objectFrames;ship.flight.velocity=ship.flight.velocity.map(v=>v*.75);r.fillObjects();assert.notStrictEqual(r.objectFrames,frames,'Velocity annotations must update');freshEquivalent();
+frames=r.objectFrames;r.focusTarget(earth.id,'track');r.fillObjects();assert.strictEqual(r.objectFrames,frames,'A camera target change repacks without recomputing the catalog');assert.equal(r.focusId,earth.id);
+const tau=ship.clock.properSeconds;r.advanceClocks(.5);assert.equal(ship.clock.properSeconds,tau+.5);assert.strictEqual(r.objectFrames,frames,'Clock integration reads, but does not invalidate, unchanged geometry');
+r.updateObject(moon.id,{orbitMeters:moon.orbitMeters*1.1});r.fillObjects();assert.notStrictEqual(r.objectFrames,frames,'Changed parent/orbit metadata invalidates');freshEquivalent();
+const save=snapshotRenderer(r);restoreRenderer(r,save);freshEquivalent();
+const active=r.objects.find(o=>o.id===ship.id);active.driveReturn={position:[...active.drivePosition],basis:active.driveBasis.map(v=>[...v]),elapsed:.5};r.fillObjects();frames=r.objectFrames;r.fillObjects();assert.notStrictEqual(r.objectFrames,frames,'Orbit return blending always bypasses the pose cache');delete active.driveReturn;r.fillObjects();
+for(let i=0;i<5;i++)r.fillObjects();let started=performance.now();for(let i=0;i<200;i++)r.fillObjects();const reused=(performance.now()-started)/200;
+started=performance.now();for(let i=0;i<24;i++){r.lastGeometryTime=NaN;r.fillObjects();}const fresh=(performance.now()-started)/24;
+r.dispose();console.log(`PASS: same-time driven pose reuse, heading/velocity/time/metadata/snapshot invalidation, fresh-frame parity, camera packing, clock progression and return bypass. Measured ${reused.toFixed(3)} ms reused vs ${fresh.toFixed(3)} ms fresh per 518-body fill.`);

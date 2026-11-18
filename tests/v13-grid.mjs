@@ -37,7 +37,7 @@ assert(!cpuRingOccluded([2,0,-2],sphere,camera.observer),'Ring beyond silhouette
 assert.equal(cpuVisibleBodies([{id:'clear-ring',type:'ring',position:[0,0,0],radius:4,opacity:0}],camera,640,400).length,0,'Transparent annuli do not consume drawing budget');
 const catalog=Array.from({length:1000},(_,i)=>({id:String(i),type:'moon',position:[0,0,0],radius:.01+i*.0001}));
 catalog.push({id:'behind',type:'planet',position:[0,0,20],radius:1},{id:'tiny',type:'moon',position:[0,0,0],radius:1e-12},{id:'offscreen',type:'planet',position:[100,0,0],radius:1});
-const visible=cpuVisibleBodies(catalog,camera,640,400,'0');assert.equal(visible.length,32);assert(visible.some(x=>x.id==='0'));assert(!visible.some(x=>['behind','tiny','offscreen'].includes(x.id)));
+const visible=cpuVisibleBodies(catalog,camera,640,400,'0');assert.equal(visible.length,32);assert(!visible.some(x=>x.id==='0'),'Focused subpixel moon stays in the logical scene but does not consume surface budget');assert(!visible.some(x=>['behind','tiny','offscreen'].includes(x.id)));
 const c=new CpuCommandCanvas();c.getBoundingClientRect=f.canvas.getBoundingClientRect;const cpu=new CpuRenderer(c,{autoStart:false,bindControls:false});cpu.loadScene('empty-space');
 const body=cpu.addChildObject('space','planet',{name:'Saturn',surfaceId:5,planetStyle:'gas',radiusMeters:58232000,shapeAxes:[1.03,.94,1.03]}),ring=cpu.addChildObject(body.id,'ring',{radiusMeters:140000000,innerRadiusRatio:.45,material:'icy'});assert(ring);cpu.focusTarget(body.id,'track');cpu.update({grid:true});
 c.beginFrame();const stages=cpu.renderStages(1000,false,true);let last=0,max=0,step;do{step=stages.next();max=Math.max(max,c.commands.length-last);last=c.commands.length;}while(!step.done);

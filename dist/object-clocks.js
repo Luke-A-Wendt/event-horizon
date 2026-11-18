@@ -1,10 +1,11 @@
+import {accumulateCrewExposure} from './crew-load.js';
 // Clock telemetry only: active wall seconds are the traveler's proper time τ.
-// Static Schwarzschild lapse plus proper-thrust rapidity. The Kerr horizon is
-// shifted into a Schwarzschild comparison radius; multiple lapse factors and
-// curved/turning paths are inexpensive visual approximations, not solved GR.
+// The clock reference is at infinity. Use the Kerr lapse for an observer
+// rotating with the local inertial frame; independent sources multiply as
+// an approximation. A prescribed spacecraft velocity is relative to that frame.
 export const CLOCK_LIGHT_SPEED=299792458;
 export const CLOCK_SOLAR_GM=1.32712440018e20;
-export const CLOCK_HORIZON_EPSILON=1e-6;
+export const CLOCK_HORIZON_EPSILON=16*Number.EPSILON;
 export const CLOCK_MAX_SECONDS=1e300;
 const MAX_RAPIDITY=300,MAX_RATE=1e150;
 export const compactExteriorRadius=(horizon,bodyRadius=0)=>horizon*(1+CLOCK_HORIZON_EPSILON)+2*Math.max(0,bodyRadius);
@@ -15,19 +16,79 @@ const boundedRate=v=>Math.max(1,Math.min(MAX_RATE,Number.isFinite(v)?v:MAX_RATE)
 const rapidity=clock=>finiteVector(clock?.rapidityVector)?clock.rapidityVector:[0,0,0];
 const gamma=eta=>Math.cosh(Math.min(MAX_RAPIDITY,Math.hypot(...eta)));
 const gammaExcess=eta=>2*Math.sinh(Math.min(MAX_RAPIDITY,Math.hypot(...eta))*.5)**2;
-export function createObjectClock(){return {properSeconds:0,coordinateSeconds:0,lagSeconds:0,properCompensation:0,coordinateCompensation:0,lagCompensation:0,rapidityVector:[0,0,0]};}
+// Display a Newtonian field-plus-command estimate in the scene's Cartesian axes.
+// It is not an accelerometer reading: the crew in an unpowered orbit is weightless.
+export function crewAccelerationG(position,sources,thrust=[0,0,0],self=null){
+ const net=thrust.slice();
+ for(const source of sources){
+  if(source.id===self||!(source.massSolar>0))continue;
+  const d=source.positionMeters.map((p,i)=>p-position[i]),r=Math.max(1,Math.hypot(...d),source.radiusMeters||0);
+  const factor=CLOCK_SOLAR_GM*source.massSolar/(9.80665*r*r*r);
+  for(let i=0;i<3;i++)net[i]+=d[i]*factor;
+ }
+ return Math.hypot(...net);
+}
+// For circular motion, v_coordinate=r*dphi/dt and v_local=v_coordinate/lapse.
+// Where the authored angular speed is not timelike, use it instead as a local
+// prescribed speed. Such near-horizon tracks are not circular geodesics.
+export function circularClockRate(rate,coordinateSpeed,useLocalSpeed=false){
+ const b=Math.abs(coordinateSpeed)/CLOCK_LIGHT_SPEED,local=b*rate.gravityFactor;
+ const prescribed=useLocalSpeed||local>=1,beta=Math.min(1-8*Number.EPSILON,prescribed?b:local);
+ const eta=Math.atanh(beta),excess=2*Math.sinh(.5*eta)**2,kinematicFactor=1+excess;
+ const rateFactor=boundedRate(rate.gravityFactor*kinematicFactor),properRate=1/rateFactor;
+ return {...rate,localSpeedMetersPerSecond:beta*CLOCK_LIGHT_SPEED,rateFactor,properRate,lossRate:1-properRate,kinematicFactor,kinematicExcess:excess,kinematicLossRate:1-1/kinematicFactor,orbitalClock:true,prescribedSpeedFallback:!useLocalSpeed&&prescribed,localSpeedPrescribed:useLocalSpeed};
+}
+// Outside the Schwarzschild ISCO, r*dphi/dt=sqrt(GM/r) describes a
+// geodesic. Between 6M and 4M blend to the authored local speed before
+// reaching the photon orbit. Kerr parking paths use a prescribed ZAMO speed.
+// Their coordinate angular rate includes both lapse and frame dragging.
+export function compactCircularClockRate(rate,speed,source,position){
+ const d=position.map((v,i)=>v-source.positionMeters[i]),r=Math.max(source.horizonMeters,Math.hypot(...d));
+ const spin=Math.min(1,Math.abs(source.spinParameter||0)),rg=source.horizonMeters/(1+Math.sqrt((1-spin)*(1+spin))),x=r/rg,m=1/x,a=spin*m;
+ const axis=source.spinAxis,cos=axis?Math.min(1,Math.abs(d.reduce((z,v,i)=>z+v*axis[i],0)/r)):0,sin=Math.sqrt((1-cos)*(1+cos));
+ const geodesic=spin===0?Math.max(0,Math.min(1,(x-4)*.5)):0,blend=geodesic*geodesic*(3-2*geodesic);
+ const local=speed*(1+blend*(rate.gravityFactor-1)),clock=circularClockRate(rate,local,true);
+ // sqrt(g_phi_phi)/r and omega*r/c from the Kerr 3+1 metric.
+ const sigma=1+(a*cos)**2,area=(1+a*a)*sigma+2*m*a*a*sin*sin;
+ const circumferential=r*Math.sqrt(area/sigma)*sin;
+ const drag=2*m*a/area*CLOCK_LIGHT_SPEED/r*Math.sign(source.spinParameter||0);
+ const coordinateOmega=sin>1e-12?drag+local/(rate.gravityFactor*circumferential):0;
+ return {...clock,coordinateAngularSpeed:Math.abs(coordinateOmega)};
+}
+export function tickAtClockRate(clock,seconds,rate){
+ if(!(seconds>0))return;
+ accumulateCrewExposure(clock,seconds,rate.crewLoadG);
+ const excess=rate.gravityExcess+rate.gravityFactor*rate.kinematicExcess;
+ accumulate(clock,'properSeconds','properCompensation',seconds);
+ accumulate(clock,'coordinateSeconds','coordinateCompensation',seconds*rate.rateFactor);
+ accumulate(clock,'lagSeconds','lagCompensation',seconds*excess);
+}
+export function createObjectClock(){return {properSeconds:0,coordinateSeconds:0,lagSeconds:0,highGExposureSeconds:0,extremeGExposureSeconds:0,properCompensation:0,coordinateCompensation:0,lagCompensation:0,rapidityVector:[0,0,0]};}
 export function clockRate({id=null,positionMeters=[0,0,0],bodyRadiusMeters=0,rapidityVector=[0,0,0],sources=[]}={}){
  let gravityFactor=1,gravityExcess=0,horizonLimit=false;
  if(finiteVector(positionMeters))for(const source of sources){
   if(source.id===id||!(source.massSolar>0)||!Number.isFinite(source.massSolar)||!finiteVector(source.positionMeters))continue;
-  const distance=Math.hypot(...positionMeters.map((v,i)=>v-source.positionMeters[i])),compact=Number.isFinite(source.horizonMeters)&&source.horizonMeters>0;
-  const rs=2*CLOCK_SOLAR_GM*source.massSolar/(CLOCK_LIGHT_SPEED*CLOCK_LIGHT_SPEED),horizon=compact?source.horizonMeters:rs;
-  // At a Kerr horizon use δ=r-r_+, and r_comparison=r_s+δ. For spin=0
-  // this is exactly sqrt(1-r_s/r)^-1; factoring δ avoids cancellation.
-  const radius=compact?distance:Math.max(distance,Number(source.radiusMeters)||0),minimumGap=Math.max(horizon*CLOCK_HORIZON_EPSILON,compact?2*Math.max(0,bodyRadiusMeters):0,1e-30);
-  const gap=Math.max(radius-horizon,minimumGap);
-  if(compact&&distance<=horizon)horizonLimit=true;
-  const potential=rs/gap,factor=Math.sqrt(1+potential),excess=potential/(factor+1);
+  const dx=positionMeters[0]-source.positionMeters[0],dy=positionMeters[1]-source.positionMeters[1],dz=positionMeters[2]-source.positionMeters[2];
+  const distance=Math.hypot(dx,dy,dz),compact=Number.isFinite(source.horizonMeters)&&source.horizonMeters>0;
+  const rs=2*CLOCK_SOLAR_GM*source.massSolar/(CLOCK_LIGHT_SPEED*CLOCK_LIGHT_SPEED);
+  let potential;
+  if(compact){
+   // Kerr ZAMO: alpha²=Sigma*Delta/A. Use 1/alpha² - 1 directly so
+   // sub-nanosecond lags in the weak field survive. Factor Delta into
+   // (r-r+)(r-r-) to retain precision one representable step outside r+.
+   const h=source.horizonMeters,spin=Math.min(1,Math.abs(source.spinParameter||0)),q=Math.sqrt((1-spin)*(1+spin));
+   const rg=h/(1+q),rawGap=distance-h;
+   if(rawGap<=0)horizonLimit=true;
+   const gap=rawGap>0?rawGap:Math.max(h*Number.EPSILON,2*Math.max(0,bodyRadiusMeters),1e-30);
+   const r=rawGap>0?distance:h+gap,m=rg/r,a=spin*m,axis=source.spinAxis;
+   const cos=axis&&distance>0?Math.max(-1,Math.min(1,(dx*axis[0]+dy*axis[1]+dz*axis[2])/distance)):0;
+   const delta=(gap/r)*(gap/r+2*m*q);
+   potential=2*m*(1+a*a)/((1+(a*cos)**2)*delta);
+  }else{
+   const radius=Math.max(distance,Number(source.radiusMeters)||0);
+   potential=rs/Math.max(radius-rs,rs*Number.EPSILON,1e-30);
+  }
+  const factor=Math.sqrt(1+potential),excess=potential/(factor+1);
   gravityExcess=Math.min(MAX_RATE,gravityExcess+excess+gravityExcess*excess);gravityFactor=boundedRate(1+gravityExcess);
  }
  const kinematicFactor=gamma(finiteVector(rapidityVector)?rapidityVector:[0,0,0]),rateFactor=boundedRate(gravityFactor*kinematicFactor),properRate=1/rateFactor;
@@ -63,7 +124,7 @@ export function advanceObjectClock(clock,seconds,rate={},accelerationVector=[0,0
 }
 export function objectClockReading(clock,rate={},metadata={}){
  const coordinateSeconds=Math.max(0,Number(clock?.coordinateSeconds)||0),properSeconds=Math.max(0,Number(clock?.properSeconds)||0);
- return {...metadata,coordinateSeconds,properSeconds,lagSeconds:Number.isFinite(clock?.lagSeconds)?Math.max(0,clock.lagSeconds):Math.max(0,coordinateSeconds-properSeconds),...rate};
+ return {...metadata,highGExposureSeconds:clock?.highGExposureSeconds||0,extremeGExposureSeconds:clock?.extremeGExposureSeconds||0,coordinateSeconds,properSeconds,lagSeconds:Number.isFinite(clock?.lagSeconds)?Math.max(0,clock.lagSeconds):Math.max(0,coordinateSeconds-properSeconds),...rate};
 }
 const readableNumber=new Intl.NumberFormat('en-US',{minimumSignificantDigits:2,maximumSignificantDigits:2});
 const rounded=value=>Number(value.toPrecision(2));

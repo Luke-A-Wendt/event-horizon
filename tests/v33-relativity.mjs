@@ -23,7 +23,7 @@ for(const formula of formulas){
  }
  assert.equal(stack.length,0);
 }
-const diagrams=[...html.matchAll(/<svg\b[\s\S]*?<\/svg>/g)].map(m=>m[0]);assert.equal(diagrams.length,3);
+const diagrams=[...html.matchAll(/<svg class="relativity-diagram"[\s\S]*?<\/svg>/g)].map(m=>m[0]);assert.equal(diagrams.length,3);
 for(const diagram of diagrams){
  assert(diagram.includes('viewBox="0 0 720 310"'));
  const labelled=diagram.match(/aria-labelledby="([^"]+)"/)[1].split(' ');for(const id of labelled)assert(diagram.includes('id="'+id+'"'));

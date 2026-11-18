@@ -1,3 +1,5 @@
+// Local placements are uncompressed SI metres; allow galactic as well as stellar routes.
+export const MAX_WORLD_METERS=1e21;
 // Procedural catalog. Every model uses its reference physical dimensions.
 export const OBJECT_TYPES = [
  {id:'anomaly',label:'Gravity anomaly',description:'A fictional, smooth region of turbulent lensing with no body or singularity.'},
@@ -7,8 +9,11 @@ export const OBJECT_TYPES = [
  {id:'jets',label:'Polar jets',description:'A pair of outflows attached to a star or black hole.'},
  {id:'dyson',label:'Dyson sphere',description:'A concentric hollow habitat shell: metallic outside, gardens and cities inside.'},
  {id:'planet',label:'Planet',description:'A small orbiting world with procedural terrain and clouds.'},
- {id:'moon',label:'Moon',description:'A natural satellite with its own physical size, surface, and orbit.'},
+ {id:'moon',label:'Moon',description:'A natural satellite of a planet or smaller world, including small moonlets.'},
+ {id:'planetoid',label:'Planetoid',description:'A dwarf planet or small world orbiting a star or black hole.'},
+ {id:'asteroid',label:'Asteroid',description:'A small rocky or metallic body with an irregular surface and shape.'},
  {id:'star',label:'Star',description:'A luminous sphere of plasma.'},
+ {id:'waypoint',label:'Stationary waypoint',description:'A fixed coordinate in the scene. Add it to a route to arrive at rest, with no body or gravity at the marker.'},
  {id:'probe',label:'Luminous probe',description:'A bright marker for tracing an orbit.'},
  {id:'iss',label:'ISS',description:'A stylized International Space Station with modules, radiators, and solar arrays.'},
  {id:'shuttle',label:'NASA Shuttle',description:'An Enterprise-era NASA shuttle study with a rounded nose, delta wings, test-era markings, and object-relative Ride and Chase cameras.'},
@@ -19,13 +24,14 @@ export const OBJECT_TYPES = [
  {id:'belt',label:'Asteroid belt',description:'A procedural annulus of small bodies around a star or planet.'}
 ];
 // Stable shader IDs retain the original planet/probe/star encoding.
-export const OBJECT_KIND = {anomaly:13,planet:0,moon:0,probe:1,star:2,iss:3,shuttle:4,astronaut:5,enterprise:6,ring:7,belt:8,disk:9,jets:10,dyson:11,heighliner:12,blackhole:2,whitehole:2};
-export const OBJECT_CLASS = {anomaly:0,space:6,blackhole:5,whitehole:5,hole:5,star:4,planet:3,moon:2.5,probe:2,iss:2,shuttle:2,enterprise:2,heighliner:2,astronaut:1,disk:0,jets:0,ring:0,belt:0,dyson:0};
+export const OBJECT_KIND = {waypoint:-1,anomaly:13,planet:0,moon:0,planetoid:0,asteroid:0,probe:1,star:2,iss:3,shuttle:4,astronaut:5,enterprise:6,ring:7,belt:8,disk:9,jets:10,dyson:11,heighliner:12,blackhole:2,whitehole:2};
+export const OBJECT_CLASS = {waypoint:0,anomaly:0,space:6,blackhole:5,whitehole:5,hole:5,star:4,planet:3,planetoid:2.8,asteroid:2.6,moon:2.5,probe:2,iss:2,shuttle:2,enterprise:2,heighliner:2,astronaut:1,disk:0,jets:0,ring:0,belt:0,dyson:0};
 
 // SI dimensions are independent of the visualization's black-hole mass.
 // normalizedExtent is the longest dimension of the procedural model.
 export const REFERENCE_RG_METERS = 1.47662504e3 * 4.3e6;
 export const OBJECT_DIMENSIONS = {
+ waypoint:{lengthMeters:0,normalizedExtent:1,description:'Fixed origin-frame navigation point'},
  anomaly:{lengthMeters:12000,normalizedExtent:2,description:'Six-kilometer-radius optical disturbance'},
  blackhole:{lengthMeters:59065.0016,normalizedExtent:2,description:"10 solar-mass Schwarzschild horizon diameter"},
  whitehole:{lengthMeters:59065.0016,normalizedExtent:2,description:"10 solar-mass time-reversed horizon diameter"},
@@ -34,6 +40,8 @@ export const OBJECT_DIMENSIONS = {
  dyson:{lengthMeters:299195741400,normalizedExtent:2,description:'One-AU-radius hollow habitat shell'},
  moon:{lengthMeters:3474800,normalizedExtent:2,description:'Lunar mean diameter'},
  planet:{lengthMeters:12742000,normalizedExtent:2,description:'Earth diameter'},
+ planetoid:{lengthMeters:939400,normalizedExtent:2,description:'Ceres reference diameter'},
+ asteroid:{lengthMeters:20000,normalizedExtent:2,description:'20 km reference asteroid extent'},
  star:{lengthMeters:1392680000,normalizedExtent:2,description:'Solar diameter'},
  ring:{lengthMeters:280000000,normalizedExtent:2,description:'Ring outer diameter'},
  belt:{lengthMeters:900000000000,normalizedExtent:2,description:'Belt outer diameter'},

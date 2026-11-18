@@ -1,3 +1,9 @@
+import {SCENE_ORIGIN} from './scene-origin.js';
+import {clockHullMeters,compactCircleMinimum,stopMinimumMeters,orbitClearance,oneGravityRadius,limitedCrew} from './orbit-clearance.js';
+import {combinedWarpEnvelope,shieldDemand} from './warp-physics.js';
+import { configureAutopilot, advanceAutopilot, advanceBridgeAutopilot, autopilotState, manualDriveEligibility,bridgeTravelTargets,previewBridgeRoute,beginBridgeRoute,bridgeParkingOrbit } from './autopilot.js';
+import {flightSequenceState,setFlightSequence,startFlightSequence,stopFlightSequence,suspendForDrive,reconcileFlightSequences} from './flight-sequence.js';
+import { isPlanetarySurface, naturalParentReason } from './object-taxonomy.js';
 /* All geometry is in fixed GM_ref/c² units, M_ref=4.3 million solar masses.
  * Holding observer position fixed while changing M therefore changes apparent
  * scale. Curved rays, plasma, binary lens fields, and debris are approximations. */
@@ -5,19 +11,21 @@ import { DEFAULTS, SCENE_PRESETS, REFERENCE_MASS, horizonRg, iscoRg, makePreset,
 import { VERTEX, createFragment } from './shaders.js';
 import { weakGridFlowWindow } from './grid-glsl.js';
 import {dysonHabitableRadius,dysonIllumination} from './dyson.js';
-import { OBJECT_KIND, OBJECT_CLASS, OBJECT_TYPES, OBJECT_DIMENSIONS, REFERENCE_RG_METERS, objectRadiusMeters, isCompactType, compactSatellite } from './objects.js';
-import { effectiveWarpRadius, warpDisplayStrength, anomalyCruise } from './warp-physics.js';
+import { OBJECT_KIND, OBJECT_CLASS, OBJECT_TYPES, OBJECT_DIMENSIONS, REFERENCE_RG_METERS, MAX_WORLD_METERS, objectRadiusMeters, isCompactType, compactSatellite } from './objects.js';
+import { effectiveWarpRadius, anomalyCruise } from './warp-physics.js';
 import { illustrativeCancellationPair } from './compact-merger.js';
-import {warpSideFraming,apparentCaptureAngle} from './camera-framing.js';
+import {cameraRelative,warpSideFraming,apparentCaptureAngle} from './camera-framing.js';
 import { tidalShape } from './tidal-shape.js';
-import { RenderBudget, QUALITY_PROFILES } from './performance-controller.js';
+import { RenderBudget, QUALITY_PROFILES, STARTUP_PROFILE } from './performance-controller.js';
 import { XRViewController } from './xr-view.js';
 import { PlanetTextureCache } from './planet-textures.js';
-import { bridgePath, bridgeJourney, bridgeConformal, bridgeProperRadius, BRIDGE_VEHICLE_CAMERA } from './bridge-math.js';
-import { stellarInfo, stellarPatch, STELLAR_STYLE_IDS, LIGHT_SPEED } from './stellar-physics.js';
-import { integrateFrenet, integratePlanar, setPlanarHeading, orthonormalFrame, speedForWarp, warpForSpeed, flightControlRates, shuttleThrustSetting, warpStarRate, shuttleRelativity, resetFlightClocks, FLIGHT_STANDARD_GRAVITY, SHUTTLE_THRUST_MAX_G, ENTERPRISE_THRUST_MAX_G, impulseThrustSetting } from './flight-dynamics.js';
-import {travelTargets,previewRoute,beginRoute,cancelRoute,routeState,advanceRoute} from './travel-routes.js';
-import {supportsObjectClock,createObjectClock,clockRate,advanceObjectClock,objectClockReading,compactExteriorRadius} from './object-clocks.js';
+import { bridgePath, bridgeJourney, bridgeResearchGateStage, bridgeConformal, bridgeProperRadius, BRIDGE_VEHICLE_CAMERA, BRIDGE_HULL_CAMERAS } from './bridge-math.js';
+import { stellarInfo, stellarPatch, STELLAR_STYLE_IDS, LIGHT_SPEED, SOLAR_RG_METERS } from './stellar-physics.js';
+import { warpVelocity, integrateFrenet, integratePlanar, setPlanarHeading, orthonormalFrame, speedForWarp, warpForSpeed, flightControlRates, shuttleThrustSetting, warpStarRate, warpStarVisuals, shuttleRelativity, resetFlightClocks, FLIGHT_STANDARD_GRAVITY, SHUTTLE_THRUST_MAX_G, ENTERPRISE_THRUST_MAX_G, impulseThrustSetting } from './flight-dynamics.js';
+import {updateParkedCamera} from './orbit-path.js';
+import {minimumReturnG,travelTargets,previewRoute,beginRoute,cancelRoute,releaseRouteCamera,routeState,advanceRoute} from './travel-routes.js';
+import {compactTrackLoadG,accumulateCrewExposure,meridionalClockMotion} from './crew-load.js';
+import {crewAccelerationG,circularClockRate,compactCircularClockRate,tickAtClockRate,supportsObjectClock,createObjectClock,clockRate,advanceObjectClock,objectClockReading,compactExteriorRadius} from './object-clocks.js';
 
 export const MAX_SCENE_OBJECTS=1024;
 export const MAX_RENDER_OBJECTS=12;
@@ -25,9 +33,9 @@ export const MAX_RENDER_OBJECTS=12;
 // cameras and GPU programs never enter this small, process-local cache.
 const PRESET_OBJECT_TEMPLATES=new WeakMap();
 const OBJECT_PROPERTY_RANGES=[['anomalyStrength',0,3],['anomalyScale',.3,3],['anomalyMotion',0,2],['dysonCutaway',0,.8],['tidalDeformation',0,1],['angularVelocity',-1e5,1e5],['collapsePeriod',4,300],['collapseRadiusMin',.01,1e15],['collapseRadiusMax',.01,1e15],['surfaceId',0,100],['axialTilt',-360,360],['surfaceRotationPhase',-1e6,1e6],['rotationPeriodSeconds',-1e12,1e12],['orbitInclination',-180,180],['orbitNode',-360,360],['argumentPeriapsis',-360,360],['orbitalPeriodSeconds',-1e20,1e20],['opacity',0,1],['eccentricity',0,.99],['heightMeters',-1e17,1e17],['radiusMeters',.01,1e15],['massSolar',0,1e12],['radiusProxyMeters',0,1e15],['orbitMeters',1,1e17],['spots',0,1],['corona',0,2],['rotation',0,10],['innerRadiusRatio',.05,.9999],['thicknessRatio',.00001,.2]];
-const UNIFORM_NAMES=['uAnomalyCount','uAnomalies[0]','uAnomalyParams[0]','uResolution','uTime','uStellarTime','uExposure','uDistance','uYaw','uPitch','uLookYaw','uLookPitch','uMass','uBounds','uStars','uPrimaryAxis','uSecondaryAxis','uSpin','uHorizon','uIsco','uDiskOuter','uHoles[0]','uFlags','uFlags2','uDiskParams','uDiskColor','uNebulaParams','uNebulaColor','uJets','uJetColor','uSpectrum','uBinary','uSteps','uObjectCount','uGravityCount','uObjects[0]','uColors[0]','uTidal','uStarColor','uObserver','uForward','uRight','uUp','uInspectIndex','uHideObjectIndex','uInspectCamera','uInspectForward','uInspectRight','uInspectUp','uHeadings[0]','uWarpCenter','uWarpAxis','uWarpRadius','uWarpStrength','uWarpThickness','uWarpFlags','uWarpObserver','uWarpObjectIndex','uWarpGridOffset','uWarpGridRotation','uWarpMotion','uDetail','uRayViewport','uInverseProjection','uProjectionMode','uBridge','uBridgeGridAxis','uBridgeStage','uBridgeBubble','uBridgeBubbleAxis','uWhiteHole','uBridgeSkyColor','uBridgeSkyParams','uBridgeOtherNebula','uLuminosities[0]','uCockpitMode','uBodyParams[0]','uBodyMasses[0]','uBodyOpacity[0]','uTransparentBodies','uBridgeStars','uSkyParams','uDriveIndex','uDriveRight','uDriveUp','uDriveForward','uDiskSecondaryParams','uDiskSecondaryColor','uJetSecondaryParams','uJetSecondaryColor','uBodyShape[0]','uGridAnchor','uGridHigh','uGridFlowWindow','uWorldOrigin','uPlanetAtlas','uPlanetFocus','uPlanetAtlasReady','uPlanetFocusId','uMetricOptions','uSceneOptions','uJetStructure','uFlightMetrics'];
-const LIMITS={mergerDuration:[5,300],waveAmplitude:[0,2],waveFrequency:[.1,5],secondaryDiskOuter:[6.1,60],secondaryDiskThickness:[.15,6],secondaryDiskDensity:[0,4],secondaryJetSpread:[.15,5],secondaryJetLength:[.2,3],secondaryJetIntensity:[0,4],starBrightness:[0,5],starVariety:[0,2],bridgeOtherStarDensity:[0,3],bridgeOtherStarBrightness:[0,5],bridgeOtherStarVariety:[0,2],mass:[.000001,100000],spin:[0,.998],secondarySpin:[0,.998],speed:[0,10],exposure:[.1,5],starDensity:[0,3],diskOuter:[6.1,60],diskThickness:[.15,6],diskDensity:[0,4],nebulaScale:[.2,4],nebulaIntensity:[0,4],nebulaRotation:[-360,360],planetMass:[.01,10000],planetRadius:[.1,15],planetDistance:[4,100],starRadius:[.1,5],disruptionStrength:[.1,3],starDistance:[5,40],binaryRatio:[.1,4],binarySeparation:[12,100],primaryTilt:[0,180],primaryAzimuth:[-360,360],secondaryTilt:[0,180],secondaryAzimuth:[-360,360],jetSpread:[.15,5],jetLength:[.2,3],jetIntensity:[0,4],warpFactor:[0,10],warpRadius:[1.3,8],warpThickness:[1,20],bridgeRadius:[.61,30],bridgeOtherScale:[.2,4],bridgeOtherIntensity:[0,4],bridgeOtherRotation:[-360,360]};
-const ENUMS={mergerOutcome:['coalescence','illustrative-cancellation'],binaryMotion:['orbit','merger'],bridgeMode:['single','crossed'],bridgeGridOrientation:['perpendicular','parallel'],bridgeLifecycle:['steady','open-transit-close'],bridgeWorlds:['caladan','earth-proxima'],diskPalette:['physical','artistic','rainbow'],secondaryDiskPalette:['physical','artistic','rainbow'],jetStructure:['steady','knots','helix'],secondaryJetStructure:['steady','knots','helix'],secondaryDiskStyle:['thermal','hydrogen','helium','dust','nebula','radiant','ribbons'],bridgeTravelerType:['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'],bridgeOtherShape:['cloud','shell','filaments','spiral'],objectScaleMode:['physical'],warpScenario:['isolated','orbit','excursion'],spectrum:['visible','infrared','xray','radio','gamma','geometry'],viewMode:['orbit','look','free'],diskStyle:['thermal','hydrogen','helium','dust','nebula','radiant','ribbons'],nebulaShape:['cloud','shell','filaments','spiral']};
+const UNIFORM_NAMES=['uClusterCount','uClusterBodies[0]','uClusterParams[0]','uClusterColors[0]','uClusterAxes[0]','uNebulaVolume','uNebulaVolumeStyle','uNebulaVolumeWorld','uNebulaMulticolor','uNebulaSecondaryColor','uCraftFocusType','uAnomalyCount','uAnomalies[0]','uAnomalyParams[0]','uResolution','uTime','uStellarTime','uExposure','uDistance','uYaw','uPitch','uLookYaw','uLookPitch','uMass','uBounds','uStars','uPrimaryAxis','uSecondaryAxis','uSpin','uHorizon','uIsco','uDiskOuter','uHoles[0]','uFlags','uFlags2','uDiskParams','uDiskColor','uNebulaParams','uNebulaColor','uJets','uJetColor','uSpectrum','uBinary','uSteps','uObjectCount','uGravityCount','uObjects[0]','uColors[0]','uTidal','uStarColor','uObserver','uForward','uRight','uUp','uInspectIndex','uHideObjectIndex','uInspectCamera','uInspectForward','uInspectRight','uInspectUp','uHeadings[0]','uWarpCenter','uWarpAxis','uWarpRadius','uWarpStrength','uWarpThickness','uWarpFlags','uWarpObserver','uWarpObjectIndex','uWarpGridOffset','uWarpGridRotation','uWarpGridLocalPatch','uLabNebulaVisibility','uWarpMotion','uWarpStarStyle','uDetail','uRayViewport','uInverseProjection','uProjectionMode','uBridge','uBridgeGridAxis','uBridgeStage','uBridgeBubble','uBridgeBubbleAxis','uWhiteHole','uBridgeSkyColor','uBridgeSkyParams','uBridgeOtherNebula','uLuminosities[0]','uCockpitMode','uBodyParams[0]','uBodyMasses[0]','uBodyOpacity[0]','uTransparentBodies','uBridgeStars','uSkyParams','uDriveIndex','uDriveRight','uDriveUp','uDriveForward','uDiskSecondaryParams','uDiskSecondaryColor','uJetSecondaryParams','uJetSecondaryColor','uBodyShape[0]','uGridAnchor','uGridHigh','uGridFlowWindow','uWorldOrigin','uPlanetAtlas','uPlanetFocus','uPlanetAtlasReady','uPlanetFocusId','uMetricOptions','uSceneOptions','uJetStructure','uFlightMetrics'];
+const LIMITS={nebulaVolumeDensity:[0,2],nebulaVolumeDepth:[.25,3],nebulaVolumeScale:[.25,4],nebulaVolumeSpeed:[0,3],nebulaColorMix:[0,1],mergerDuration:[5,300],waveAmplitude:[0,2],waveFrequency:[.1,5],secondaryDiskOuter:[6.1,60],secondaryDiskThickness:[.15,6],secondaryDiskDensity:[0,4],secondaryJetSpread:[.15,5],secondaryJetLength:[.2,3],secondaryJetIntensity:[0,4],starBrightness:[0,5],starVariety:[0,2],bridgeOtherStarDensity:[0,3],bridgeOtherStarBrightness:[0,5],bridgeOtherStarVariety:[0,2],mass:[.000001,100000],spin:[0,.998],secondarySpin:[0,.998],speed:[0,10],exposure:[.1,5],starDensity:[0,3],diskOuter:[6.1,60],diskThickness:[.15,6],diskDensity:[0,4],nebulaScale:[.2,4],nebulaIntensity:[0,4],nebulaRotation:[-360,360],planetMass:[.01,10000],planetRadius:[.1,15],planetDistance:[4,100],starRadius:[.1,5],disruptionStrength:[.1,3],starDistance:[5,40],binaryRatio:[.1,4],binarySeparation:[12,100],primaryTilt:[0,180],primaryAzimuth:[-360,360],secondaryTilt:[0,180],secondaryAzimuth:[-360,360],jetSpread:[.15,5],jetLength:[.2,3],jetIntensity:[0,4],warpFactor:[0,10],warpRadius:[1.3,8],warpThickness:[1,20],bridgeRadius:[.61,30],bridgeOtherScale:[.2,4],bridgeOtherIntensity:[0,4],bridgeOtherRotation:[-360,360]};
+const ENUMS={nebulaVolumePreset:['wisps','clouds','storm'],mergerOutcome:['coalescence','illustrative-cancellation'],binaryMotion:['orbit','merger'],bridgeMode:['single','crossed'],bridgeGridOrientation:['perpendicular','parallel'],bridgeLifecycle:['steady','open-transit-close'],bridgeWorlds:['caladan','earth-proxima'],diskPalette:['physical','artistic','rainbow'],secondaryDiskPalette:['physical','artistic','rainbow'],jetStructure:['steady','knots','helix'],secondaryJetStructure:['steady','knots','helix'],secondaryDiskStyle:['thermal','hydrogen','helium','dust','nebula','radiant','ribbons','aurora'],bridgeTravelerType:['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'],bridgeOtherShape:['cloud','shell','filaments','spiral'],objectScaleMode:['physical'],warpScenario:['isolated','orbit','excursion'],spectrum:['visible','infrared','xray','radio','gamma','geometry'],viewMode:['orbit','look','free'],diskStyle:['thermal','hydrogen','helium','dust','nebula','radiant','ribbons','aurora'],nebulaShape:['cloud','shell','filaments','spiral']};
 const NUMERIC_STATE_KEYS=Object.keys(DEFAULTS).filter(key=>typeof DEFAULTS[key]==='number');
 const CAMERA_KEYS=['yaw','pitch','distance','lookYaw','lookPitch','focusDistance'];
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -38,6 +46,10 @@ function color(hex,fallback='#ffffff'){
 }
 function axis(tilt,azimuth){const t=radians(tilt),a=radians(azimuth);return [Math.sin(t)*Math.cos(a),Math.cos(t),Math.sin(t)*Math.sin(a)];}
 function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}
+const BLUE_FIRE_ARRIVAL=10;
+const DESCENT_SECONDS_PER_SCENE_SECOND=18*REFERENCE_RG_METERS/LIGHT_SPEED;
+const isParkingCraft=o=>o.placement==='orbit'&&(!o.motion||o.motion==='orbit')&&['shuttle','enterprise','iss','astronaut'].includes(o.type);
+const SOLAR_MU=1.32712440018e20;
 function basis(up){const ref=Math.abs(up[2])>.9?[1,0,0]:[0,0,1];const x=cross(up,ref),length=Math.hypot(...x);for(let i=0;i<3;i++)x[i]/=length;return [x,up,cross(x,up)];}
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const unit=v=>{const n=Math.hypot(...v)||1;return v.map(x=>x/n);};
@@ -58,7 +70,7 @@ function rocheFraction(q){const x=Math.cbrt(q);return .49*x*x/(.6*x*x+Math.log1p
 // Subpixel weak fields keep their true masses and analytic surface intersections,
 // but need neither per-step force evaluations nor tiny curvature-limited steps.
 export function bodyLensingSignificant(body,pixelAngle){
- if(!['star','planet','moon','blackhole','whitehole'].includes(body.type))return false;
+ if(!['star','planet','moon','planetoid','asteroid','blackhole','whitehole'].includes(body.type))return false;
  const axes=body.shapeAxes||[1,1,1],surfaceRadius=body.radius*Math.min(...axes)/Math.max(...axes);
  const deflection=4*Math.max(0,body.massSolar||0)/(4300000*Math.max(surfaceRadius,1e-30));
  return deflection>=Math.max(1e-12,pixelAngle)*.05;
@@ -68,8 +80,8 @@ export class BlackHoleRenderer {
  constructor(canvas,{onStats=()=>{},onError=()=>{},bindControls=true,autoStart=true,deferProgram=false}={}){
   this.canvas=canvas;this.onStats=onStats;this.onError=onError;this.deferProgram=deferProgram;
   this.state={...DEFAULTS,objectScaleMode:'physical'};this.camera={yaw:.25,pitch:.19,distance:32,lookYaw:0,lookPitch:0,focusDistance:6};this.target={...this.camera};
-  this.cameraGuide=null;this.sceneId='disk';this.sceneFocusId=null;this.bridgeObjectId=null;this.bridgeTime=0;this.bridgeTravelTime=0;this.freePosition=null;this.freeTarget=null;this.freeBasis=null;this.photoActive=false;this.xr=null;this.nextObjectId=1;this.selectedId=null;this.focusId=null;this.focusMode=null;this.warpObjectId=null;this.savedOverview=null;this.warpTravelWorld=0;this.warpTravelPosition=[0,0,0];this.warpTravelTime=0;this.objectFrames=[];this.cameraFrame=null;
-  this.quality='adaptive';this.budget=new RenderBudget();this.adaptiveScale=this.budget.profile.scale;this.steps=this.budget.profile.steps;this.objects=[];this.time=0;this.orbitOverrides={};this.flightInput={speed:0,curvature:0,torsion:0};
+  this.cameraGuide=null;this.sceneId='disk';this.sceneFocusId=null;this.bridgeObjectId=null;this.bridgeTime=0;this.bridgeTravelTime=0;this.freePosition=null;this.freeTarget=null;this.freeBasis=null;this.photoActive=false;this.xr=null;this.nextObjectId=1;this.selectedId=null;this.focusId=null;this.focusMode=null;this.warpObjectId=null;this.savedOverview=null;this.warpLocalGridPhase=0;this.warpTravelWorld=0;this.warpTravelPosition=[0,0,0];this.warpTravelTime=0;this.objectFrames=[];this.cameraFrame=null;
+  this.quality='adaptive';this.budget=new RenderBudget();this.adaptiveScale=this.budget.profile.scale;this.steps=this.budget.profile.steps;this.objects=[];this.time=0;this.gapOrbitTime=0;this.routeChartY=null;this.routeVisualTime=0;this.orbitOverrides={};this.flightInput={speed:0,curvature:0,torsion:0};
   this.lastTime=0;this.statsStart=0;this.frames=0;this.fps=0;this.lastSubmit=0;this.nextSubmit=0;this.gpuFence=null;this.resizePending=false;this.resizeMeasurePending=false;this.presentationPaused=false;this.captureRequest=null;this.warmupFrames=0;this.frame=this.frame.bind(this);
   this.listeners=[];this.pointers=new Map();this.disposed=false;this.travel=false;this.navigationUntil=0;this.pinchOwned=false;
   this.bodySurfaceData=new Float32Array(48);this.bodyShapeData=new Float32Array(48);this.bodyShapeData.fill(1);this.bodyMassData=new Float32Array(12);this.bodyOpacityData=new Float32Array(12);this.bodyOpacityData.fill(1);this.transparentBodyCount=0;this.bodyParamData=new Float32Array(48);this.luminosityData=new Float32Array(12);this.luminosityData.fill(1);this.headingData=new Float32Array(24);this.objectData=new Float32Array(48);this.colorData=new Float32Array(48);this.holeData=new Float32Array(8);this.tidalData=new Float32Array(4);
@@ -77,8 +89,9 @@ export class BlackHoleRenderer {
   this.raf=autoStart?requestAnimationFrame(this.frame):0;
  }
  initGL(){
+  this.scenePreview=true;this.sceneGeneration=(this.sceneGeneration||0)+1;this.requestedSceneKey=null;
   this.planetTextures?.dispose();this.planetTextures=null;this.textureError='';
-  this.ready=false;this.contextLost=false;this.gl=null;this.program=null;this.activeProgram=null;this.pendingProgram=null;this.programs=new Map();this.failedPrograms=new Set();this.gpuFence=null;this.budget.setContext(true,this.now());
+  this.ready=false;this.contextLost=false;this.gl=null;this.program=null;this.activeProgram=null;this.pendingProgram=null;this.programs=new Map();this.failedPrograms=new Set();this.shaderSlotLimits=new Map();this.shaderCompileFailures=[];this.gpuFence=null;this.budget.setContext(true,this.now());
   const options={alpha:false,antialias:false,depth:false,stencil:false,powerPreference:'high-performance',preserveDrawingBuffer:false};
   let gl=this.canvas.getContext('webgl2',options);this.webgl2=!!gl;if(!gl)gl=this.canvas.getContext('webgl',options);
   if(!gl){this.onError('WebGL is unavailable. Enable hardware acceleration or try a current browser.');return;}
@@ -95,16 +108,30 @@ export class BlackHoleRenderer {
   // A cold start never compiles the craft, warp or Ultra branches unnecessarily.
   if(!this.deferProgram)this.requestProgram(this.shaderFeatures());
  }
- shaderObjectSlots(){const count=this.objects.reduce((n,o)=>n+(o.type==='anomaly'?0:1),0)+(this.state.planet?1:0)+(this.state.tidalStar?1:0);return Math.min(this.gpuObjectLimit||MAX_RENDER_OBJECTS,count<=2?2:count<=4?4:count<=6?6:count<=8?8:12);}
+ usesWeakField(){return !!this.configCache.weakFieldBodies&&!this.state.blackHole&&!this.state.bridge&&!this.state.tidalStar&&!(this.state.warp&&this.warpObjectId)&&!this.state.interiorView;}
+ shaderObjectSlots(){if(this.sceneId==='horizon-hierarchy')return 2;const count=this.objects.reduce((n,o)=>n+(o.type==='anomaly'||o.type==='waypoint'?0:1),0)+(this.state.planet?1:0)+(this.state.tidalStar?1:0);return Math.min(this.usesWeakField()?6:MAX_RENDER_OBJECTS,this.shaderSlotLimits?.get(this.sceneId)||this.gpuObjectLimit||MAX_RENDER_OBJECTS,count<=2?2:count<=4?4:count<=6?6:count<=8?8:12);}
  shaderFeatures(){
+  const cluster=this.sceneId==='horizon-hierarchy',nebulaVolume=!!this.state.nebulaVolume&&this.state.spectrum!=='geometry'&&(!!this.state.nebula||!!this.state.bridge&&this.state.bridgeOtherNebula!==false);
   const warp=!!this.state.warp&&!!this.warpObjectId&&!this.state.bridge;let craftMask=warp?8:0;
+  // A model-based analytic path avoids compiling the strong-field marcher
+  // for ordinary systems. Camera changes never churn this shader feature.
+  const weakField=this.usesWeakField();
+  const warpLocal=warp&&(!this.state.blackHole||this.focusId===this.warpObjectId&&['track','onboard','chase'].includes(this.focusMode));
+  const warpLocalOnlyCraft=warpLocal&&this.objects.every(o=>{const kind=OBJECT_KIND[o.type];return o.id===this.warpObjectId||!(kind>=3&&kind<=6||kind===12);});
+  const warpOnly=warpLocal&&!this.state.blackHole&&!this.state.bridge&&!this.state.planet&&!this.state.tidalStar&&this.objects.every(o=>o.id===this.warpObjectId||o.type==='waypoint');
   for(const object of this.objects){const kind=OBJECT_KIND[object.type];if(kind>=3&&kind<=6)craftMask|=1<<(kind-3);else if(kind===12)craftMask|=16;}
-  return {anomaly:this.objects.some(o=>o.type==='anomaly'),dyson:this.objects.some(o=>o.type==='dyson'),derivatives:!!this.supportsDerivatives,derivativeExtension:!!this.supportsDerivatives&&!this.webgl2,diagnostics:!!this.state.metrics||this.state.spectrum==='geometry'||!!this.state.interiorView,attachments:this.objects.some(o=>['disk','jets'].includes(o.type)),objectSlots:this.shaderObjectSlots(),planetary:this.objects.some(o=>['planet','moon'].includes(o.type)&&o.surfaceId>0),bodyGravity:!!this.state.planet||!!this.state.tidalStar||this.objects.some(o=>['star','planet','moon','blackhole','whitehole'].includes(o.type)),stellar:!!this.state.tidalStar||this.objects.some(o=>['star','blackhole','whitehole'].includes(o.type)),rings:this.objects.some(o=>['ring','belt','disk','jets'].includes(o.type)),ultra:this.quality==='ultra',craft:craftMask!==0,craftMask,warp,grid:!!this.state.grid,bridge:!!this.state.bridge,probe:this.objects.some(object=>object.type==='probe')};
+  return {cluster,nebulaVolume,weakField,warpLocal,warpOnly,warpLocalOnlyCraft,anomaly:this.objects.some(o=>o.type==='anomaly'),dyson:this.objects.some(o=>o.type==='dyson'),derivatives:!!this.supportsDerivatives,derivativeExtension:!!this.supportsDerivatives&&!this.webgl2,diagnostics:!!this.state.metrics||this.state.spectrum==='geometry'||!!this.state.interiorView,attachments:this.objects.some(o=>['disk','jets'].includes(o.type)),objectSlots:this.shaderObjectSlots(),planetary:this.objects.some(o=>isPlanetarySurface(o.type)&&o.surfaceId>0),bodyGravity:!!this.state.planet||!!this.state.tidalStar||this.objects.some(o=>['star','planet','moon','planetoid','asteroid','blackhole','whitehole'].includes(o.type)),stellar:!!this.state.tidalStar||this.objects.some(o=>['star','blackhole','whitehole'].includes(o.type)),rings:this.objects.some(o=>['ring','belt','disk','jets'].includes(o.type)),ultra:this.budget.effectiveQuality==='ultra',craft:craftMask!==0,craftMask,warp,grid:!!this.state.grid,bridge:!!this.state.bridge,probe:this.objects.some(object=>object.type==='probe')};
  }
- programKey(features){return `${features.anomaly?1:0}${features.dyson?1:0}${features.derivatives?1:0}${features.derivativeExtension?1:0}${features.diagnostics?1:0}${features.attachments?1:0}${features.ultra?1:0}${features.warp?1:0}${features.grid?1:0}${features.bridge?1:0}${features.probe?1:0}${features.stellar?1:0}${features.rings?1:0}${features.bodyGravity?1:0}${features.planetary?1:0}:${features.craftMask??(features.craft?15:0)}:${features.objectSlots||MAX_RENDER_OBJECTS}`;}
- programSupports(features,active=this.activeProgram){const mask=features.craftMask??(features.craft?15:0);return !!active&&(!features.anomaly||active.features.anomaly)&&(!features.dyson||active.features.dyson)&&(active.features.objectSlots||MAX_RENDER_OBJECTS)===(features.objectSlots||MAX_RENDER_OBJECTS)&&((active.features.craftMask??(active.features.craft?15:0))&mask)===mask&&(!features.warp||active.features.warp)&&(!features.grid||active.features.grid)&&(!!features.bridge===!!active.features.bridge)&&(!features.diagnostics||active.features.diagnostics)&&(!features.attachments||active.features.attachments)&&(!features.probe||active.features.probe)&&(!features.stellar||active.features.stellar)&&(!features.rings||active.features.rings)&&(!features.bodyGravity||active.features.bodyGravity)&&(!features.planetary||active.features.planetary); }
+ programKey(features){return `${features.cluster?1:0}${features.nebulaVolume?1:0}${features.weakField?1:0}${features.warpLocal?1:0}${features.warpOnly?1:0}${features.warpLocalOnlyCraft?1:0}${features.anomaly?1:0}${features.dyson?1:0}${features.derivatives?1:0}${features.derivativeExtension?1:0}${features.diagnostics?1:0}${features.attachments?1:0}${features.ultra?1:0}${features.warp?1:0}${features.grid?1:0}${features.bridge?1:0}${features.probe?1:0}${features.stellar?1:0}${features.rings?1:0}${features.bodyGravity?1:0}${features.planetary?1:0}:${features.craftMask??(features.craft?15:0)}:${features.objectSlots||MAX_RENDER_OBJECTS}`;}
+ programSupports(features,active=this.activeProgram){const mask=features.craftMask??(features.craft?15:0);return !!active&&!!features.cluster===!!active.features.cluster&&!!features.nebulaVolume===!!active.features.nebulaVolume&&!!features.weakField===!!active.features.weakField&&!!features.warpLocal===!!active.features.warpLocal&&!!features.warpOnly===!!active.features.warpOnly&&!!features.warpLocalOnlyCraft===!!active.features.warpLocalOnlyCraft&&(!features.anomaly||active.features.anomaly)&&(!features.dyson||active.features.dyson)&&(active.features.objectSlots||MAX_RENDER_OBJECTS)===(features.objectSlots||MAX_RENDER_OBJECTS)&&((active.features.craftMask??(active.features.craft?15:0))&mask)===mask&&(!features.warp||active.features.warp)&&(!features.grid||active.features.grid)&&(!!features.bridge===!!active.features.bridge)&&(!features.diagnostics||active.features.diagnostics)&&(!features.attachments||active.features.attachments)&&(!features.probe||active.features.probe)&&(!features.stellar||active.features.stellar)&&(!features.rings||active.features.rings)&&(!features.bodyGravity||active.features.bodyGravity)&&(!features.planetary||active.features.planetary); }
  requestProgram(features=this.shaderFeatures()){
   if(!this.gl||this.contextLost||this.disposed)return;
+  const sceneKey=this.programKey({...features,ultra:false});
+  if(this.requestedSceneKey&&this.requestedSceneKey!==sceneKey)this.beginSceneRendering();
+  this.requestedSceneKey=sceneKey;
+  // Only a cold renderer gets a cheap complete frame before Ultra compiles.
+  // Later scene and Drive changes retain the measured/selected fidelity.
+  if(this.scenePreview&&features.ultra)features={...features,ultra:false};
   const key=this.programKey(features),cached=this.programs.get(key);
   // Switching scenes must not wait for an abandoned asynchronous compile.
   if(this.pendingProgram&&this.pendingProgram.key!==key){const old=this.pendingProgram;this.pendingProgram=null;old.shaders.forEach(shader=>this.gl.deleteShader(shader));this.gl.deleteProgram(old.program);}
@@ -120,18 +147,32 @@ export class BlackHoleRenderer {
    // LINK_STATUS / shader logs can synchronize. With KHR, only ask after its
    // completion bit becomes true in a later animation frame.
    if(!this.parallelCompile)this.pollProgram();
-  }catch(error){for(const shader of shaders)gl.deleteShader(shader);if(program)gl.deleteProgram(program);this.pendingProgram=null;this.failedPrograms.add(key);this.cancelCapture('The selected graphics could not compile.');this.onError('This graphics mode could not start. '+error.message);}
+  }catch(error){for(const shader of shaders)gl.deleteShader(shader);if(program)gl.deleteProgram(program);this.pendingProgram=null;this.failedPrograms.add(key);if(this.quality==='adaptive'&&features.ultra){this.budget.limitUltra(this.now());this.resizePending=true;this.requestProgram();}else if(!this.retrySmallerProgram(features,error.message)){this.cancelCapture('The selected graphics could not compile.');this.onError('This graphics mode could not start. '+error.message);}}
+ }
+ shaderCompileMessage(pending,linkMessage=''){
+  const logs=[linkMessage,...(pending.shaders||[]).map((shader,i)=>{const log=this.gl.getShaderInfoLog(shader);return log?(i?'Fragment: ':'Vertex: ')+log:'';})].filter(Boolean);
+  return [...new Set(logs)].join('\n').slice(0,2200)||'The graphics driver rejected this shader.';
+ }
+ retrySmallerProgram(features,message){
+  if(this.contextLost||this.disposed)return false;
+  const current=features.objectSlots||this.shaderObjectSlots(),next=[12,8,6,4,2].find(value=>value<current);
+  this.shaderCompileFailures??=[];this.shaderCompileFailures.push({scene:this.sceneId,slots:current,message:String(message||'')});if(this.shaderCompileFailures.length>8)this.shaderCompileFailures.shift();
+  if(!next)return false;
+  // Compatibility limits belong to this scene/context. A dense solar catalog
+  // must not permanently reduce a different black-hole or warp scene.
+  this.shaderSlotLimits??=new Map();this.shaderSlotLimits.set(this.sceneId,next);
+  this.packedView=null;this.packRenderObjects();this.resizePending=true;this.requestProgram();return true;
  }
  pollProgram(){
   const pending=this.pendingProgram;if(!pending||this.contextLost)return;
   const gl=this.gl;if(this.parallelCompile&&!gl.getProgramParameter(pending.program,this.parallelCompile.COMPLETION_STATUS_KHR))return;
   this.pendingProgram=null;
   if(!gl.getProgramParameter(pending.program,gl.LINK_STATUS)){
-   const message=gl.getProgramInfoLog(pending.program)||pending.shaders.map(shader=>gl.getShaderInfoLog(shader)).join('\n');
+   const message=this.shaderCompileMessage(pending,gl.getProgramInfoLog(pending.program));
    pending.shaders.forEach(shader=>gl.deleteShader(shader));gl.deleteProgram(pending.program);
    // An abandoned scene may finish compiling after another scene was selected.
    // Its failure must not abort the new scene or its loading lifecycle.
-   if(pending.key===this.programKey(this.shaderFeatures())){this.failedPrograms.add(pending.key);this.cancelCapture('The selected graphics could not compile.');this.onError('This graphics mode could not start. '+message);}return;
+   if(pending.key===this.programKey(this.shaderFeatures())){this.failedPrograms.add(pending.key);if(this.quality==='adaptive'&&pending.features.ultra){this.budget.limitUltra(this.now());this.resizePending=true;this.requestProgram();}else if(!this.retrySmallerProgram(pending.features,message)){this.cancelCapture('The selected graphics could not compile.');this.onError('This graphics mode could not start. '+message);}}return;
   }
   pending.shaders.forEach(shader=>gl.deleteShader(shader));delete pending.shaders;
   pending.uniforms={};for(const name of UNIFORM_NAMES)pending.uniforms[name]=gl.getUniformLocation(pending.program,name);
@@ -141,6 +182,9 @@ export class BlackHoleRenderer {
   while(this.programs.size>4){const obsolete=[...this.programs.values()].find(p=>p!==this.activeProgram);if(!obsolete)break;gl.deleteProgram(obsolete.program);this.programs.delete(obsolete.key);}
  }
  activateProgram(entry){
+  // Keep recently revisited scenes warm. The bounded cache used to retain
+  // insertion order, evicting the bridge even immediately after revisiting it.
+  if(this.programs.has(entry.key)){this.programs.delete(entry.key);this.programs.set(entry.key,entry);}
   if(this.activeProgram===entry)return;
   const gl=this.gl;this.activeProgram=entry;this.program=entry.program;this.uniforms=entry.uniforms;this.ready=true;
   this.programs.delete(entry.key);this.programs.set(entry.key,entry);gl.useProgram(entry.program);gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);gl.enableVertexAttribArray(entry.attribute);gl.vertexAttribPointer(entry.attribute,2,gl.FLOAT,false,0,0);
@@ -152,10 +196,15 @@ export class BlackHoleRenderer {
   const gl=this.gl,fence=this.gpuFence,status=fence.query?null:gl.clientWaitSync(fence.sync,0,0),elapsed=Math.max(0,now-fence.started);
   const complete=fence.query?!!this.completionQuery.getQueryObjectEXT(fence.query,this.completionQuery.QUERY_RESULT_AVAILABLE_EXT):status===gl.ALREADY_SIGNALED||status===gl.CONDITION_SATISFIED;
   fence.polls=(fence.polls||0)+1;
-  const eligible=!fence.ignoreLatency&&!fence.warmup&&fence.generation===this.budget.generation;
-  if(this.budget.noteGpu(now,elapsed,complete,{eligible,polls:fence.polls}))this.resizePending=true;
+  const eligible=!fence.ignoreLatency&&!fence.warmup&&!fence.refiningProgram&&fence.generation===this.budget.generation;
+  // A slow first frame may reduce the next draw's pixel budget. It still
+  // cannot earn a promotion or contaminate steady-state FPS measurements.
+  const canReduce=!fence.ignoreLatency&&fence.sceneGeneration===this.sceneGeneration;
+  if(this.budget.noteGpu(now,elapsed,complete,{eligible:canReduce,polls:fence.polls}))this.resizePending=true;
   if(status===gl.WAIT_FAILED){this.releaseFence();this.canFence=false;this.budget.resetTiming(now);return false;}
   if(!complete)return false;
+  if(fence.workloadProbe)this.completeWarpWorkload(fence,now,elapsed);
+  if(fence.scenePreview&&fence.sceneGeneration===this.sceneGeneration)this.completeScenePreview();
   this.frames++;
   if(this.budget.noteCompletion(now,{eligible}))this.resizePending=true;
   this.releaseFence();return true;
@@ -210,7 +259,7 @@ export class BlackHoleRenderer {
   // Explicit Ultra captures wait; Picture's Quick/baseline captures may save
   // the compatible program actually visible while Ultra is still preparing.
   if(this.quality!==request.quality){this.cancelCapture('Render quality changed before the image was ready. Please save again.');return;}
-  if(!request.allowPreview&&(this.quality==='ultra')!==!!this.activeProgram?.features.ultra)return;
+  if(!request.allowPreview&&this.shaderFeatures().ultra!==!!this.activeProgram?.features.ultra)return;
   request.encoding=true;request.progress('Encoding current frame…');
   // preserveDrawingBuffer is false: snapshot in the SAME task as the new draw,
   // before the browser composites and is allowed to discard its drawing buffer.
@@ -236,6 +285,7 @@ export class BlackHoleRenderer {
   this.listen(canvas,'pointermove',e=>{
    if(!this.pointers.has(e.pointerId))return;
    const previous=this.pointers.get(e.pointerId),dx=e.clientX-previous.x,dy=e.clientY-previous.y;
+   if(dx||dy)this.noteCameraInteraction();
    if(this.pointers.size>1){
     const other=[...this.pointers.entries()].find(([id])=>id!==e.pointerId)?.[1];
     if(other){const before=Math.hypot(previous.x-other.x,previous.y-other.y),after=Math.hypot(e.clientX-other.x,e.clientY-other.y);if(after>1)this.zoom(before/after);}
@@ -251,7 +301,7 @@ export class BlackHoleRenderer {
   this.listen(canvas,'wheel',e=>{e.preventDefault();if([...this.pointers.values()].some(p=>p.mode==='look'))return;this.zoom(Math.exp(clamp(e.deltaY,-180,180)*.0022));},{passive:false});
   this.listen(canvas,'keydown',e=>{
    if(this.driveId&&['w','s','a','d','q','e'].includes(e.key.toLowerCase()))return;
-   const directional=(yaw,pitch)=>{if(this.cameraGuide!=='warp-side'||this.focusMode!=='track')this.cameraGuide=null;if(this.state.viewMode==='look'||this.state.viewMode==='free'||['onboard','chase'].includes(this.focusMode)||e.shiftKey){this.travel=false;this.target.lookYaw+=yaw;this.target.lookPitch=clamp(this.target.lookPitch+pitch,-1.5533,1.5533);}else this.rotate(yaw,pitch);};
+   const directional=(yaw,pitch)=>{this.noteCameraInteraction();if(this.cameraGuide!=='warp-side'||this.focusMode!=='track')this.cameraGuide=null;if(this.state.viewMode==='look'||this.state.viewMode==='free'||['onboard','chase'].includes(this.focusMode)||e.shiftKey){this.travel=false;this.target.lookYaw+=yaw;this.target.lookPitch=clamp(this.target.lookPitch+pitch,-1.5533,1.5533);}else this.rotate(yaw,pitch);};
    const actions={ArrowLeft:()=>directional(-.10,0),ArrowRight:()=>directional(.10,0),ArrowUp:()=>directional(0,.08),ArrowDown:()=>directional(0,-.08),'+':()=>this.zoom(.85),'=':()=>this.zoom(.85),'-':()=>this.zoom(1.18),Home:()=>this.resetCamera(),w:()=>this.zoom(.85),s:()=>this.zoom(1.18),W:()=>this.zoom(.85),S:()=>this.zoom(1.18)};
    if(actions[e.key]){e.preventDefault();actions[e.key]();}
   });
@@ -264,19 +314,36 @@ export class BlackHoleRenderer {
  get massScale(){return this.state.mass/REFERENCE_MASS;}
  get minDistance(){return this.state.interiorView&&this.state.spectrum==='geometry'?.02*this.massScale:this.massScale*horizonRg(this.state.spin)*1.012;}
  get maxDistance(){return Math.max(5000*this.massScale,(this.configCache.bounds||0)*4);}
- maxFocusDistance(){const focus=this.getFocusFrame();if(!focus)return 160;let extent=160*focus.radius;for(const object of this.objects){if(object.parentId===this.focusId){const orbital=(object.orbitMeters||object.radius*this.massScale*REFERENCE_RG_METERS)*(1+(object.eccentricity||0))/REFERENCE_RG_METERS;extent=Math.max(extent,(orbital+this.objectRadius(object)*3)*2.4);}}return Math.min(1e12,Math.max(160,extent/Math.max(1e-20,focus.radius)));}
+ maxFocusDistance(){const focus=this.getFocusFrame();if(!focus)return 160;let extent=Math.max(160*focus.radius,(this.camera?.focusDistance||0)*focus.radius*2);for(const object of this.objects){if(object.parentId===this.focusId){const orbital=(object.orbitMeters||object.radius*this.massScale*REFERENCE_RG_METERS)*(1+(object.eccentricity||0))/REFERENCE_RG_METERS;extent=Math.max(extent,(orbital+this.objectRadius(object)*3)*2.4);}}return Math.min(1e12,Math.max(512,extent/Math.max(1e-20,focus.radius)));}
 
+ nebulaWorldScale(){
+  const s=this.state,k=this.configCache;
+  if(s.bridge)return Math.max(1e-12,(k.bridgeRadius||1)*8);
+  if(s.blackHole)return Math.max(1e-12,this.massScale*24);
+  const ship=this.objects.find(o=>o.id===this.warpObjectId)||this.objects.find(o=>o.type==='enterprise');
+  if(ship&&s.warp)return Math.max(1e-12,this.objectRadius(ship)*16);
+  return Math.max(.01,(k.bounds||30)/3);
+ }
  refreshConfiguration(){
   this.state.metrics=false;
   this.geometryRevision=(this.geometryRevision||0)+1;
+  this.hasWarpGridNeighbor=!!(this.state.blackHole||this.state.planet||this.state.tidalStar||this.state.bridge||this.objects.some(o=>['star','blackhole','whitehole','planet','moon','planetoid','asteroid','anomaly','dyson'].includes(o.type)));
+  this.hasWaypoints=this.objects.some(o=>o.type==='waypoint');
   this.anomalyObjects=this.objects.filter(o=>o.type==='anomaly').slice(0,4);
   this.clockActors=this.objects.filter(o=>supportsObjectClock(o.type));
   for(const object of this.clockActors)if(!object.clock)object.clock=createObjectClock();
   const s=this.state,c=this.configCache,m=this.massScale;
+  // Compute only when the model changes, not once per ray or animation tick.
+  c.weakFieldBodies=this.objects.length>0&&this.objects.every(o=>{
+   if(['blackhole','whitehole','anomaly','dyson','disk','jets'].includes(o.type))return false;
+   if(o.type==='star'){const star=stellarInfo(o,this.time);return !o.collapseEnabled&&!star.collapsed&&star.compactness<.001;}
+   if(isPlanetarySurface(o.type))return 2*SOLAR_RG_METERS*(o.massSolar||0)/(this.objectRadius(o)*REFERENCE_RG_METERS)<.001;
+   return true;
+  });
   s.warpRadius=effectiveWarpRadius(s.warpFactor);
   const bridgeShip=this.objects.find(o=>o.id===this.bridgeObjectId)||this.objects.find(o=>['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'].includes(o.type));c.bridgeRadius=(bridgeShip?this.objectRadius(bridgeShip):this.bodyRadius(s.bridgeTravelerType||'enterprise'))*(s.bridgeRadius||8);
   c.primaryAxis=axis(s.primaryTilt,s.primaryAzimuth);c.secondaryAxis=axis(s.secondaryTilt,s.secondaryAzimuth);c.primaryBasis=basis(c.primaryAxis);
-  c.bridgeOtherColor=color(s.bridgeOtherColor,DEFAULTS.bridgeOtherColor);c.diskColor=color(s.diskColor,DEFAULTS.diskColor);c.nebulaColor=color(s.nebulaColor,DEFAULTS.nebulaColor);c.jetColor=color(s.jetColor,DEFAULTS.jetColor);c.starColor=color(s.starColor,DEFAULTS.starColor);c.planetColor=color(s.planetColor,DEFAULTS.planetColor);
+  c.bridgeOtherColor=color(s.bridgeOtherColor,DEFAULTS.bridgeOtherColor);c.diskColor=color(s.diskColor,DEFAULTS.diskColor);c.nebulaColor=color(s.nebulaColor,DEFAULTS.nebulaColor);c.nebulaSecondaryColor=color(s.nebulaSecondaryColor,DEFAULTS.nebulaSecondaryColor);c.jetColor=color(s.jetColor,DEFAULTS.jetColor);c.starColor=color(s.starColor,DEFAULTS.starColor);c.planetColor=color(s.planetColor,DEFAULTS.planetColor);
   c.horizon=[m*horizonRg(s.spin),m*s.binaryRatio*horizonRg(s.secondarySpin)];c.isco=[iscoRg(s.spin),iscoRg(s.secondarySpin)];
   const separation=s.binarySeparation*m;
   c.diskOuter=s.binary?[Math.min(s.diskOuter*m,.65*separation*rocheFraction(1/s.binaryRatio)),Math.min((s.secondaryDiskOuter??s.diskOuter)*m*s.binaryRatio,.65*separation*rocheFraction(s.binaryRatio))]:[s.diskOuter*m,0];
@@ -341,7 +408,7 @@ export class BlackHoleRenderer {
   if((this.focusId==='primary'&&!this.state.blackHole)||(this.focusId==='secondary'&&(!this.state.blackHole||!this.state.binary))||(this.focusId==='planet'&&!this.state.planet)||(this.focusId==='tidalStar'&&!this.state.tidalStar))this.releaseFocus();
  }
  setQuality(quality){if(!this.budget.setQuality(quality,this.now()))return;if(this.captureRequest&&quality!==this.quality)this.cancelCapture('Render quality changed before the image was ready. Please save again.');this.quality=quality;this.requestProgram();this.resize();}
- profile(){const p=this.budget.profile;this.adaptiveScale=p.scale;return this.quality==='ultra'&&!this.activeProgram?.features.ultra?QUALITY_PROFILES.high:p;}
+ profile(){let p=this.scenePreview?STARTUP_PROFILE:this.budget.profile;if(!this.scenePreview&&this.budget.effectiveQuality==='ultra'&&!this.activeProgram?.features.ultra)p=QUALITY_PROFILES.high;if(this.warpWorkloadProbe)p={...p,pixels:Math.min(p.pixels,32768)};this.adaptiveScale=p.scale;return p;}
  resize(external=false){
   if(external)this.resizeMeasurePending=true;
   if(!this.gl||this.contextLost||this.photoActive||this.xr?.active)return;if(this.gpuFence){this.resizePending=true;return;}const p=this.profile(),r=this.canvas.getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,p.dpr)*p.scale;
@@ -352,7 +419,7 @@ export class BlackHoleRenderer {
   this.resizeMeasurePending=false;this.gl.viewport(0,0,width,height);this.steps=Math.min(p.steps,this.activeProgram?.features.ultra?768:288);this.detail=p.detail;this.renderScale=width/Math.max(1,r.width);this.resizePending=false;
  }
  resetCamera(){
-  const selectedPreset=SCENE_PRESETS.find(p=>p.id===this.sceneId),preset=(this.state.bridge&&!selectedPreset?.patch?.bridge?SCENE_PRESETS.find(p=>p.id==='bridge'):selectedPreset)||SCENE_PRESETS[0],bridgeVehicle=this.state.bridge&&this.objects.some(o=>o.id===this.bridgeObjectId&&['enterprise','shuttle','heighliner'].includes(o.type)),view=bridgeVehicle?{...(preset.camera||{}),...BRIDGE_VEHICLE_CAMERA,focusTarget:null}:preset.camera||{},pitchLimit=preset.category==='Geometry'?Math.PI/2-.001:1.48;
+  const selectedPreset=SCENE_PRESETS.find(p=>p.id===this.sceneId),preset=(this.state.bridge&&!selectedPreset?.patch?.bridge?SCENE_PRESETS.find(p=>p.id==='bridge'):selectedPreset)||SCENE_PRESETS[0],bridgeVehicle=this.state.bridge&&this.objects.some(o=>o.id===this.bridgeObjectId&&['enterprise','shuttle','heighliner'].includes(o.type)),view=bridgeVehicle?{...(preset.camera||{}),...(BRIDGE_HULL_CAMERAS[preset.id]||BRIDGE_VEHICLE_CAMERA),focusTarget:null}:preset.camera||{},pitchLimit=preset.category==='Geometry'?Math.PI/2-.001:1.48;
   this.releaseFocus(false,false);this.travel=false;this.freePosition=this.freeTarget=this.freeBasis=null;this.state.viewMode='orbit';
   this.target={yaw:Number.isFinite(view.yaw)?view.yaw:.25,pitch:Number.isFinite(view.pitch)?clamp(view.pitch,-pitchLimit,pitchLimit):.19,distance:Number.isFinite(view.distanceMeters)?view.distanceMeters/REFERENCE_RG_METERS:this.state.blackHole?(Number.isFinite(view.distanceRg)?view.distanceRg:(this.state.binary?48:32))*this.massScale:1000/REFERENCE_RG_METERS,lookYaw:0,lookPitch:0,focusDistance:6};
   if(this.state.bridge)this.target.distance=this.configCache.bridgeRadius*8;
@@ -366,7 +433,8 @@ export class BlackHoleRenderer {
   if(view.fitGeometry)this.fitGeometryOverview();
   this.cameraGuide=view.fitWarpSide?'warp-side':view.guideBlueFire?'blue-fire-edge':null;
   if(view.fitWarpSide)this.fitWarpCamera(true);
-  this.updateCameraFrame();this.xr?.recenter();return this.getState();
+  // Initialize orbital composition only after the authored camera is installed.
+  this.parkedCamera=null;this.updateCameraFrame();this.xr?.recenter();return this.getState();
  }
  // Fit the whole initial geometric system, including a complete traveler
  // circuit, inside the HUD-free center. CSS pixels, not render resolution,
@@ -399,6 +467,7 @@ export class BlackHoleRenderer {
   this.state.viewMode=mode;this.pointers.clear();this.pinchOwned=false;this.updateCameraFrame();
  }
  moveForward(distance){
+  this.noteCameraInteraction();
   if(!Number.isFinite(distance)||this.state.viewMode!=='free'||!this.freeTarget)return false;
   this.updateCameraFrame();const direction=this.cameraFrame.forward;
   if(this.driveId)return false;
@@ -418,15 +487,15 @@ export class BlackHoleRenderer {
   for(let k=0;k<(this.state.binary?2:1);k++){const center=Array.from(this.holeData.slice(k*4,k*4+3)),delta=p.map((x,i)=>x-center[i]),distance=Math.hypot(...delta),minimum=this.configCache.horizon[k]*1.013;if(distance<minimum)p=add(center,mul(distance>1e-15?unit(delta):[0,0,1],minimum));}
   return p;
  }
- look(direction){if(this.cameraGuide!=='warp-side'||this.focusMode!=='track')this.cameraGuide=null;this.travel=false;this.target.lookYaw=direction==='outward'?Math.PI:direction==='tangent'?Math.PI/2:0;this.target.lookPitch=direction==='above'?Math.PI/2-.001:0;this.camera.lookYaw=this.target.lookYaw;this.camera.lookPitch=this.target.lookPitch;}
+ look(direction){this.noteCameraInteraction();if(this.cameraGuide!=='warp-side'||this.focusMode!=='track')this.cameraGuide=null;this.travel=false;this.target.lookYaw=direction==='outward'?Math.PI:direction==='tangent'?Math.PI/2:0;this.target.lookPitch=direction==='above'?Math.PI/2-.001:0;this.camera.lookYaw=this.target.lookYaw;this.camera.lookPitch=this.target.lookPitch;}
  setCameraPreset(preset){if(!['in-plane','above-plane'].includes(preset))return false;if(this.cameraGuide!=='warp-side'||this.focusMode!=='track')this.cameraGuide=null;this.travel=false;if(['onboard','chase'].includes(this.focusMode)||this.state.viewMode==='free'||this.state.viewMode==='look'){this.look(preset==='above-plane'?'above':'tangent');}else{this.resetView();this.camera.pitch=this.target.pitch=preset==='above-plane'?Math.PI/2-.001:0;}this.updateCameraFrame();return true;}
- rotate(yawDelta,pitchDelta){if(this.cameraGuide!=='warp-side'||this.focusMode!=='track')this.cameraGuide=null;if(this.state.viewMode==='free'){this.target.lookYaw+=yawDelta;this.target.lookPitch=clamp(this.target.lookPitch+pitchDelta,-1.5533,1.5533);return;}this.travel=false;this.target.distance=this.camera.distance;if(!['onboard','chase'].includes(this.focusMode))this.resetView();if(['onboard','chase'].includes(this.focusMode)){this.target.lookYaw+=yawDelta;this.target.lookPitch=clamp(this.target.lookPitch+pitchDelta,-1.5533,1.5533);}else{this.target.yaw+=yawDelta;this.target.pitch=clamp(this.target.pitch+pitchDelta,-Math.PI/2+.001,Math.PI/2-.001);}this.navigationUntil=this.now()+100;}
+ rotate(yawDelta,pitchDelta){this.noteCameraInteraction();if(this.cameraGuide!=='warp-side'||this.focusMode!=='track')this.cameraGuide=null;if(this.state.viewMode==='free'){this.target.lookYaw+=yawDelta;this.target.lookPitch=clamp(this.target.lookPitch+pitchDelta,-1.5533,1.5533);return;}this.travel=false;this.target.distance=this.camera.distance;if(!['onboard','chase'].includes(this.focusMode))this.resetView();if(['onboard','chase'].includes(this.focusMode)){this.target.lookYaw+=yawDelta;this.target.lookPitch=clamp(this.target.lookPitch+pitchDelta,-1.5533,1.5533);}else{this.target.yaw+=yawDelta;this.target.pitch=clamp(this.target.pitch+pitchDelta,-Math.PI/2+.001,Math.PI/2-.001);}this.navigationUntil=this.now()+100;}
  detachRide(){this.cameraGuide=null;
   this.updateCameraFrame();const f=this.getFocusFrame();if(!f)return false;
   const forward=inverse(f.frame,this.cameraFrame.forward),distance=this.focusMode==='chase'?Math.hypot(...this.cameraFrame.inspectCamera):1.15;
   this.focusMode='track';this.state.viewMode='orbit';this.resetView();this.camera.yaw=this.target.yaw=Math.atan2(-forward[0],-forward[2]);this.camera.pitch=this.target.pitch=clamp(Math.asin(-forward[1]),-1.5533,1.5533);this.camera.focusDistance=this.target.focusDistance=Math.max(1.15,distance);this.updateCameraFrame();return true;
  }
- zoom(factor){this.cameraGuide=null;if(this.state.viewMode==='free'){this.moveForward(-Math.log(clamp(factor,.01,100))*this.navigationStep());return;}this.travel=false;if(this.focusId){if(['onboard','chase'].includes(this.focusMode)){if(factor<=1)return;this.detachRide();}this.target.focusDistance=clamp(this.target.focusDistance*factor,['dyson','anomaly'].includes(this.getFocusFrame()?.type)?1e-7:this.state.interiorView&&this.state.spectrum==='geometry'&&this.getFocusFrame()?.collapsed?.02:1.15,this.maxFocusDistance());}else{const lower=this.state.blackHole?(this.state.binary?.05*this.massScale:this.minDistance):.1/REFERENCE_RG_METERS;this.target.distance=clamp(this.target.distance*factor,lower,this.maxDistance);}this.navigationUntil=this.now()+180;}
+ zoom(factor){this.noteCameraInteraction();this.cameraGuide=null;if(this.state.viewMode==='free'){this.moveForward(-Math.log(clamp(factor,.01,100))*this.navigationStep());return;}this.travel=false;if(this.focusId){if(['onboard','chase'].includes(this.focusMode)){if(factor<=1)return;this.detachRide();}this.target.focusDistance=clamp(this.target.focusDistance*factor,['dyson','anomaly'].includes(this.getFocusFrame()?.type)?1e-7:this.state.interiorView&&this.state.spectrum==='geometry'&&this.getFocusFrame()?.collapsed?.02:1.15,this.maxFocusDistance());}else{const lower=this.state.blackHole?(this.state.binary?.05*this.massScale:this.minDistance):.1/REFERENCE_RG_METERS;this.target.distance=clamp(this.target.distance*factor,lower,this.maxDistance);}this.navigationUntil=this.now()+180;}
 
  setDistanceRg(value){if(!Number.isFinite(Number(value)))return;this.releaseFocus(false,false);this.travel=false;this.resetView();const lower=this.state.blackHole?(this.state.binary?.05*this.massScale:this.minDistance):.1/REFERENCE_RG_METERS;this.target.distance=clamp(Number(value)*this.massScale,lower,this.maxDistance);}
  setDistanceMeters(value){if(!Number.isFinite(Number(value)))return;this.releaseFocus(false,false);this.travel=false;this.resetView();this.target.distance=clamp(Number(value)/REFERENCE_RG_METERS,this.state.blackHole?this.minDistance:.1/REFERENCE_RG_METERS,this.maxDistance);}
@@ -449,16 +518,32 @@ export class BlackHoleRenderer {
  // Accelerating the fictional stellar system leaves convection visually legible.
  stellarVisualTime(){return this.sceneId==='thorne-zytkow'?this.time/(SCENE_PRESETS.find(p=>p.id===this.sceneId)?.simulationTimeScale||1):this.time;}
  objectRadius(obj){if(obj.type==='star'){const info=stellarInfo(obj,this.time);return (info.collapsed?info.horizonMeters:info.radiusMeters)/REFERENCE_RG_METERS;}if(['blackhole','whitehole'].includes(obj.type))return 2*1476.62504*(obj.massSolar||10)/REFERENCE_RG_METERS;const shape=Array.isArray(obj.shapeAxes)?Math.max(1e-6,...obj.shapeAxes):1;return shape*(Number.isFinite(obj.radiusMeters)&&obj.radiusMeters>0?obj.radiusMeters*objectScale(obj):objectRadiusMeters(obj.type,obj.scale))/REFERENCE_RG_METERS;}
- orbitalOmega(obj){if(obj.placement==='local'||['ring','belt','disk','jets','dyson'].includes(obj.type))return 0;if(obj.orbitMeters){const r=Math.max(1,obj.orbitMeters)/REFERENCE_RG_METERS,m=(this.parentMassSolar(obj)+(OBJECT_CLASS[(this.objectById?.get(obj.parentId)||this.objects.find(p=>p.id===obj.parentId))?.type||(obj.parentId==='planet'?'planet':obj.parentId==='tidalStar'?'star':null)]===OBJECT_CLASS[obj.type]||obj.barycentric?this.objectMassSolar(obj):0))/(REFERENCE_MASS*1e6);return 18*Math.sqrt(Math.max(1e-30,m)/(r*r*r));}const r=Math.max(.1,obj.radius)*this.massScale;return 18*Math.sqrt(this.massScale/(r*r*r));}
+ orbitalOmega(obj){
+  // This guided circle is supported by the shield: its radius does not
+  // impose a Keplerian speed. Convert cruise m/s to the scene clock.
+  if(this.sceneId==='warp-orbit'&&obj.type==='enterprise'&&this.state.warp&&obj.placement==='orbit'){
+   const meters=obj.orbitMeters||obj.radius*this.massScale*REFERENCE_RG_METERS;
+   return 18*REFERENCE_RG_METERS/LIGHT_SPEED*speedForWarp(this.state.warpFactor)/Math.max(1,meters);
+  }
+  if(obj.placement==='local'||['ring','belt','disk','jets','dyson'].includes(obj.type))return 0;if(isParkingCraft(obj)){const r=Math.max(1,obj.orbitMeters||obj.radius*this.massScale*REFERENCE_RG_METERS);return 18*REFERENCE_RG_METERS/LIGHT_SPEED*Math.sqrt(SOLAR_MU*Math.max(0,this.parentMassSolar(obj))/(r*r*r));}if(obj.orbitMeters){const r=Math.max(1,obj.orbitMeters)/REFERENCE_RG_METERS,m=(this.parentMassSolar(obj)+(OBJECT_CLASS[(this.objectById?.get(obj.parentId)||this.objects.find(p=>p.id===obj.parentId))?.type||(obj.parentId==='planet'?'planet':obj.parentId==='tidalStar'?'star':null)]===OBJECT_CLASS[obj.type]||obj.barycentric?this.objectMassSolar(obj):0))/(REFERENCE_MASS*1e6);return 18*Math.sqrt(Math.max(1e-30,m)/(r*r*r));}const r=Math.max(.1,obj.radius)*this.massScale;return 18*Math.sqrt(this.massScale/(r*r*r));}
  currentPhase(obj){if(obj.placement==='local'||obj.motion==='horizon'||obj.motion==='infall'||this.state.bridge&&obj.id===this.bridgeObjectId)return obj.phase;if(this.state.warp&&obj.id===this.warpObjectId&&this.state.warpScenario!=='orbit')return obj.phase;return obj.phase-(this.time-(obj.epoch||0))*this.orbitalOmega(obj);}
  componentOrbitPhase(id,omega,initial=0){const saved=this.orbitOverrides?.[id];return (saved?.phase??initial)-(this.time-(saved?.epoch||0))*omega;}
  orbitMassSolar(obj){const parent=this.objectById?.get(obj.parentId)||this.objects.find(p=>p.id===obj.parentId),parentClass=OBJECT_CLASS[parent?.type||(obj.parentId==='planet'?'planet':obj.parentId==='tidalStar'?'star':null)];return this.parentMassSolar(obj)+(parentClass===OBJECT_CLASS[obj.type]||obj.barycentric?this.objectMassSolar(obj):0);}
+ // A recommendation at creation, never a live limiter on a user-selected orbit.
+ applyCrewOrbitDefault(o){
+  if(this.state.bridge||!limitedCrew(o.type)||o.placement!=='orbit'||o.motion!=='orbit')return;
+  const mass=this.parentMassSolar(o),unit=this.massScale*REFERENCE_RG_METERS;
+  const floor=oneGravityRadius(o.type,mass)/(1-(isParkingCraft(o)?0:o.eccentricity||0));
+  if((o.orbitMeters||o.radius*unit)>=floor||!(floor>0))return;
+  if(!o.orbitMeters&&o.heightMeters==null)o.heightMeters=(o.height||0)*unit;
+  o.orbitMeters=floor;o.radius=floor/unit;o.orbitalPeriodSeconds=TAU*Math.sqrt(floor**3/(SOLAR_MU*mass));
+ }
  minimumObjectRadiusRg(object,height){
+  if(isParkingCraft(object))height=Math.max(orbitClearance(this,object,object.parentId), (object.routeParkingHeightMeters||0)/REFERENCE_RG_METERS)/this.massScale;
   if(height===undefined)height=object.orbitMeters&&Number.isFinite(object.heightMeters)?object.heightMeters/(this.massScale*REFERENCE_RG_METERS):object.height||0;
   const parentId=object.parentId||'primary',index=parentId==='primary'?0:parentId==='secondary'?1:-1;
   if(index<0||!this.state.blackHole)return 2.2;
-  const clearance=compactExteriorRadius(this.configCache.horizon[index],this.objectRadius(object))/this.massScale;
-  return Math.max(.000001,Math.sqrt(Math.max(0,clearance*clearance-height*height)));
+  return Math.max(.000001,compactCircleMinimum(this.configCache.horizon[index]/this.massScale,clockHullMeters(this,object,this.objectRadius(object)*REFERENCE_RG_METERS)/(REFERENCE_RG_METERS*this.massScale),height));
  }
  getOrbitEditInfo(id){
   const object=this.objects.find(o=>o.id===id),parentId=object?.parentId||(id==='planet'||id==='tidalStar'||id==='secondary'?'primary':id==='primary'?'space':null),result={editable:false,parentId,radiusMeters:0,minimumMeters:1,maximumMeters:1e17,periodDays:null,speedMetersPerSecond:null};
@@ -472,16 +557,21 @@ export class BlackHoleRenderer {
   else if(object){
    if(object.placement==='local'||parentId==='space')return {...result,reason:'This object has a local position. Choose an orbital parent in Properties.'};
    if(object.motion&&object.motion!=='orbit'||this.driveId===id||object.driveReturn||this.state.warp&&id===this.warpObjectId&&this.state.warpScenario!=='orbit')return {...result,reason:'Resume its orbit before changing the orbital radius.'};
-   radius=object.orbitMeters||object.radius*this.massScale*REFERENCE_RG_METERS;mass=this.orbitMassSolar(object);e=object.eccentricity||0;bodyRadius=this.objectRadius(object)*REFERENCE_RG_METERS;
+   radius=object.orbitMeters||object.radius*this.massScale*REFERENCE_RG_METERS;mass=this.orbitMassSolar(object);e=isParkingCraft(object)?0:object.eccentricity||0;bodyRadius=this.objectRadius(object)*REFERENCE_RG_METERS;
    const parent=this.objects.find(o=>o.id===parentId);parentRadius=parent?this.objectRadius(parent)*REFERENCE_RG_METERS:parentId==='primary'?this.configCache.horizon[0]*REFERENCE_RG_METERS:parentId==='secondary'?this.configCache.horizon[1]*REFERENCE_RG_METERS:parentId==='planet'?this.bodyRadius('planet',this.state.planetRadius)*REFERENCE_RG_METERS:parentId==='tidalStar'?this.bodyRadius('star',this.state.starRadius)*REFERENCE_RG_METERS:0;
    const compact=['primary','secondary'].includes(parentId)||parent&&(['blackhole','whitehole'].includes(parent.type)||parent.type==='star'&&stellarInfo(parent,this.time).collapsed);
-   const height=object.orbitMeters?(object.heightMeters||0):(object.height||0)*this.massScale*REFERENCE_RG_METERS,clearance=compactExteriorRadius(parentRadius,bodyRadius);
-   const minimumPericenter=compact?Math.sqrt(Math.max(1,clearance*clearance-height*height)):(parentRadius+bodyRadius)*1.02;
+   const height=isParkingCraft(object)?Math.max(orbitClearance(this,object,object.parentId)*REFERENCE_RG_METERS,object.routeParkingHeightMeters||0):object.orbitMeters?(object.heightMeters||0):(object.height||0)*this.massScale*REFERENCE_RG_METERS;
+   const minimumPericenter=compact?stopMinimumMeters(this,object,parentId,height):(parentRadius+bodyRadius)*1.02;
    result.minimumMeters=Math.max(1,minimumPericenter/(1-e));result.radiusLabel=e>0?'Semi-major axis':'Orbital radius';
    if(compact)result.orbitNote='Near-horizon paths are prescribed demonstrations; circular orbits below the innermost stable orbit are not stable physical orbits.';
   }else return {...result,reason:'Choose an orbiting body.'};
-  const mu=1.32712440018e20*Math.max(0,mass),period=mu>0?TAU*Math.sqrt(radius**3/mu):null;
+  const mu=SOLAR_MU*Math.max(0,mass),period=mu>0?TAU*Math.sqrt(radius**3/mu):null;
   return {...result,editable:true,radiusMeters:radius,minimumMeters:Math.min(result.minimumMeters,radius),maximumMeters:Math.max(result.maximumMeters,radius),periodDays:period===null?null:period/86400,speedMetersPerSecond:mu>0?Math.sqrt(mu/radius):null,velocityLabel:e>0?'Circular-equivalent speed':'Orbital speed',reason:''};
+ }
+ setShuttleOrbitSpeed(id,value){
+  const craft=this.objects.find(o=>o.id===id),info=this.getOrbitEditInfo(id),speed=Number(value);
+  if(craft?.type!=='shuttle'||!info.editable||!(speed>0)||!Number.isFinite(speed))return false;
+  return this.setOrbitRadiusMeters(id,SOLAR_MU*this.parentMassSolar(craft)/(speed*speed));
  }
  setOrbitRadiusMeters(id,meters){
   const info=this.getOrbitEditInfo(id);if(!info.editable||!Number.isFinite(Number(meters)))return false;
@@ -499,7 +589,7 @@ export class BlackHoleRenderer {
  }
  getObjectTree(){
   const nodes=[{id:'space',parentId:null,type:'space',label:'Space',component:'space',enabled:true,canAdd:!this.state.bridge,canTrack:false,canBoard:false}],preset=SCENE_PRESETS.find(p=>p.id===this.sceneId);
-  const add=(id,parentId,type,label,component)=>nodes.push({id,parentId,type,label,component,enabled:true,canAdd:!['disk','jets','ring','belt','dyson','anomaly'].includes(type),canTrack:true,canBoard:!['disk','jets','ring','belt'].includes(type)});
+  const add=(id,parentId,type,label,component)=>nodes.push({id,parentId,type,label,component,enabled:true,canAdd:!['disk','jets','ring','belt','dyson','anomaly','waypoint'].includes(type),canTrack:type!=='waypoint',canBoard:!['disk','jets','ring','belt','waypoint'].includes(type)});
   if(this.state.blackHole){add('primary','space',this.state.whiteHole?'whitehole':'blackhole',holeDisplayName(this.state,0,preset),'blackHole');if(this.state.disk)add('disk','primary','disk','Accretion disc','disk');if(this.state.jets)add('jets','primary','jets','Polar jets','jets');if(this.state.binary){add('secondary','primary',this.state.secondaryWhiteHole?'whitehole':'blackhole',holeDisplayName(this.state,1,preset),'binary');if(this.state.secondaryDisk)add('secondary-disk','secondary','disk','Accretion disc','secondary-disk');if(this.state.secondaryJets)add('secondary-jets','secondary','jets','Polar jets','secondary-jets');}}
   if(this.state.planet)add('planet',this.state.blackHole?'primary':'space','planet','Planet A','planet');if(this.state.tidalStar)add('tidalStar',this.state.blackHole?'primary':'space','star','Disrupting star','tidalStar');
   for(const object of this.objects)add(object.id,object.parentId||(object.referenceId||(this.state.blackHole?'primary':'space')),object.type,object.name||`${OBJECT_TYPES.find(t=>t.id===object.type)?.label||object.type} ${object.id.replace('body-','')}`);
@@ -512,6 +602,7 @@ export class BlackHoleRenderer {
   if(this.state.bridge)reason='The bridge has one route traveler; change it in the bridge properties.';
   else if(!parent)reason='Choose an existing parent.';
   else if(!parent.canAdd)reason='Attachments cannot contain orbiting objects.';
+  else if(type==='waypoint'&&parentId!=='space')reason='Stationary waypoints belong to the scene origin.';
   else if(type==='anomaly'&&parentId!=='space')reason='A gravity anomaly is a region in Space, not an orbiting body.';
   else if(type==='anomaly'&&this.objects.filter(o=>o.type==='anomaly'&&o.id!==excludeId).length>=4)reason='Up to four gravity anomaly regions can be combined.';
   else if(excludeId===parentId)reason='An object cannot orbit itself.';
@@ -519,8 +610,9 @@ export class BlackHoleRenderer {
   else if(['disk','jets'].includes(type)&&((['primary','secondary'].includes(parentId)&&this.state[parentId==='secondary'?(type==='disk'?'secondaryDisk':'secondaryJets'):type])||nodes.some(n=>n.parentId===parentId&&n.type===type&&n.id!==excludeId)))reason='This object already has this component.';
   else if(type==='dyson'&&!['star','blackhole','whitehole'].includes(parent.type))reason='A Dyson sphere is concentric with a star or compact central body.';
   else if(type==='dyson'&&nodes.some(n=>n.parentId===parentId&&n.type===type&&n.id!==excludeId))reason='This central body already has a Dyson sphere.';
-  else if(['ring','belt'].includes(type)&&!['star','planet'].includes(parent.type))reason='Rings and belts belong to stars or planets.';
+  else if(['ring','belt'].includes(type)&&!['star','planet','planetoid','asteroid'].includes(parent.type))reason='Rings and belts belong to stars or planets.';
   else if(!['disk','jets','ring','belt'].includes(type)&&OBJECT_CLASS[type]===undefined)reason='Unknown object type.';
+  else if(naturalParentReason(type,parent.type))reason=naturalParentReason(type,parent.type);
   else if(OBJECT_CLASS[type]>OBJECT_CLASS[parent.type])reason='A heavier object class cannot orbit a lighter parent.';
   if(!reason&&excludeId){let ancestor=parent;const visited=new Set();while(ancestor&&!visited.has(ancestor.id)){if(ancestor.id===excludeId){reason='This would create a cycle.';break;}visited.add(ancestor.id);ancestor=nodes.find(n=>n.id===ancestor.parentId);}}
   if(!reason&&OBJECT_CLASS[type]===OBJECT_CLASS[parent.type]&&!satellite){const grand=nodes.find(n=>n.id===parent.parentId),comparable=(child,host)=>OBJECT_CLASS[child?.type]===OBJECT_CLASS[host?.type]&&!compactSatellite(child?.type,this.compactNodeMass(child?.id),host?.type,this.compactNodeMass(host?.id));if((grand&&comparable(parent,grand))||nodes.some(n=>n.id!==excludeId&&n.parentId===parentId&&comparable(n,parent))||(excludeId&&nodes.some(n=>n.parentId===excludeId&&comparable(n,{id:excludeId,type}))))reason='Comparable-mass compact bodies and equal-class objects are restricted to a pair; smaller compact satellites must be at most one tenth of their host mass.';}
@@ -535,10 +627,11 @@ export class BlackHoleRenderer {
   if(this.objects.length>=MAX_SCENE_OBJECTS){this.lastTreeError='This scene supports up to 1,024 catalog objects; only visible bodies use detailed GPU slots.';return false;}
   const added=this.addObject(type,options.radius??12,options.phase??0,options.scale??1);if(!added)return false;
   const obj=this.objects.find(o=>o.id===added.id);obj.parentId=parentId;obj.referenceId=null;
-  if(parentId==='space'){obj.placement='local';obj.x=options.x??0;obj.y=options.y??0;obj.z=options.z??0;}
+  if(parentId==='space'){obj.placement='local';for(const k of ['x','y','z'])obj[k]=options[k]??(type==='waypoint'?obj[k]:0);}
   else{obj.placement='orbit';const parent=this.objects.find(o=>o.id===parentId);if(parent)obj.orbitMeters=options.orbitMeters??Math.max(10,(this.objectRadius(parent)+this.objectRadius(obj))*REFERENCE_RG_METERS*3);else if(['planet','tidalStar'].includes(parentId)){this.fillObjects();const frame=this.getFocusFrame(parentId);obj.orbitMeters=options.orbitMeters??Math.max(10,((frame?.radius||0)+this.objectRadius(obj))*REFERENCE_RG_METERS*3);}else if(parentId==='secondary')obj.radius=options.radius??6;}
   if(['disk','jets'].includes(type)){const parent=this.objects.find(o=>o.id===parentId);obj.radiusMeters=this.objectRadius(parent)*REFERENCE_RG_METERS*(type==='disk'?5:12);obj.innerRadiusRatio=type==='disk'?.23:.01;obj.thicknessRatio=.025;obj.color=type==='disk'?'#83bfff':'#65b8ff';}
   if(type==='dyson'){const parent=this.objects.find(o=>o.id===parentId);obj.radiusMeters=dysonHabitableRadius(parent);obj.dysonCutaway=0;obj.opacity=1;obj.massSolar=0;obj.color='#a5bdce';obj.height=0;obj.orbitMeters=1;obj.radius=0;obj.rotation=0;obj.dataNote='Fictional rigid habitat shell. Earth-equivalent stellar flux sets its initial radius; active support and artificial surface gravity are assumed. The shell center stays on its parent.';}
+  if(options.orbitMeters==null&&options.radius==null)this.applyCrewOrbitDefault(obj);
   this.updateObject(obj.id,options);return {...obj};
  }
  reparentObject(id,parentId){
@@ -548,6 +641,7 @@ export class BlackHoleRenderer {
   obj.parentId=parentId;obj.referenceId=null;obj.phase=phase;obj.epoch=this.time;
   if(parentId==='space'){obj.placement='local';[obj.x,obj.y,obj.z]=(current?.position||[0,0,0]).map(v=>v*REFERENCE_RG_METERS);}
   else{obj.placement='orbit';const parent=this.objects.find(o=>o.id===parentId);obj.orbitMeters=parent?Math.max(10,(this.objectRadius(parent)+this.objectRadius(obj))*REFERENCE_RG_METERS*3):['planet','tidalStar'].includes(parentId)?Math.max(10,((this.getFocusFrame(parentId)?.radius||0)+this.objectRadius(obj))*REFERENCE_RG_METERS*3):undefined;}
+  this.applyCrewOrbitDefault(obj);
   // An intrinsic field follows its owner's placement. Reparenting must not
   // leave the isolated travel path overriding a newly assigned physical orbit.
   if(this.state.warp&&this.warpObjectId===id){this.state.warpScenario=parentId==='space'?'isolated':'orbit';this.warpTravelWorld=0;this.warpTravelTime=this.time;this.warpTravelPosition=[...(current?.position||[0,0,0])];}
@@ -563,7 +657,7 @@ export class BlackHoleRenderer {
  }
  updateTreeObject(id,patch){if(id==='secondary-disk'||id==='secondary-jets'){const translated={};for(const [key,value]of Object.entries(patch))translated[key.startsWith('disk')?'secondaryD'+key.slice(1):key.startsWith('jet')?'secondaryJ'+key.slice(1):key]=value;return this.update(translated);}if((id==='primary'||id==='secondary')&&typeof patch.name==='string'){patch={...patch,[id==='primary'?'primaryName':'secondaryName']:patch.name.trim().slice(0,64)};}if(this.objects.some(o=>o.id===id))return this.updateObject(id,patch);if(id==='secondary'){const translated={...patch};if('spin'in patch){translated.secondarySpin=patch.spin;delete translated.spin;}return this.update(translated);}return this.update(patch);}
  parentMassSolar(obj){if(obj.parentId==='planet')return this.state.planetMass*3.00349e-6;if(obj.parentId==='tidalStar')return 1;if(obj.parentId==='secondary')return this.state.mass*1e6*this.state.binaryRatio;if(obj.parentId==='primary'||!obj.parentId&&this.state.blackHole)return this.state.mass*1e6;const p=this.objectById?.get(obj.parentId)||this.objects.find(o=>o.id===obj.parentId);if(!p)return 0;const companion=obj.orbitBarycenter?(this.barycentricByParent?.get(p.id)||this.objects.find(o=>o.parentId===p.id&&o.barycentric)):null;return this.objectMassSolar(p)+(companion?this.objectMassSolar(companion):0);}
- objectMassSolar(obj){if(Number.isFinite(obj.massSolar)&&obj.massSolar>=0)return obj.massSolar;return Math.max(1e-30,Number(obj.massSolar)||(obj.type==='star'?1:obj.type==='planet'?3.00349e-6:obj.type==='moon'?3.694e-8:obj.type==='astronaut'?5e-29:5e-26));}
+ objectMassSolar(obj){if(Number.isFinite(obj.massSolar)&&obj.massSolar>=0)return obj.massSolar;return Math.max(1e-30,Number(obj.massSolar)||(obj.type==='star'?1:obj.type==='planet'?3.00349e-6:obj.type==='moon'?3.694e-8:obj.type==='planetoid'?4.72e-10:obj.type==='asteroid'?4.2e-15:obj.type==='astronaut'?5e-29:5e-26));}
  getObjectMetrics(id=this.focusId||this.selectedId||'primary'){
   const frame=this.getFocusFrame(id),object=this.objects.find(o=>o.id===id);if(!frame)return null;const orbit=this.getOrbitEditInfo(id),star=object?.type==='star'?stellarInfo(object,this.time):null,flight=id===this.driveId?this.getFlightState():null,parentId=object?.parentId||(id==='secondary'?'primary':'space'),parent=this.getFocusFrame(parentId),distance=parent?Math.hypot(...frame.position.map((v,i)=>v-parent.position[i]))*REFERENCE_RG_METERS:null,rg=(frame.massSolar||0)*1476.62504,spin=frame.spinParameter??0;
   const angularVelocity=star?.angularVelocity??(frame.type==='hole'&&rg>0?spin*LIGHT_SPEED/(2*rg*(1+Math.sqrt(Math.max(0,1-spin*spin)))):object?.rotationPeriodSeconds?TAU/object.rotationPeriodSeconds:null),velocity=flight?.type==='shuttle'?flight.velocity:frame.velocity||[0,0,0],speed=flight?.speedMetersPerSecond??(orbit?.editable?Math.sqrt(Math.max(0,1.32712440018e20*(object?this.orbitMassSolar(object):id==='secondary'?this.state.mass*1e6*(1+this.state.binaryRatio):this.state.mass*1e6)*(2/Math.max(1,distance||orbit.radiusMeters)-1/orbit.radiusMeters))):Math.hypot(...velocity)*LIGHT_SPEED/18);
@@ -577,7 +671,7 @@ export class BlackHoleRenderer {
   if(!compact.length){this.clockSweepStarts?.clear();return;}
   for(const object of this.clockActors){
    const frame=this.frameById.get(object.id);if(!frame)continue;let moved=false;
-   const bodyRadius=frame.physicalRadius||frame.radius,start=this.clockSweepStarts?.get(object.id);this.clockSweepStarts?.delete(object.id);
+   const bodyRadius=clockHullMeters(this,object,(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS)/REFERENCE_RG_METERS,start=this.clockSweepStarts?.get(object.id);this.clockSweepStarts?.delete(object.id);
    // A relativistic Shuttle can cross a small horizon between two frames.
    // Test its swept center segment once; do not let a coarse time step tunnel.
    if(start){const delta=frame.position.map((v,i)=>v-start[i]),a=dot(delta,delta);let first=1;
@@ -599,86 +693,331 @@ export class BlackHoleRenderer {
   // Keep the logical mass list, rather than rebuilding it for every clock or
   // depending on which bodies fit into the GPU's visible-object budget.
   if(this.clockSourceCache?.revision!==this.geometryRevision||this.clockSourceCache?.objects!==this.objects){
-   const ids=[...(this.state.blackHole?['primary',...(this.state.binary?['secondary']:[])]:[]),...this.objects.filter(o=>['star','planet','moon','blackhole','whitehole'].includes(o.type)).map(o=>o.id),...(this.state.planet?['planet']:[]),...(this.state.tidalStar?['tidalStar']:[])];
+   const ids=[...(this.state.blackHole?['primary',...(this.state.binary?['secondary']:[])]:[]),...this.objects.filter(o=>['star','planet','moon','planetoid','asteroid','blackhole','whitehole'].includes(o.type)).map(o=>o.id),...(this.state.planet?['planet']:[]),...(this.state.tidalStar?['tidalStar']:[])];
    this.clockSourceCache={revision:this.geometryRevision,objects:this.objects,sources:ids.map(id=>({id,positionMeters:[0,0,0],velocityMetersPerSecond:[0,0,0]}))};
   }
   const sources=this.clockSourceCache.sources;
   for(const source of sources){
    const index=source.id==='primary'?0:source.id==='secondary'?1:-1,frame=index<0?this.frameById?.get(source.id):null;
-   if(index>=0){const offset=index*4;source.massSolar=this.state.blackHole?this.holeData[offset+3]*REFERENCE_MASS*1e6:0;source.radiusMeters=this.configCache.horizon[index]*REFERENCE_RG_METERS;source.horizonMeters=source.radiusMeters;for(let j=0;j<3;j++){source.positionMeters[j]=this.holeData[offset+j]*REFERENCE_RG_METERS;source.velocityMetersPerSecond[j]=(this.holeVelocities?.[index]?.[j]||0)*LIGHT_SPEED/18;}}
-   else if(frame){source.massSolar=frame.massSolar||0;source.radiusMeters=(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS;source.horizonMeters=frame.collapsed?(frame.horizonRadius||frame.radius)*REFERENCE_RG_METERS:0;for(let j=0;j<3;j++){source.positionMeters[j]=frame.position[j]*REFERENCE_RG_METERS;source.velocityMetersPerSecond[j]=(frame.velocity?.[j]||0)*LIGHT_SPEED/18;}}
+   if(index>=0){const offset=index*4;source.massSolar=this.state.blackHole?this.holeData[offset+3]*REFERENCE_MASS*1e6:0;source.radiusMeters=this.configCache.horizon[index]*REFERENCE_RG_METERS;source.horizonMeters=source.radiusMeters;source.spinParameter=index?this.state.secondarySpin:this.state.spin;source.spinAxis=index?this.configCache.secondaryAxis:this.configCache.primaryAxis;for(let j=0;j<3;j++){source.positionMeters[j]=this.holeData[offset+j]*REFERENCE_RG_METERS;source.velocityMetersPerSecond[j]=(this.holeVelocities?.[index]?.[j]||0)*LIGHT_SPEED/18;}}
+   else if(frame){source.massSolar=frame.massSolar||0;source.radiusMeters=(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS;source.horizonMeters=frame.collapsed?(frame.horizonRadius||frame.radius)*REFERENCE_RG_METERS:0;source.spinParameter=frame.spinParameter||0;source.spinAxis=frame.spinAxis||this.configCache.primaryAxis;for(let j=0;j<3;j++){source.positionMeters[j]=frame.position[j]*REFERENCE_RG_METERS;source.velocityMetersPerSecond[j]=(frame.velocity?.[j]||0)*LIGHT_SPEED/18;}}
    else source.massSolar=0;
   }
   return sources;
  }
- clockRateForObject(object,sources=this.clockSources()){
+ // The radial/height animation specifies a meridian in the locally dragged
+ // frame. Use the same curve for position, speed, clock and support alerts.
+ radialClockSample(object,source,state){
+  const length=REFERENCE_RG_METERS,T=DESCENT_SECONDS_PER_SCENE_SECOND;
+  const motion=meridionalClockMotion(source,state.radius*length,state.height*length,state.radialSpeed*length/T,state.heightSpeed*length/T,state.radialAcceleration*length/T**2,state.heightAcceleration*length/T**2);
+  return motion;
+ }
+ clockRateForObject(object,sources=this.clockSources(),sampleOverride=null){
   const frame=this.frameById?.get(object.id);if(!frame)return clockRate();
-  const position=frame.position.map(v=>v*REFERENCE_RG_METERS);
+  const position=this.transfer?.craftId===object.id&&object.flight?.position?object.flight.position:frame.position.map(v=>v*REFERENCE_RG_METERS);
   let dominant=null,weight=0;
   for(const source of sources){if(source.id===object.id||!(source.massSolar>0))continue;const r=Math.max(source.radiusMeters||0,Math.hypot(...position.map((v,i)=>v-source.positionMeters[i])),1),value=source.massSolar/r;if(value>weight){weight=value;dominant=source;}}
   const bridgeClock=this.state.bridge&&object.id===this.bridgeObjectId;
   const prescribedRadialClock=this.state.blackHole&&this.driveId!==object.id&&['infall','horizon'].includes(object.motion);
-  const rate=clockRate({id:object.id,positionMeters:position,bodyRadiusMeters:(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS,rapidityVector:object.clock?.rapidityVector,sources});
+  let rate=clockRate({id:object.id,positionMeters:position,bodyRadiusMeters:(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS,rapidityVector:object.clock?.rapidityVector,sources});
+  const t=this.transfer?.craftId===object.id?this.transfer:null,f=object.flight,sample=sampleOverride||t?.sample;
+  const bridgeOrbit=bridgeClock?this.getBridgeParkingOrbit(object.id):null,orbiting=supportsObjectClock(object.type)&&!t&&(bridgeOrbit||object.placement==='orbit'&&object.motion==='orbit'&&!object.waypointHoldId&&(this.driveId!==object.id||!f||f.orbitHold));
+  const thrustG=!orbiting&&f&&this.driveId===object.id?Math.min(1,Math.abs(f.thrust||0)):0,thrustDirection=f?.basis?.[2]||[0,0,0];
+  let speedMetersPerSecond=sample?.speedMetersPerSecond??f?.speed??0,crewLoadG=thrustG;
+  let accelerationG=bridgeClock?thrustG:crewAccelerationG(position,sources,thrustDirection.map(x=>x*thrustG),object.id);
+  let radialAccelerationG=null,tangentialAccelerationG=null,requiredSupportG=null;
+  if(prescribedRadialClock&&!bridgeClock&&dominant?.id==='primary'){
+   const T=DESCENT_SECONDS_PER_SCENE_SECOND,still=object.motion==='horizon',owner=this.objectById.get(object.id)||object,size=frame.physicalRadius||frame.radius;
+   const path=still?{radius:compactExteriorRadius(this.configCache.horizon[0],size),height:0,radialSpeed:0,heightSpeed:0,radialAcceleration:0,heightAcceleration:0}:this.infallState(owner,size);
+   const m=this.radialClockSample(object,dominant,path);
+   ({speedMetersPerSecond,accelerationG,radialAccelerationG,tangentialAccelerationG,requiredSupportG,crewLoadG}=m);
+   const factor=rate.gravityFactor*m.kinematicFactor;
+   rate={...rate,kinematicFactor:m.kinematicFactor,kinematicExcess:m.kinematicExcess,kinematicLossRate:1-1/m.kinematicFactor,rateFactor:factor,properRate:1/factor,lossRate:1-1/factor,radialMotionClock:true,
+    approachHeld:!!path.atGap,properSecondsPerWallSecond:path.atGap?0:still?1:T*this.effectivePlaybackSpeed()*this.simulationTimeScale()};
+  }else if(bridgeClock&&object.type==='astronaut'&&!bridgeOrbit&&!object.drivePosition){
+   // Ellis radial distance l is already a physical distance. A passive
+   // traveler can follow the scripted crossing without a flight controller.
+   const path=bridgeJourney(this.bridgeTime,this.configCache.bridgeRadius,this.state.bridgeLifecycle),active=this.state.bridgeTravel!==false;
+   const u=active?path.properSpeed*REFERENCE_RG_METERS:0,gamma=Math.hypot(1,u/LIGHT_SPEED);
+   speedMetersPerSecond=Math.abs(u)/gamma;
+   const load=active?path.properAcceleration*REFERENCE_RG_METERS/(gamma*FLIGHT_STANDARD_GRAVITY):0;
+   requiredSupportG=crewLoadG=Math.abs(load);radialAccelerationG=load/gamma**3;tangentialAccelerationG=0;accelerationG=Math.abs(radialAccelerationG);
+   rate={...circularClockRate(rate,speedMetersPerSecond,true),bridgeObserverClock:true};
+  }else if(orbiting){
+   const a=object.orbitMeters||object.radius*this.massScale*REFERENCE_RG_METERS,parent=sources.find(v=>v.id===object.parentId)||dominant;
+   let speed=bridgeOrbit?.circularSpeedMetersPerSecond??Math.sqrt(SOLAR_MU*this.parentMassSolar(object)/Math.max(1,a));
+   const eccentric=object.eccentricity>0&&object.type==='astronaut';
+   if(eccentric&&parent){const dist=Math.max(1,Math.hypot(...position.map((p,i)=>p-parent.positionMeters[i])));speed=Math.sqrt(Math.max(0,SOLAR_MU*this.parentMassSolar(object)*(2/dist-1/a)));}
+   rate=!bridgeClock&&parent?.horizonMeters?compactCircularClockRate(rate,speed,parent,position):circularClockRate(rate,speed);
+   speedMetersPerSecond=rate.localSpeedMetersPerSecond;
+   const rho=bridgeOrbit?.physicalRadiusMeters||a;
+   // v²/r is radial trajectory acceleration in the orbital chart. A crew
+   // accelerometer instead measures the *nongravitational* support needed.
+   radialAccelerationG=-speed*speed/(rho*FLIGHT_STANDARD_GRAVITY);tangentialAccelerationG=0;
+   if(!eccentric)accelerationG=Math.abs(radialAccelerationG);
+   if(!bridgeClock&&!eccentric&&parent?.horizonMeters)requiredSupportG=compactTrackLoadG(parent,position,speedMetersPerSecond);
+   else if(!bridgeClock&&!eccentric&&parent){
+    // Work in the orbit's local chart; subtracting two galactic-scale
+    // positions to measure an Earth parking orbit loses kilometres.
+    const h=isParkingCraft(object)?Math.max(orbitClearance(this,object,object.parentId)*REFERENCE_RG_METERS,object.routeParkingHeightMeters||0):object.orbitMeters?(object.heightMeters||0):(object.height||0)*this.massScale*REFERENCE_RG_METERS;
+    const r=Math.hypot(rho,h),mu=SOLAR_MU*parent.massSolar;
+    requiredSupportG=r>0?Math.hypot(mu*rho/r**3-speed*speed/rho,mu*h/r**3)/FLIGHT_STANDARD_GRAVITY:0;
+   }
+   crewLoadG=requiredSupportG??0;
+  }else if(t?.radiusTransfer&&sample&&Number.isFinite(sample.radialAcceleration)){
+   radialAccelerationG=sample.radialAcceleration/FLIGHT_STANDARD_GRAVITY;tangentialAccelerationG=sample.tangentialAcceleration/FLIGHT_STANDARD_GRAVITY;
+   accelerationG=Math.hypot(radialAccelerationG,tangentialAccelerationG);
+   const parent=sources.find(src=>src.id===t.targetId);
+   requiredSupportG=parent?.horizonMeters?compactTrackLoadG(parent,position,sample.tangentialVelocity,sample):sample.requiredSupportG;
+   crewLoadG=requiredSupportG;
+  }else if(!bridgeClock&&!orbiting&&f&&(t||this.driveId===object.id)){
+   // The long flip-and-burn legs are prescribed SR worldlines in an
+   // inertial chart. Their speed changes by alpha_parallel/gamma³ (and
+   // direction by alpha_perp/gamma²), even though the engine still reads
+   // one proper g. Gravity is accounted separately in the route clock.
+   const v=f.velocity||[0,0,0],m=Math.hypot(...v),n=m?v.map(x=>x/m):thrustDirection;
+   const gamma=Math.max(1,sample?.lorentzFactor||1/Math.sqrt(Math.max(Number.EPSILON,1-(speedMetersPerSecond/LIGHT_SPEED)**2)));
+   const parallel=dot(n,thrustDirection),ac=thrustDirection.map((x,i)=>thrustG*((x-parallel*n[i])/gamma**2+parallel*n[i]/gamma**3));
+   accelerationG=t?Math.hypot(...ac):crewAccelerationG(position,sources,ac,object.id);
+  }
   const referenceDistanceMeters=dominant?Math.hypot(...position.map((v,i)=>v-dominant.positionMeters[i])):null,horizonRadiusMeters=dominant?.horizonMeters||0;
   const referenceName=dominant?(this.objectById.get(dominant.id)?.name||this.getFocusFrame(dominant.id)?.label||dominant.id):null;
-  return {...rate,ultrastaticBridge:bridgeClock,prescribedRadialClock,model:bridgeClock?'Ellis ultrastatic throat · proper-thrust clock comparison':'Exterior gravitational comparison × proper-thrust rapidity · approximate',referenceId:dominant?.id||null,referenceName,referenceDistanceMeters,horizonRadiusMeters,horizonGapMeters:horizonRadiusMeters>0?referenceDistanceMeters-horizonRadiusMeters:null};
+  let returnG=0;
+  if(supportsObjectClock(object.type)&&dominant?.horizonMeters>0){
+   const outer=this.flightSequences?.[object.id]?.nodes.reduce((max,n)=>n.targetId===dominant.id?Math.max(max,n.radiusMeters||0):max,0)||Math.sqrt(SOLAR_MU*dominant.massSolar/FLIGHT_STANDARD_GRAVITY);
+   if(outer){const delta=position.map((v,i)=>v-dominant.positionMeters[i]),plane=this.configCache.primaryBasis;
+    returnG=minimumReturnG(SOLAR_MU*dominant.massSolar,Math.hypot(dot(delta,plane[0]),dot(delta,plane[2])),outer);}
+  }
+  return {...rate,minimumReturnG:returnG,speedMetersPerSecond,accelerationG,radialAccelerationG,tangentialAccelerationG,crewLoadG,requiredSupportG,thrustG,ultrastaticBridge:bridgeClock,prescribedRadialClock,model:bridgeClock?'Ellis ultrastatic throat · proper-thrust clock comparison':dominant?.horizonMeters?'Kerr local-frame lapse × local Lorentz factor · prescribed path':'Exterior gravitational comparison × proper-thrust rapidity · approximate',referenceId:dominant?.id||null,referenceName,referenceDistanceMeters,horizonRadiusMeters,horizonGapMeters:horizonRadiusMeters>0?referenceDistanceMeters-horizonRadiusMeters:null};
+ }
+ advanceCrewExposure(object,seconds,sample){
+  if(!(seconds>0)||!object.clock)return;
+  const t=this.transfer,load=this.clockRateForObject(object,this.clockSources(),sample).crewLoadG;
+  accumulateCrewExposure(object.clock,seconds,t?.previousExposureG??load,load);
+  if(t)t.previousExposureG=load;
+  return load;
+ }
+ // Use the subject's center and the nearest outer horizon, independently of
+ // camera zoom, engine state, clock eligibility and the dominant clock source.
+ getHorizonProximity(id){
+  const subject=this.frameById?.get(id);
+  if(!subject||!['astronaut','iss','shuttle','enterprise'].includes(subject.type))return null;
+  let nearest=null,gap=Infinity,range,offset;
+  const consider=hole=>{
+   if(!hole?.collapsed||hole.whiteHole||!(hole.horizonRadius>0)||!(hole.massSolar>0))return;
+   const delta=subject.position.map((x,i)=>x-hole.position[i]),r=Math.hypot(...delta),d=Math.max(0,r-hole.horizonRadius);
+   if(d<gap){nearest=hole;gap=d;range=r*REFERENCE_RG_METERS;offset=delta;}
+  };
+  if(this.state.blackHole){consider(this.getFocusFrame('primary'));if(this.state.binary)consider(this.getFocusFrame('secondary'));}
+  for(const body of this.objectFrames)if(body.collapsed)consider(body);
+  if(!nearest)return null;
+  // These are display thresholds for the external field, not crew loads.
+  const fieldG=SOLAR_MU*nearest.massSolar/(Math.max(1,range)**2*FLIGHT_STANDARD_GRAVITY);
+  let noticeable=true;
+  if(gap>0&&fieldG<.1){
+   const source={id:nearest.id,positionMeters:[0,0,0],massSolar:nearest.massSolar,horizonMeters:nearest.horizonRadius*REFERENCE_RG_METERS,
+    spinParameter:nearest.spinParameter,spinAxis:nearest.id==='secondary'?this.configCache.secondaryAxis:nearest.spinAxis||this.configCache.primaryAxis};
+   noticeable=clockRate({positionMeters:offset.map(x=>x*REFERENCE_RG_METERS),sources:[source]}).gravityExcess>=.01;
+  }
+  const atWarpHelm=subject.type==='enterprise'&&this.driveId===id&&this.navigationModes?.[id]==='manual';
+  if(!noticeable&&!atWarpHelm)return null;
+  return {id:nearest.id,name:nearest.name||nearest.label||'Black hole',gapMeters:gap*REFERENCE_RG_METERS,noticeable};
  }
  getObjectClock(id){
   const object=this.objectById?.get(id)||this.objects.find(o=>o.id===id);if(!object||!supportsObjectClock(object.type)||!this.objects.includes(object))return null;
   return objectClockReading(object.clock,this.clockRateForObject(object),{id:object.id,type:object.type,name:object.name||OBJECT_TYPES.find(t=>t.id===object.type)?.label||object.type,properSecondsPerWallSecond:1});
  }
- getTravelTargets(){return travelTargets(this);}
- previewTravel(targetId){return previewRoute(this,targetId);}
- startTravel(targetId){return beginRoute(this,targetId);}
+ getTravelTargets(options){return this.state.bridge?bridgeTravelTargets(this,options):travelTargets(this,options);}
+ getNavigationWaypoints(craftId){return this.state.bridge?bridgeTravelTargets(this,{craftId:craftId||this.bridgeObjectId}):[];}
+ getBridgeParkingOrbit(craftId){return bridgeParkingOrbit(this,craftId||this.focusId||this.bridgeObjectId);}
+ previewTravel(targetId,options){return this.state.bridge?previewBridgeRoute(this,targetId,options):previewRoute(this,targetId,options);}
+ startTravel(targetId,options={}){this.travelPreview=null;
+  // Public Go must acquire the tangent before the line launcher takes over.
+  const id=options.craftId||this.selectedId||this.focusId,craft=this.objects.find(o=>o.id===id);
+  const rest=craft?.waypointHoldId&&(!this.driveId||craft.flight?.speed===0)?craft.waypointHoldId:null,departure=rest||(isParkingCraft(craft||{})&&(!this.driveId||craft.flight?.orbitHold)?craft.parentId:null);
+  if(!this.state.bridge&&!options.sequenceManaged&&!options.fromSequence&&((departure&&departure!==targetId)||(!departure&&Number.isFinite(options.heading)&&this.getFocusFrame(targetId)?.type==='waypoint'))){
+   const checked=this.previewTravel(targetId,options);if(checked.error)return checked;
+   this.navigationModes??={};this.navigationModes[id]='auto';
+   const q=this.setFlightSequence(id,[...(departure?[{targetId:departure,kind:rest?'waypoint':'orbit'}]:[]),{targetId,kind:checked.waypoint?'waypoint':'orbit',warpFactor:options.warpFactor??1,...(checked.waypoint&&Number.isFinite(options.heading)?{heading:options.heading}:{})}],{loop:false,active:false});
+   if(!q||!this.startFlightSequence(id))return false;this.state.paused=false;return true;
+  }
+  const result=this.state.bridge?beginBridgeRoute(this,targetId,options):beginRoute(this,targetId,options);if(result&&!result.error&&!options.fromSequence&&!options.sequenceManaged)stopFlightSequence(this,options.craftId||this.transfer?.craftId);return result;}
+ getFlightSequence(craftId){return flightSequenceState(this,craftId);}
+ setFlightSequence(craftId,nodes,options){
+  if(!options?.flyNow)return setFlightSequence(this,craftId,nodes,options);
+  if(nodes?.length!==1)return false;
+  const moving=this.transfer?.active&&this.transfer.craftId===craftId;
+  const q=setFlightSequence(this,craftId,nodes,{loop:false,index:0,active:false});
+  if(!q||q.error)return q;
+  if(moving)this.cancelTravel(); // Preserve the current position and velocity for the recovery approach.
+  const started=startFlightSequence(this,craftId,{rejoin:!!moving||this.driveId===craftId});
+  if(!started)return {error:this.flightSequences[craftId]?.error||'Unable to reach this destination.'};
+  this.state.paused=false;return this.getFlightSequence(craftId);
+ }
+ startFlightSequence(craftId){return startFlightSequence(this,craftId);}
+ stopFlightSequence(craftId){return stopFlightSequence(this,craftId);}
+ setTravelPreview(preview){this.travelPreview=preview&&!preview.error?preview:null;return true;}
  cancelTravel(){return cancelRoute(this);}
  getTravelState(){return routeState(this);}
- advanceTravel(dt){return advanceRoute(this,dt);}
- advanceClocks(properSeconds){
+ advanceTravel(dt){return this.transfer?.bridgeRoute?advanceBridgeAutopilot(this,dt):advanceRoute(this,dt);}
+ advanceClocks(properSeconds,sceneSeconds=null){
   if(!this.clockActors?.length||!(properSeconds>0))return;
   this.fillHoles();this.fillObjects();const sources=this.clockSources();
   for(const object of this.clockActors){
    if(this.transfer?.craftId===object.id||this.transferClockObjectId===object.id)continue;
    const flight=this.driveId===object.id?object.flight:null,thrust=flight&&object.type==='shuttle'?(flight.brakeSpeed?Math.max(0,flight.thrust||0):shuttleThrustSetting(flight.thrust))*FLIGHT_STANDARD_GRAVITY:0;
    const acceleration=thrust>0?flight.basis[2].map(v=>v*thrust):[0,0,0];
-   advanceObjectClock(object.clock,properSeconds,this.clockRateForObject(object,sources),acceleration);
+   const rate=this.clockRateForObject(object,sources);
+   if(rate.radialMotionClock&&object.motion==='infall'&&sceneSeconds!=null){
+    const T=DESCENT_SECONDS_PER_SCENE_SECOND,primary=sources.find(s=>s.id==='primary'),begin=this.time-sceneSeconds,size=this.objectRadius(object);
+    const stop=this.sceneId==='radiant-descent'&&object.type==='astronaut'?(object.motionEpoch||0)+BLUE_FIRE_ARRIVAL:Infinity;
+    const span=Math.max(0,Math.min(this.time,stop)-begin);
+    if(span>0){
+     // Refine the last few milliseconds, where the Kerr lapse changes rapidly.
+     const finish=begin+span,knee=stop-.04;
+     const cuts=begin<knee&&knee<finish?[begin,knee,finish]:[begin,finish];
+     for(let k=1;k<cuts.length;k++){
+      const from=cuts[k-1],length=cuts[k]-from,n=Math.max(1,Math.ceil(length/(from>=knee?.00005:.005))),h=length/n;
+      for(let i=0;i<n;i++){
+       const path=this.infallState(object,size,from+(i+.5)*h),m=this.radialClockSample(object,primary,path);
+       const pos=add(primary.positionMeters,transform(this.configCache.primaryBasis,[Math.cos(object.phase)*path.radius,path.height,Math.sin(object.phase)*path.radius].map(v=>v*REFERENCE_RG_METERS)));
+       const gravity=clockRate({id:object.id,positionMeters:pos,sources});
+       tickAtClockRate(object.clock,h*T,{...gravity,...m,rateFactor:gravity.gravityFactor*m.kinematicFactor});
+      }
+     }
+    }
+   }else if(rate.bridgeObserverClock&&sceneSeconds!=null)tickAtClockRate(object.clock,sceneSeconds,rate);
+   else if(rate.approachHeld)continue;else if(rate.orbitalClock||rate.radialMotionClock)tickAtClockRate(object.clock,properSeconds,rate);else{advanceObjectClock(object.clock,properSeconds,rate,acceleration);accumulateCrewExposure(object.clock,properSeconds,rate.crewLoadG);}
   }
  }
  getStellarInfo(id){const obj=this.objects.find(o=>o.id===id&&o.type==='star');return obj?stellarInfo(obj,this.time):null;}
  updateStellar(id,patch={}){const obj=this.objects.find(o=>o.id===id&&o.type==='star');if(!obj)return false;const phases=this.objects.filter(o=>o.parentId===id).map(o=>[o,this.currentPhase(o)]),result=this.updateObject(id,stellarPatch(obj,patch));for(const [child,phase]of phases){child.phase=phase;child.epoch=this.time;if(child.orbitMeters){const mu=1.32712440018e20*this.orbitMassSolar(child);if(mu>0)child.orbitalPeriodSeconds=TAU*Math.sqrt(child.orbitMeters**3/mu);}}this.refreshConfiguration();this.fillObjects();this.updateCameraFrame();return result;}
  // Manual Enterprise piloting always uses warp. Automatic bridge routes are
  // prescribed impulse journeys and never enter this controller.
- setFlightMode(mode){
+ setFlightMode(mode,{fitCamera=true}={}){
   const obj=this.objects.find(o=>o.id===this.driveId),f=obj?.flight;if(obj?.type!=='enterprise'||!f||mode!=='warp')return false;
-  if(f.mode!=='warp'){f.speed=speedForWarp(f.warpSetting??4);f.thrust=0;f.mode='warp';f.brakeSpeed=false;this.setFlightInput({});}
+  if(f.mode!=='warp'){f.speed=speedForWarp(f.warpSetting??0);f.thrust=0;f.mode='warp';f.brakeSpeed=false;this.setFlightInput({});}
   this.state.warp=true;this.warpObjectId=obj.id;this.state.warpFactor=warpForSpeed(f.speed);
   for(const body of this.objects)body.warpEnabled=body.id===obj.id;
   this.state.warpScenario=obj.placement==='orbit'&&obj.parentId!=='space'?'orbit':'isolated';
-  this.refreshConfiguration();this.fillObjects();if(this.focusId===obj.id)this.resumeWarpCameraFit();this.updateCameraFrame();return this.getFlightState();
+  this.refreshConfiguration();this.fillObjects();if(fitCamera&&this.focusId===obj.id)this.resumeWarpCameraFit();this.updateCameraFrame();return this.getFlightState();
  }
- setFlightPower(value){this.cancelTravel();const obj=this.objects.find(o=>o.id===this.driveId);if(!obj?.flight)return false;const f=obj.flight,warp=obj.type==='enterprise';if(warp){f.speed=speedForWarp(clamp(Number(value)||0,0,9.9999));f.warpSetting=warpForSpeed(f.speed);if(obj.id===this.warpObjectId)this.state.warpFactor=f.warpSetting;if(this.focusId===obj.id)this.resumeWarpCameraFit();}else f.thrust=impulseThrustSetting(value,obj.type==='enterprise'?ENTERPRISE_THRUST_MAX_G:SHUTTLE_THRUST_MAX_G);f.brakeSpeed=false;return this.getFlightState();}
- setFlightHeading(degrees){this.cancelTravel();const f=this.objects.find(o=>o.id===this.driveId)?.flight;if(!f||!Number.isFinite(Number(degrees)))return false;setPlanarHeading(f,Number(degrees)*Math.PI/180);return this.getFlightState();}
- nudgeFlightTurn(direction){this.cancelTravel();const f=this.objects.find(o=>o.id===this.driveId)?.flight;if(!f)return false;return setPlanarHeading(f,(f.headingTarget??f.headingAngle??0)+Math.sign(Number(direction)||0)*Math.PI/36);}
- setFlightInput(input={}){if(input.speed||input.curvature||input.torsion)this.cancelTravel();this.flightInput={speed:clamp(Number(input.speed)||0,-1,1),curvature:clamp(Number(input.curvature)||0,-1,1),torsion:clamp(Number(input.torsion)||0,-1,1)};return this.getFlightState();}
+ setFlightPower(value){if(this.transfer?.active)return false;this.cancelTravel();const obj=this.objects.find(o=>o.id===this.driveId);if(!obj?.flight)return false;this.noteCameraInteraction();if(Number(value)>0)this.releaseOrbitHold(obj);const f=obj.flight,warp=obj.type==='enterprise';if(warp){f.speed=speedForWarp(clamp(Number(value)||0,0,9.9999));f.warpSetting=warpForSpeed(f.speed);if(obj.id===this.warpObjectId)this.state.warpFactor=f.warpSetting;if(this.focusId===obj.id)this.resumeWarpCameraFit();}else f.thrust=impulseThrustSetting(value,obj.type==='enterprise'?ENTERPRISE_THRUST_MAX_G:SHUTTLE_THRUST_MAX_G);f.brakeSpeed=false;return this.getFlightState();}
+ setFlightHeading(degrees){if(this.transfer?.active)return false;this.cancelTravel();const f=this.objects.find(o=>o.id===this.driveId)?.flight;if(!f||!Number.isFinite(Number(degrees)))return false;setPlanarHeading(f,-Number(degrees)*Math.PI/180);return this.getFlightState();}
+ nudgeFlightTurn(direction){this.cancelTravel();const f=this.objects.find(o=>o.id===this.driveId)?.flight;if(!f)return false;return setPlanarHeading(f,(f.headingTarget??f.headingAngle??0)-Math.sign(Number(direction)||0)*Math.PI/36);}
+ setFlightInput(input={}){if(this.transfer?.active&&(input.speed||input.curvature||input.torsion))return false;if(input.speed||input.curvature||input.torsion){this.cancelTravel();this.noteCameraInteraction();}this.flightInput={speed:clamp(Number(input.speed)||0,-1,1),curvature:-clamp(Number(input.curvature)||0,-1,1),torsion:clamp(Number(input.torsion)||0,-1,1)};return this.getFlightState();}
  getFlightState(){
   const obj=this.objects.find(o=>o.id===this.driveId),f=obj?.flight;if(!obj||!f)return {active:false,id:null};
-  const enterprise=obj.type==='enterprise',warp=enterprise,maxThrustG=enterprise?ENTERPRISE_THRUST_MAX_G:SHUTTLE_THRUST_MAX_G,relativity=warp?null:shuttleRelativity(f,{maxThrustG}),velocity=warp?f.basis[2].map(v=>v*f.speed*(f.travelDirection||1)):relativity.velocity,speed=warp?f.speed:relativity.speed,warpFactor=warp?warpForSpeed(speed):0,maxSpeed=warp?speedForWarp(9.9999):LIGHT_SPEED,rates=flightControlRates(f,{warp,lengthMeters:OBJECT_DIMENSIONS[obj.type].lengthMeters}),thrustSetting=warp?0:f.brakeSpeed?Math.max(0,f.thrust||0):impulseThrustSetting(f.thrust,maxThrustG),requested=this.flightInput?.speed||(f.brakeSpeed?-1:0),stopped=this.state.paused||this.state.speed===0;
+  const enterprise=obj.type==='enterprise',warp=enterprise,maxThrustG=enterprise?ENTERPRISE_THRUST_MAX_G:SHUTTLE_THRUST_MAX_G,relativity=warp?null:shuttleRelativity(f,{maxThrustG}),velocity=warp?((f.orbitHold||this.transfer?.craftId===obj.id)&&f.velocity?[...f.velocity]:warpVelocity(f)):relativity.velocity,speed=warp?f.speed:relativity.speed,warpFactor=warp&&!f.orbitHold?warpForSpeed(speed):0,maxSpeed=warp?speedForWarp(9.9999):LIGHT_SPEED,rates=flightControlRates(f,{warp,lengthMeters:OBJECT_DIMENSIONS[obj.type].lengthMeters}),thrustSetting=warp?0:f.brakeSpeed?clamp(f.thrust||0,0,maxThrustG):impulseThrustSetting(f.thrust,maxThrustG),requested=this.flightInput?.speed||(f.brakeSpeed?-1:0),stopped=this.state.paused||this.state.speed===0;
   const throttle=warp?(stopped||speed<=0&&requested<0||speed>=maxSpeed&&requested>0?0:requested):(stopped?0:thrustSetting/maxThrustG),accelerationMetersPerSecondSquared=warp?throttle*rates.speedRate:stopped?0:relativity.coordinateAcceleration;
   const clock=enterprise?null:objectClockReading(obj.clock),coordinateTimeSeconds=enterprise?f.coordinateTimeSeconds||0:clock.coordinateSeconds,timeLagSeconds=enterprise?null:clock.lagSeconds,properTimeSeconds=enterprise?null:clock.properSeconds,properAcceleration=warp?null:stopped?0:relativity.properAcceleration;
-  return {active:true,id:obj.id,type:obj.type,flightMode:warp?'warp':'impulse',canWarp:enterprise,maxThrustG,coordinateTimeSeconds,properTimeSeconds,timeLagSeconds,properAcceleration,coordinateAcceleration:accelerationMetersPerSecondSquared,lorentzFactor:warp?null:relativity.lorentzFactor,beta:warp?null:relativity.beta,clockModel:enterprise?'Enterprise clocks are exempt':'Since creation · approximate gravity + local SR',speed:speed,curvature:f.curvature,torsion:f.torsion,speedMetersPerSecond:speed,velocity,velocityMetersPerSecond:[...velocity],curvaturePerMeter:f.curvature,torsionPerMeter:f.torsion,warpFactor,thrustSetting,thrustSettingG:thrustSetting,standardGravityMetersPerSecondSquared:FLIGHT_STANDARD_GRAVITY,steeringInput:stopped?0:clamp((f.angularVelocity||0)/.65,-1,1),headingDegrees:Math.atan2(Math.sin(f.headingAngle||0),Math.cos(f.headingAngle||0))*180/Math.PI,headingTargetDegrees:Math.atan2(Math.sin(f.headingTarget||0),Math.cos(f.headingTarget||0))*180/Math.PI,travelDirection:warp?(f.travelDirection||1):1,bridgeNavigation:!!this.state.bridge,warpRatePerSecond:throttle*rates.warpRate,curvatureRatePerMeterSecond:stopped?0:(this.flightInput?.curvature||0)*rates.curvatureRate,torsionRatePerMeterSecond:stopped?0:(this.flightInput?.torsion||0)*rates.torsionRate,turnRateRadiansPerSecond:f.angularVelocity||0,twistRateRadiansPerSecond:speed*f.torsion,throttle,accelerationMetersPerSecondSquared,accelerationVectorMetersPerSecondSquared:warp?f.basis[2].map(v=>v*accelerationMetersPerSecondSquared):stopped?[0,0,0]:[...relativity.coordinateAccelerationVector],speedFraction:Math.min(1,speed/maxSpeed),basis:f.basis.map(v=>[...v]),position:[...f.position],travelCompression:f.travelCompression||1};
+  return {active:true,id:obj.id,type:obj.type,navigationMode:this.navigationModes?.[obj.id]||'auto',guided:!!(this.transfer?.active&&this.transfer.craftId===obj.id),flightMode:warp?'warp':'impulse',canWarp:enterprise,maxThrustG,coordinateTimeSeconds,properTimeSeconds,timeLagSeconds,properAcceleration,coordinateAcceleration:accelerationMetersPerSecondSquared,lorentzFactor:warp?null:relativity.lorentzFactor,beta:warp?null:relativity.beta,clockModel:enterprise?'Enterprise clocks are exempt':'Since creation · approximate gravity + local SR',speed:speed,curvature:f.curvature,torsion:f.torsion,speedMetersPerSecond:speed,velocity,velocityMetersPerSecond:[...velocity],curvaturePerMeter:f.curvature,torsionPerMeter:f.torsion,warpFactor,thrustSetting,thrustSettingG:thrustSetting,standardGravityMetersPerSecondSquared:FLIGHT_STANDARD_GRAVITY,steeringInput:stopped?0:warp?clamp((f.angularVelocity||0)/.65,-1,1):f.visualJet||0,holdingOrbit:!!f.orbitHold,headingDegrees:-Math.atan2(Math.sin(f.headingAngle||0),Math.cos(f.headingAngle||0))*180/Math.PI,headingTargetDegrees:-Math.atan2(Math.sin(f.headingTarget||0),Math.cos(f.headingTarget||0))*180/Math.PI,travelDirection:warp?(f.travelDirection||1):1,bridgeNavigation:!!this.state.bridge,warpRatePerSecond:throttle*rates.warpRate,curvatureRatePerMeterSecond:stopped?0:(this.flightInput?.curvature||0)*rates.curvatureRate,torsionRatePerMeterSecond:stopped?0:(this.flightInput?.torsion||0)*rates.torsionRate,turnRateRadiansPerSecond:f.angularVelocity||0,twistRateRadiansPerSecond:speed*f.torsion,throttle,accelerationMetersPerSecondSquared,accelerationVectorMetersPerSecondSquared:warp?f.basis[2].map(v=>v*accelerationMetersPerSecondSquared):stopped?[0,0,0]:[...relativity.coordinateAccelerationVector],speedFraction:Math.min(1,speed/maxSpeed),basis:f.basis.map(v=>[...v]),position:[...f.position],travelCompression:f.travelCompression||1};
  }
- brakeFlight(axis='speed'){this.cancelTravel();const obj=this.objects.find(o=>o.id===this.driveId),f=obj?.flight;if(!f)return false;if(axis==='turn')f.brakeTurn=true;else{f.brakeSpeed=true;f.brakeInitialSpeed=obj.type==='enterprise'?f.speed:Math.max(0,f.thrust||0);}return true;}
- reverseFlight(){const o=this.objects.find(o=>o.id===this.driveId);if(!o?.flight||o.type!=='enterprise'||!this.state.bridge)return false;o.flight.travelDirection=-(o.flight.travelDirection||1);return true;}
- resetFlight(){const obj=this.objects.find(o=>o.id===this.driveId);if(!obj?.flight)return false;if(obj.type==='enterprise')obj.flight.speed=0;else{obj.flight.thrust=0;obj.flight.brakeSpeed=false;}obj.flight.curvature=0;obj.flight.torsion=0;obj.flight.angularVelocity=0;obj.flight.headingTarget=obj.flight.headingAngle||0;if(obj.id===this.warpObjectId||obj.id===this.bridgeObjectId)this.state.warpFactor=0;if(obj.type==='enterprise'&&this.focusId===obj.id)this.resumeWarpCameraFit();this.setFlightInput({});return this.getFlightState();}
- setFreeDrive(id,enabled){
+ brakeFlight(axis='speed'){if(this.transfer?.active)return false;this.cancelTravel();const obj=this.objects.find(o=>o.id===this.driveId),f=obj?.flight;if(!f)return false;if(axis==='turn')f.brakeTurn=true;else{f.brakeSpeed=true;f.brakeInitialSpeed=obj.type==='enterprise'?f.speed:Math.max(0,f.thrust||0);}return true;}
+ reverseFlight(){if(this.transfer?.active)return false;const o=this.objects.find(o=>o.id===this.driveId);if(!o?.flight||o.type!=='enterprise'||!this.state.bridge)return false;o.flight.travelDirection=-(o.flight.travelDirection||1);return true;}
+ resetFlight(){if(this.transfer?.active)return false;const obj=this.objects.find(o=>o.id===this.driveId);if(!obj?.flight)return false;if(obj.type==='enterprise')obj.flight.speed=0;else{obj.flight.thrust=0;obj.flight.brakeSpeed=false;}obj.flight.curvature=0;obj.flight.torsion=0;obj.flight.visualJet=0;obj.flight.angularVelocity=0;obj.flight.headingTarget=obj.flight.headingAngle||0;if(obj.id===this.warpObjectId||obj.id===this.bridgeObjectId)this.state.warpFactor=0;if(obj.type==='enterprise'&&this.focusId===obj.id)this.resumeWarpCameraFit();this.setFlightInput({});return this.getFlightState();}
+ releaseOrbitHold(obj){
+  if(!obj?.flight?.orbitHold)return false;this.fillObjects();const frame=this.frameById.get(obj.id),f=obj.flight;f.orbitHold=false;if(this.state.bridge){delete this.bridgeParking?.[obj.id];return true;}if(frame){f.position=frame.position.map(v=>v*REFERENCE_RG_METERS);obj.drivePosition=[...frame.position];if(obj.type==='shuttle'){f.velocity=(frame.velocity||[0,0,0]).map(v=>v*LIGHT_SPEED/18);const speed=Math.hypot(...f.velocity);if(speed>=LIGHT_SPEED)f.velocity=f.velocity.map(v=>v/speed*LIGHT_SPEED*(1-8*Number.EPSILON));f.speed=Math.hypot(...f.velocity);}}return true;
+ }
+ // Navigation mode is independent of camera mode. Changing authority never
+ // respawns the craft or restarts either lifetime clock.
+ getNavigationState(craftId){
+  const eligible=id=>this.objects.find(o=>o.id===id&&['shuttle','enterprise'].includes(o.type)),obj=craftId!==undefined?eligible(craftId):eligible(this.selectedId)||eligible(this.focusId)||eligible(this.driveId);
+  if(!obj)return {active:false,craftId:null,mode:'auto',guided:false,holdingOrbit:false};
+  const flight=this.driveId===obj.id?obj.flight:null,guided=!!(this.transfer?.active&&this.transfer.craftId===obj.id),mode=this.navigationModes?.[obj.id]==='manual'&&this.driveId===obj.id?'manual':'auto';
+  return {active:true,craftId:obj.id,id:obj.id,type:obj.type,mode,guided,coasting:!!flight&&!guided&&mode==='auto',holdingOrbit:!flight&&obj.placement==='orbit'||!!flight?.orbitHold,waypoint:!!obj.waypointHoldId||!!this.bridgeParking?.[obj.id],sequenceActive:!!this.flightSequences?.[obj.id]?.active};
+ }
+ // Take the snapshot before releasing guidance. Displayed arc playback is
+ // time-compressed, and the hull can point backwards during a retroburn.
+ manualHandoff(obj,frame){
+  const f=this.driveId===obj.id&&obj.flight,trip=this.transfer?.active&&this.transfer.craftId===obj.id;
+  const bridge=this.getBridgeParkingOrbit(obj.id),arc=this.flightSequences?.[obj.id]?.orbitWait;
+  const guided=f&&(trip||!f.orbitHold);
+  if(guided)return {position:[...f.position],basis:f.basis.map(v=>[...v]),speed:f.speed,
+   velocity:obj.type==='enterprise'&&!trip?warpVelocity(f):[...f.velocity]};
+  const basis=orthonormalFrame(frame.frame);
+  const park=bridge||isParkingCraft(obj)&&!obj.waypointHoldId;
+  const atRest=obj.waypointHoldId||this.bridgeParking?.[obj.id]&&!bridge;
+  const velocity=(frame.velocity||[0,0,0]).map(v=>v*LIGHT_SPEED/18);
+  const enterprise=obj.type==='enterprise',warp=!atRest&&enterprise&&this.state.warp&&this.warpObjectId===obj.id?this.state.warpFactor:0;
+  const orbitSpeed=park?(bridge?.circularSpeedMetersPerSecond??arc?.speedMetersPerSecond??this.getOrbitEditInfo(obj.id)?.speedMetersPerSecond):undefined;
+  const speed=atRest?0:Math.min(enterprise?Infinity:LIGHT_SPEED*(1-8*Number.EPSILON),enterprise&&this.state.warp&&this.warpObjectId===obj.id&&(warp>0||this.sceneId==='warp-orbit')?speedForWarp(warp):orbitSpeed??Math.hypot(...velocity));
+  const parent=park&&!bridge?this.getFocusFrame(obj.parentId):null;
+  const radius=park&&(bridge||parent)?frame.position.map((v,i)=>v-(bridge?.center||parent.position)[i]):null;
+  const tangent=radius?cross(bridge?.basis[1]||this.configCache.primaryBasis[1],radius):null;
+  const forward=park&&tangent&&Math.hypot(...tangent)>0?unit(tangent):Math.hypot(...velocity)>0?unit(velocity):basis[2];
+  return {position:frame.position.map(v=>v*REFERENCE_RG_METERS),basis,velocity:mul(forward,speed),speed};
+ }
+ setNavigationMode(craftId,mode){
+  if(!['manual','auto'].includes(mode))return false;
+  const obj=this.objects.find(o=>o.id===craftId&&['shuttle','enterprise'].includes(o.type));if(!obj)return false;
+  this.navigationModes??={};const previous=this.navigationModes[craftId]||'auto';
+  if(previous===mode&&!(mode==='manual'&&this.driveId!==craftId))return this.getNavigationState(craftId);
+  this.fillHoles();this.fillObjects();const frame=this.getFocusFrame(craftId);if(!frame)return false;
+  const handoff=mode==='manual'?this.manualHandoff(obj,frame):null;
+  if(this.parkedCamera?.craftId===craftId)releaseRouteCamera(this);
+  if(mode==='manual')suspendForDrive(this,obj);
+  if(this.transfer?.active&&this.transfer.craftId===craftId)this.cancelTravel();
+  if(this.transferClockObjectId===craftId)this.transferClockObjectId=null;
+  if(this.autopilot?.craftId===craftId||this.autopilot?.vehicleId===craftId||this.bridgeObjectId===craftId){if(this.autopilot)this.autopilot.enabled=false;}
+  let f=this.driveId===craftId&&obj.flight?obj.flight:null;
+  if(!f&&mode==='manual'){
+   const {basis,speed,velocity,position}=handoff;
+   f=obj.flight={position,basis,speed,velocity,curvature:0,torsion:0,angularVelocity:0,headingAngle:0,headingTarget:0,thrust:0,mode:obj.type==='enterprise'?'warp':'impulse',warpSetting:0,orbitHold:false,travelCompression:1,escapeBlend:0};
+   const parent=this.getFocusFrame(obj.parentId),anchor=parent?.position||frame.position;f.escapeAnchor=anchor.map(v=>v*REFERENCE_RG_METERS);f.escapeRadiusMeters=Math.max(Math.hypot(...frame.position.map((v,i)=>v-anchor[i]))*REFERENCE_RG_METERS,(parent?.physicalRadius||parent?.radius||0)*REFERENCE_RG_METERS*8,this.objectRadius(obj)*REFERENCE_RG_METERS*200);
+   resetFlightClocks(f);if(obj.clock){f.coordinateTimeSeconds=obj.clock.coordinateSeconds;f.timeLagSeconds=obj.clock.lagSeconds;if(obj.type==='shuttle'&&speed>0){const eta=Math.atanh(Math.min(1-8*Number.EPSILON,speed/LIGHT_SPEED));obj.clock.rapidityVector=velocity.map(v=>v/Math.max(1e-30,speed)*eta);}}
+  }
+  if(handoff){
+   Object.assign(f,handoff,{orbitHold:false,thrust:0,travelDirection:1});
+   if(obj.type==='enterprise'){
+    const T=handoff.speed>0?unit(handoff.velocity):handoff.basis[2];
+    // Preserve velocity even if the hull was mid-turn; steering then rotates
+    // the direction of travel and the attitude by the same amount.
+    f.coastDirection=handoff.basis.map(axis=>dot(axis,T));
+   }
+   if(this.state.bridge)delete this.bridgeParking?.[craftId];
+  }
+  if(this.driveId&&this.driveId!==craftId)this.navigationModes[this.driveId]='auto';
+  this.navigationModes[craftId]=mode;this.flightInput={speed:0,curvature:0,torsion:0};
+  if(f){
+   // Auto waits inertially for a destination; it does not continue an old
+   // acceleration or unfinished steering command in the background.
+   f.visualJet=0;f.jetStart=f.headingAngle||0;f.headingTarget=f.headingAngle||0;f.angularVelocity=0;f.curvature=0;f.torsion=0;f.brakeTurn=false;f.brakeSpeed=false;f.travelCompression=1;
+   if(mode==='auto'&&obj.type==='shuttle')f.thrust=0;
+   this.driveId=craftId;obj.drivePosition=f.position.map(v=>v/REFERENCE_RG_METERS);obj.driveBasis=f.basis.map(v=>[...v]);delete obj.driveReturn;
+   if(obj.type==='enterprise'){
+    f.mode='warp';f.warpSetting=f.orbitHold?0:warpForSpeed(f.speed);this.state.warp=true;this.state.warpFactor=f.warpSetting;this.warpObjectId=craftId;this.state.warpScenario=obj.placement==='orbit'&&obj.parentId!=='space'?'orbit':'isolated';for(const body of this.objects)body.warpEnabled=body.id===craftId;this.refreshConfiguration();
+   }
+  }
+  // A hand-steered heading at a stationary marker is still the same stop.
+  // Returning authority at rest must not start coasting or revive isolated warp.
+  if(mode==='auto'&&obj.waypointHoldId&&f&&f.speed===0){
+   obj.waypointHoldBasis=f.basis.map(v=>[...v]);[obj.x,obj.y,obj.z]=f.position;
+   delete obj.drivePosition;delete obj.driveReturn;delete obj.driveRestore;this.driveId=null;
+   if(obj.type==='enterprise'){const shield=this.state.blackHole||this.objectFrames.some(body=>body.collapsed);obj.warpEnabled=this.state.warp=shield;this.state.warpFactor=0;this.warpObjectId=shield?obj.id:null;this.state.warpScenario=shield&&this.sceneId==='warp-excursion'?'excursion':'orbit';this.refreshConfiguration();}
+   this.lastGeometryTime=null;
+  }
+  this.lastFlightError='';this.fillObjects();
+  if(mode==='auto'&&this.flightSequences?.[craftId]?.nodes.length)startFlightSequence(this,craftId,{rejoin:true});
+  this.updateCameraFrame();return this.getNavigationState(craftId);
+ }
+ getManualDriveEligibility(id=this.driveId||this.selectedId||this.focusId){return manualDriveEligibility(this,id);}
+ setFreeDrive(id,enabled,{guidance=false}={}){
+  if(enabled&&!guidance){const permission=this.getManualDriveEligibility(id);if(!permission.allowed){this.lastFlightError=permission.reason;return false;}this.lastFlightError='';if(this.autopilot)this.autopilot.enabled=false;this.navigationModes??={};this.navigationModes[id]='manual';}
+
   if(this.transfer?.active&&(!enabled||this.transfer.craftId!==id))this.cancelTravel();
   const obj=this.objects.find(o=>o.id===id&&['enterprise','shuttle'].includes(o.type));if(!obj)return false;this.fillObjects();const frame=this.objectFrames.find(o=>o.id===id);if(!frame)return false;
+  // Drive refits the camera. Keep its current fidelity, but measure the new
+  // view independently so real frame pressure can adjust it immediately.
+  if(enabled?this.driveId!==id:this.driveId===id)this.beginSceneRendering();
   if(enabled){
    if(this.driveId===id)return true;if(this.driveId)this.setFreeDrive(this.driveId,false);
    if(obj.type==='enterprise')obj.driveRestore={warp:this.state.warp,warpObjectId:this.warpObjectId||null,warpFactor:this.state.warpFactor,warpScenario:this.state.warpScenario,warpTravelWorld:this.warpTravelWorld||0,warpTravelPosition:this.warpTravelPosition?[...this.warpTravelPosition]:null,warpTravelTime:this.warpTravelTime||0};
    obj.drivePosition=[...frame.position];obj.driveBasis=orthonormalFrame(frame.frame);obj.driveReturn=null;
-   obj.flight={position:frame.position.map(v=>v*REFERENCE_RG_METERS),basis:obj.driveBasis.map(v=>[...v]),speed:0,curvature:0,torsion:0,angularVelocity:0,headingAngle:0,headingTarget:0,thrust:0,velocity:[0,0,0],...(obj.type==='enterprise'?{warpSetting:this.state.warp&&id===this.warpObjectId?this.state.warpFactor:4}:{mode:'impulse'})};
+   obj.flight={position:frame.position.map(v=>v*REFERENCE_RG_METERS),basis:obj.driveBasis.map(v=>[...v]),speed:0,curvature:0,torsion:0,angularVelocity:0,headingAngle:0,headingTarget:0,thrust:0,velocity:[0,0,0],orbitHold:!this.state.bridge&&obj.placement==='orbit'&&(!obj.motion||obj.motion==='orbit')&&!(this.state.warp&&id===this.warpObjectId&&this.state.warpScenario!=='orbit'),escapeBlend:0,...(obj.type==='enterprise'?{warpSetting:0}:{mode:'impulse'})};
+   const parent=this.getFocusFrame(obj.parentId),anchor=parent?.position||frame.position;obj.flight.escapeAnchor=anchor.map(v=>v*REFERENCE_RG_METERS);obj.flight.escapeRadiusMeters=Math.max(Math.hypot(...frame.position.map((v,i)=>v-anchor[i]))*REFERENCE_RG_METERS,(parent?.physicalRadius||parent?.radius||0)*REFERENCE_RG_METERS*8,this.objectRadius(obj)*REFERENCE_RG_METERS*200);
    resetFlightClocks(obj.flight);if(obj.clock){obj.flight.coordinateTimeSeconds=obj.clock.coordinateSeconds;obj.flight.timeLagSeconds=obj.clock.lagSeconds;obj.flight.coordinateTimeCompensation=obj.clock.coordinateCompensation;obj.flight.timeLagCompensation=obj.clock.lagCompensation;}
-   this.driveId=id;this.setFlightInput({});if(obj.type==='enterprise')this.setFlightMode('warp');
+   this.driveId=id;this.setFlightInput({});if(obj.type==='enterprise')this.setFlightMode('warp',{fitCamera:!(guidance&&this.sceneId==='warp-excursion')});this.fillObjects();
   }
   else if(this.driveId===id){if(this.state.bridge&&id===this.bridgeObjectId&&this.state.bridgeLifecycle!=='open-transit-close'){const b=this.configCache.bridgeRadius,l=bridgeProperRadius(Math.hypot(...obj.drivePosition),b),phase=Math.acos(clamp(l/(6*b),-1,1)),velocity=obj.type==='enterprise'?obj.driveBasis[2].map(v=>v*(obj.flight?.travelDirection||1)):obj.flight?.velocity||obj.driveBasis[2],inward=dot(velocity,obj.drivePosition)<0;this.bridgeTime=(inward?phase:TAU-phase)/.12;}obj.driveReturn={position:[...obj.drivePosition],basis:(obj.driveBasis||frame.frame).map(v=>[...v]),elapsed:0};delete obj.drivePosition;this.driveId=null;this.setFlightInput({});
    const saved=obj.driveRestore;if(saved){const owner=this.objects.find(o=>o.id===saved.warpObjectId&&o.type==='enterprise');this.state.warp=saved.warp&&!!owner;this.warpObjectId=owner?saved.warpObjectId:null;this.state.warpFactor=saved.warpFactor;this.state.warpScenario=saved.warpScenario;this.warpTravelWorld=saved.warpTravelWorld;this.warpTravelPosition=saved.warpTravelPosition;this.warpTravelTime=saved.warpTravelTime;for(const body of this.objects)body.warpEnabled=this.state.warp&&body.id===this.warpObjectId;delete obj.driveRestore;this.refreshConfiguration();}
@@ -692,19 +1031,48 @@ export class BlackHoleRenderer {
   const lookup=id=>this.sceneBuildObjects?this.sceneBuildObjects.get(id):this.objects.find(o=>o.id===id),reference=lookup(this.warpObjectId)||lookup(this.focusId)||lookup(this.selectedId)||this.objects.find(o=>OBJECT_KIND[o.type]>=3)||this.objects[0];
   return {kind:'local',referenceId:reference?.id||null,referenceLabel:reference?OBJECT_TYPES.find(t=>t.id===reference.type)?.label||reference.type:'World origin',unit:'m',addMode:'object',allowedTypes:OBJECT_TYPES.filter(o=>Object.hasOwn(OBJECT_KIND,o.id)).map(o=>o.id)};
  }
- addObject(type='planet',radius=12,phase=0,scale=1){
+ addObject(type='planet',radius,phase=0,scale=1){
   const kind=Object.hasOwn(OBJECT_KIND,type)?type:'planet',context=this.getObjectContext();
   if(context.kind==='bridge'){if(!context.allowedTypes.includes(kind))return false;if(this.objects.some(o=>o.id===this.bridgeObjectId))return this.setBridgeTraveler(kind);}
   if(kind==='anomaly'&&this.objects.filter(o=>o.type==='anomaly').length>=4){this.lastTreeError='Up to four gravity anomaly regions can be combined.';return false;}
   if(this.objects.length>=MAX_SCENE_OBJECTS)return false;
   const obj={type:kind,radius:clamp(Number(radius)||12,2.2,1e7),phase:Number.isFinite(Number(phase))?Number(phase):0,parentId:context.kind==='orbit'?'primary':'space',height:OBJECT_KIND[kind]>=3?1.1:.1,scale:clamp(Number(scale)||1,.25,4),epoch:this.time,id:`body-${this.nextObjectId++}`,placement:context.kind==='orbit'?'orbit':'local',referenceId:null,x:0,y:0,z:0,warpEnabled:false,motion:'orbit',motionEpoch:this.time,logLuminosity:0};
   if(supportsObjectClock(kind))obj.clock=createObjectClock();
+  if(kind==='planetoid'){obj.massSolar=4.72e-10;obj.radiusMeters=469700;obj.planetStyle='rocky';}
+  if(kind==='asteroid'){obj.massSolar=4.2e-15;obj.radiusMeters=10000;obj.planetStyle='rocky';obj.shapeAxes=[1,.72,.84];}
   if(context.kind==='local'&&context.referenceId){const reference=this.sceneBuildObjects?this.sceneBuildObjects.get(context.referenceId):this.objects.find(o=>o.id===context.referenceId);obj.referenceId=reference.id;obj.x=Math.max(50,(objectRadiusMeters(reference.type,reference.scale)+objectRadiusMeters(obj.type,obj.scale))*2.5);}
+  if(kind==='waypoint'){
+   const ship=[this.selectedId,this.focusId].map(id=>this.objects.find(o=>o.id===id&&['shuttle','enterprise'].includes(o.type))).find(Boolean)||this.objects.find(o=>['shuttle','enterprise'].includes(o.type));
+   const shipFrame=ship&&this.getFocusFrame(ship.id),parent=ship&&this.getFocusFrame(ship.parentId),axis=this.configCache.primaryBasis[0],origin=shipFrame?.position||this.getFocusFrame('primary')?.position||[0,0,0];
+   const span=Math.max(1000,(shipFrame&&parent?Math.hypot(...shipFrame.position.map((x,i)=>x-parent.position[i]))*REFERENCE_RG_METERS:0),(parent?.radius||this.getFocusFrame('primary')?.radius||0)*REFERENCE_RG_METERS*4);
+   // Different default points, all in the current vehicle's plane. Positions never follow the ship.
+   const markers=this.objects.filter(o=>o.type==='waypoint'),names=new Set(markers.map(o=>o.name)),occupied=new Set(markers.map(o=>[o.x,o.y,o.z].join(',')));
+   let serial=markers.length+1,coordinates;
+   do{obj.name='Waypoint '+serial;coordinates=origin.map((v,i)=>v*REFERENCE_RG_METERS+axis[i]*span*serial);serial++;}while(names.has(obj.name)||occupied.has(coordinates.join(',')));
+   [obj.x,obj.y,obj.z]=coordinates;
+   obj.parentId='space';obj.referenceId=null;obj.placement='local';obj.massSolar=0;
+  }
   if(kind==='anomaly'){obj.parentId='space';obj.referenceId=null;obj.placement='local';obj.x=0;obj.y=0;obj.z=0;obj.massSolar=0;obj.radiusMeters=6000;obj.anomalyStrength=1.8;obj.anomalyScale=1;obj.anomalyMotion=1;obj.color='#89cfff';}
-  if(['blackhole','whitehole'].includes(kind))obj.massSolar=10*obj.scale;this.objects.push(obj);this.sceneBuildObjects?.set(obj.id,obj);if(this.state.bridge&&!this.bridgeObjectId&&['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'].includes(obj.type))this.bridgeObjectId=obj.id;this.selectedId=obj.id;if(!this.buildingScene)this.refreshConfiguration();return {...obj};
+  if(['blackhole','whitehole'].includes(kind))obj.massSolar=10*obj.scale;if(!this.buildingScene&&radius==null)this.applyCrewOrbitDefault(obj);this.objects.push(obj);this.sceneBuildObjects?.set(obj.id,obj);if(this.state.bridge&&!this.bridgeObjectId&&['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'].includes(obj.type))this.bridgeObjectId=obj.id;this.selectedId=obj.id;if(!this.buildingScene)this.refreshConfiguration();return {...obj};
+ }
+ invalidateWaypointPath(id,removed=false){
+  const message=removed?'Waypoint removed. Review the playlist to continue.':'Waypoint moved. Review the playlist and resume from the current position.';
+  const inbound=this.transfer?.active&&this.transfer.targetId===id?this.transfer.craftId:null;
+  if(inbound){
+   const ship=this.objects.find(o=>o.id===inbound);this.cancelTravel();this.transferClockObjectId=null;
+   if(ship?.flight){ship.flight.thrust=0;ship.flight.angularVelocity=0;ship.flight.headingTarget=ship.flight.headingAngle||0;ship.flight.travelCompression=1;this.setFlightInput({});}
+  }
+  for(const ship of this.objects){
+   const held=ship.waypointHoldId===id;
+   if(held){const facing=ship.waypointHoldBasis?.[2],basis=this.configCache.primaryBasis;if(facing){ship.orbitInclination=0;ship.orbitNode=0;ship.argumentPeriapsis=0;ship.orbitReferenceFrame='ecliptic';ship.phase=Math.atan2(dot(facing,basis[0]),-dot(facing,basis[2]));}delete ship.waypointHoldId;delete ship.waypointHoldBasis;}
+   const q=this.flightSequences?.[ship.id];
+   if(q&&(ship.id===inbound||held||!this.transfer?.active&&q.active&&q.nodes.some(n=>n.targetId===id))){this.stopFlightSequence(ship.id);q.error=message;}
+  }
+  if(this.travelPreview?.targetId===id)this.travelPreview=null;
  }
  updateObject(id,patch={}){
   const obj=this.sceneBuildObjects?this.sceneBuildObjects.get(id):this.objects.find(o=>o.id===id);if(!obj)return false;const phase=this.buildingScene&&this.time===obj.epoch?obj.phase:this.currentPhase(obj);
+  if(obj.type==='waypoint'&&!this.buildingScene&&['x','y','z'].some(k=>Object.hasOwn(patch,k)&&Number.isFinite(Number(patch[k]))&&clamp(Number(patch[k]),-MAX_WORLD_METERS,MAX_WORLD_METERS)!==obj[k]))this.invalidateWaypointPath(id);
   if(!this.buildingScene&&isCompactType(obj.type)&&Number.isFinite(Number(patch.massSolar))){
    const oldMass=obj.massSolar;obj.massSolar=clamp(Number(patch.massSolar),.000001,1e12);
    const affected=[obj,...this.objects.filter(child=>child.parentId===obj.id&&isCompactType(child.type))];
@@ -717,7 +1085,7 @@ export class BlackHoleRenderer {
    if(obj.orbitMeters&&Number.isFinite(Number(patch.height))&&!Object.hasOwn(patch,'heightMeters'))obj.heightMeters=obj.height*this.massScale*REFERENCE_RG_METERS;
    if(Object.hasOwn(patch,'height')&&!obj.orbitMeters)obj.radius=Math.max(obj.radius,this.minimumObjectRadiusRg(obj));
   }else{
-   for(const key of ['x','y','z'])if(Number.isFinite(Number(patch[key])))obj[key]=clamp(Number(patch[key]),-1e12,1e12);
+   for(const key of ['x','y','z'])if(Number.isFinite(Number(patch[key])))obj[key]=clamp(Number(patch[key]),-MAX_WORLD_METERS,MAX_WORLD_METERS);
    if(Object.hasOwn(patch,'referenceId')){let target=this.objects.find(o=>o.id===patch.referenceId),ancestor=target,valid=true;for(let i=0;ancestor&&i<=this.objects.length;i++){if(ancestor.id===id){valid=false;break;}ancestor=this.objects.find(o=>o.id===ancestor.referenceId);}if(valid){obj.referenceId=target?.id||null;obj.parentId=target?.id||'space';}}
   }
   if(Number.isFinite(Number(patch.scale)))obj.scale=clamp(Number(patch.scale),.001,1000);
@@ -744,6 +1112,7 @@ export class BlackHoleRenderer {
    if(Object.hasOwn(patch,'radius')&&!Object.hasOwn(patch,'orbitMeters')&&obj.orbitMeters)obj.orbitMeters=obj.radius*this.massScale*REFERENCE_RG_METERS;
    const a=obj.orbitMeters||obj.radius*this.massScale*REFERENCE_RG_METERS,mu=1.32712440018e20*this.orbitMassSolar(obj);if(mu>0)obj.orbitalPeriodSeconds=TAU*Math.sqrt(a**3/mu);
   }
+  if(obj.type==='waypoint'){obj.motion='orbit';delete obj.radiusMeters;obj.parentId='space';obj.referenceId=null;obj.placement='local';obj.massSolar=0;}
   if(obj.type==='anomaly'){obj.parentId='space';obj.referenceId=null;obj.placement='local';obj.massSolar=0;}
   if(obj.type==='dyson'){obj.radius=0;obj.orbitMeters=1;obj.height=0;obj.massSolar=0;}
   obj.phase=Number.isFinite(Number(patch.phase))?Number(patch.phase):phase;obj.epoch=this.time;this.selectedId=obj.id;
@@ -789,6 +1158,7 @@ export class BlackHoleRenderer {
  }
  removeObjectSet(remove){
   if(!this.objects.some(o=>remove.has(o.id)))return false;
+  for(const obj of this.objects)if(obj.type==='waypoint'&&remove.has(obj.id))this.invalidateWaypointPath(obj.id,true);
   const bridgeShip=this.state.bridge&&remove.has(this.bridgeObjectId),wasFocused=remove.has(this.focusId);
   if(wasFocused)this.releaseFocus(!bridgeShip,false);
   this.objects=this.objects.filter(o=>!remove.has(o.id));this.objectFrames=this.objectFrames.filter(o=>!remove.has(o.id));this.frameById=new Map(this.objectFrames.map(o=>[o.id,o]));this.objectById=new Map(this.objects.map(o=>[o.id,o]));
@@ -796,7 +1166,7 @@ export class BlackHoleRenderer {
   if(remove.has(this.selectedId))this.selectedId=this.objects[0]?.id||null;
   if(remove.has(this.warpObjectId)){this.warpObjectId=null;this.state.warp=false;}
   if(bridgeShip)this.bridgeObjectId=this.objects.find(o=>['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'].includes(o.type))?.id||null;
-  this.refreshConfiguration();if(bridgeShip&&(wasFocused||!this.focusId))this.resetCamera();return true;
+  reconcileFlightSequences(this);if(this.transfer&&(remove.has(this.transfer.craftId)||remove.has(this.transfer.targetId)))cancelRoute(this);this.refreshConfiguration();if(bridgeShip&&(wasFocused||!this.focusId))this.resetCamera();return true;
  }
  removeObject(id){
   if(!this.objects.some(o=>o.id===id))return false;const remove=new Set([id]);let changed=true;
@@ -804,8 +1174,9 @@ export class BlackHoleRenderer {
   return this.removeObjectSet(remove);
  }
  selectObject(id){if(!this.getObjectTree().some(o=>o.id===id))return false;this.selectedId=id;return true;}
- clearObjects(){this.releaseFocus(false,false);this.objects=[];this.selectedId=null;this.warpObjectId=null;this.bridgeObjectId=null;this.state.warp=false;this.refreshConfiguration();if(this.state.bridge)this.resetCamera();}
+ clearObjects(){this.releaseFocus(false,false);this.objects=[];reconcileFlightSequences(this);this.transfer=null;this.selectedId=null;this.warpObjectId=null;this.bridgeObjectId=null;this.state.warp=false;this.refreshConfiguration();if(this.state.bridge)this.resetCamera();}
  getFocusFrame(id=this.focusId){
+  if(id===SCENE_ORIGIN.id)return {...SCENE_ORIGIN,index:-1,frame:this.configCache.primaryBasis};
   if(['disk','jets','secondary-disk','secondary-jets'].includes(id)){const k=id.startsWith('secondary-')?1:0,owner=this.getFocusFrame(k?'secondary':'primary');if(!owner)return null;const disk=id.endsWith('disk');return {...owner,id,type:disk?'disk':'jets',radius:disk?this.configCache.diskOuter[k]:this.massScale*(k?this.state.binaryRatio:1)*12,frame:k?basis(this.configCache.secondaryAxis):this.configCache.primaryBasis,label:disk?'Accretion disc':'Polar jets'};}
   if(id==='bridge'&&this.state.bridge)return {id,type:'bridge',index:-1,position:[0,0,0],radius:this.configCache.bridgeRadius/2,physicalRadius:this.configCache.bridgeRadius,frame:[[1,0,0],[0,1,0],[0,0,1]],label:'Bridge throat'};
   if(id==='primary'||id==='secondary'){
@@ -821,32 +1192,52 @@ export class BlackHoleRenderer {
   if(this.state.planet)targets.push({id:'planet',label:'Environment planet',kind:'planet',canTrack:true,canBoard:true,enabled:true});
   if(this.state.tidalStar)targets.push({id:'tidalStar',label:'Disrupting star',kind:'star',canTrack:true,canBoard:true,enabled:true});
   for(const node of tree.filter(n=>['disk','jets'].includes(n.type)&&n.component))targets.push({...node,kind:node.type,canTrack:true,canBoard:false});
-  for(const item of objects){const target={...item};target.kind=item.type;target.canTrack=true;target.canBoard=!['ring','belt','disk','jets'].includes(item.type);target.enabled=true;targets.push(target);}
+  for(const item of objects){const target={...item};target.kind=item.type;target.canTrack=item.type!=='waypoint';target.canBoard=!['ring','belt','disk','jets','waypoint'].includes(item.type);target.enabled=true;targets.push(target);}
   return targets;
  }
  focusObject(id,mode='track'){return this.objects.some(o=>o.id===id)?this.focusTarget(id,mode):false;}
  focusTarget(id,mode='track',prepared=false,reset=false){
   this.focusReferenceFrame=null;this.cameraGuide=null;
   if(!reset&&id===this.focusId&&mode==='track'&&['onboard','chase'].includes(this.focusMode)){this.detachRide();return true;}
-  if(!prepared){this.fillHoles();this.fillObjects();}const obj=this.getFocusFrame(id);if(!obj||(['bridge','ring','belt','disk','jets'].includes(obj.type)&&mode==='onboard'))return false;
+  if(!prepared){this.fillHoles();this.fillObjects();}const obj=this.getFocusFrame(id);if(!obj||obj.type==='waypoint'||(['bridge','ring','belt','disk','jets'].includes(obj.type)&&mode==='onboard'))return false;
+  if(id!==this.focusId)this.beginSceneRendering();
   if(!this.focusId)this.savedOverview={camera:{...this.camera},target:{...this.target},viewMode:this.state.viewMode,travel:this.travel,freePosition:this.freePosition?[...this.freePosition]:null,freeTarget:this.freeTarget?[...this.freeTarget]:null,freeBasis:this.freeBasis?{forward:[...this.freeBasis.forward],right:[...this.freeBasis.right],up:[...this.freeBasis.up]}:null};
   // Set the navigation mode directly: changing from free flight must not replace
   // this target camera with a radius measured about the scene origin.
   this.state.viewMode=['onboard','chase'].includes(mode)?'look':'orbit';this.freePosition=this.freeTarget=this.freeBasis=null;this.pointers.clear();this.pinchOwned=false;
   if(this.objects.some(o=>o.id===id))this.selectedId=id;this.focusId=id;this.focusMode=['onboard','chase'].includes(mode)?mode:'track';this.travel=false;this.resetView();
-  this.target.yaw=.7;this.target.pitch=.28;this.target.focusDistance=obj.type==='hole'?8:6;this.camera.yaw=this.target.yaw;this.camera.pitch=this.target.pitch;this.camera.focusDistance=this.target.focusDistance;if(mode==='track'&&['enterprise','shuttle'].includes(obj.type)){this.camera.yaw=this.target.yaw=Math.PI;this.camera.pitch=this.target.pitch=Math.atan2(1.44,4.32);this.camera.focusDistance=this.target.focusDistance=Math.hypot(1.44,4.32);this.camera.lookPitch=this.target.lookPitch=0;}if(reset&&mode==='track'&&obj.type==='enterprise'){this.cameraGuide='warp-side';this.camera.yaw=this.target.yaw=-Math.PI/2;this.camera.pitch=this.target.pitch=0;this.fitWarpCamera(true);}this.updateCameraFrame();this.xr?.recenter();return true;
+  this.target.yaw=.7;this.target.pitch=.28;this.target.focusDistance=obj.type==='hole'?8:6;this.camera.yaw=this.target.yaw;this.camera.pitch=this.target.pitch;this.camera.focusDistance=this.target.focusDistance;if(mode==='track'&&['enterprise','shuttle'].includes(obj.type)){const view=this.bridgeHullCamera(id)||BRIDGE_VEHICLE_CAMERA;this.camera.yaw=this.target.yaw=view.yaw;this.camera.pitch=this.target.pitch=view.pitch;this.camera.focusDistance=this.target.focusDistance=view.focusDistance;this.camera.lookPitch=this.target.lookPitch=0;}if(reset&&mode==='track'&&obj.type==='enterprise'&&!this.bridgeHullCamera(id)){this.cameraGuide='warp-side';this.camera.yaw=this.target.yaw=-Math.PI/2;this.camera.pitch=this.target.pitch=0;this.fitWarpCamera(true);}this.parkedCamera=null;this.updateCameraFrame();this.xr?.recenter();return true;
  }
  releaseFocus(restore=true,includeState=true){
+  if(this.focusId)this.beginSceneRendering();
   this.focusReferenceFrame=null;this.cameraGuide=null;  this.freeReferenceId=null;this.freeReferencePosition=null;const saved=restore?this.savedOverview:null;this.focusId=null;this.focusMode=null;this.savedOverview=null;
   if(saved){this.camera={...saved.camera};this.target={...saved.target};this.travel=saved.travel;this.state.viewMode=saved.viewMode;this.freePosition=saved.freePosition;this.freeTarget=saved.freeTarget;this.freeBasis=saved.freeBasis;}
   else{this.state.viewMode='orbit';this.freePosition=this.freeTarget=this.freeBasis=null;this.resetView();}
   this.pointers.clear();this.pinchOwned=false;this.fillHoles();this.fillObjects();this.updateCameraFrame();this.xr?.recenter();return includeState?this.getState():undefined;
  }
- resetWarpTravel(){this.warpTravelWorld=0;this.warpTravelPosition=[0,0,0];this.warpTravelTime=this.time;}
+ resetWarpTravel(){this.warpLocalGridPhase=0;this.warpTravelWorld=0;this.warpTravelPosition=[0,0,0];this.warpTravelTime=this.time;}
+ beginSceneRendering(){
+  this.sceneGeneration=(this.sceneGeneration||0)+1;
+  this.warpWorkloadProbe=null;this.warpProbeDraw=null;
+  this.budget.beginScene(this.now());this.resizePending=true;
+  this.lastSubmit=0;this.nextSubmit=0;this.statsStart=0;this.frames=0;
+  this.annotationSolvedPose=null;this.annotationProjectionSeeds?.clear();
+ }
+ completeScenePreview(){if(this.scenePreview){this.scenePreview=false;this.resizePending=true;}}
+ completeWarpWorkload(frame,now,elapsed){
+  if(!this.warpWorkloadProbe||frame.workloadProbe!==this.warpWorkloadProbe||frame.sceneGeneration!==this.sceneGeneration)return;
+  this.warpWorkloadProbe=null;this.warpProbeDraw=null;
+  this.budget.noteWorkloadProbe(now,{ms:elapsed,pixels:frame.pixels,steps:frame.steps});this.resizePending=true;
+ }
+ noteCameraInteraction(){
+  const now=this.now();this.cameraInteractionUntil=now+200;
+  if((this.cpu?this.cpuBudget:this.budget)?.noteInteraction(now))this.resizePending=true;
+ }
  warpSpeedWorld(){const ship=this.objects.find(o=>o.id===this.warpObjectId);return this.state.warp&&this.state.warpScenario==='isolated'&&ship?this.objectRadius(ship)*effectiveWarpRadius(this.state.warpFactor)*.07*this.state.warpFactor:0;}
  loadScene(id='disk'){
   const preset=SCENE_PRESETS.find(p=>p.id===id)||SCENE_PRESETS[0],paused=true;
-  this.clearObjects();this.focusReferenceFrame=null;this.transfer=null;this.lastTransfer=null;this.travelTargetCache=null;this.driveId=null;this.freeReferenceId=null;this.freeReferencePosition=null;this.sceneId=preset.id;this.state={...makePreset(preset.id),paused,objectScaleMode:'physical'};this.refreshConfiguration();this.time=0;this.orbitOverrides={};this.bridgeTime=0;this.bridgeTravelTime=0;this.resetWarpTravel();
+  this.beginSceneRendering();
+  this.clearObjects();this.focusReferenceFrame=null;this.travelPreview=null;this.transfer=null;this.lastTransfer=null;this.navigationModes={};this.flightSequences={};this.bridgeParking={};this.parkedCamera=null;this.travelTargetCache=null;this.driveId=null;this.freeReferenceId=null;this.freeReferencePosition=null;this.sceneId=preset.id;this.gapOrbitTime=0;this.routeChartY=null;this.routeVisualTime=0;this.state={...makePreset(preset.id),paused,objectScaleMode:'physical'};this.refreshConfiguration();this.time=0;this.orbitOverrides={};this.bridgeTime=0;this.bridgeTravelTime=0;this.resetWarpTravel();
   this.state.grid=this.state.warpGrid=!!(this.state.grid||this.state.warpGrid||this.state.spectrum==='geometry');this.flightInput={speed:0,curvature:0,torsion:0};
   // Presets are validated at build time. Instantiate their graph in one batch;
   // normal user additions still pass canParentObject and its full safety rules.
@@ -865,6 +1256,7 @@ export class BlackHoleRenderer {
      const added=this.addObject(entry.type,entry.radius,entry.phase,entry.scale);if(!added)continue;
      const object=this.objects[this.objects.length-1];
      if(parentId!==undefined){object.parentId=parentId;object.referenceId=null;object.placement=parentId==='space'?'local':'orbit';if(parentId==='space'){object.x=entry.x??0;object.y=entry.y??0;object.z=entry.z??0;}else if(entry.orbitMeters)object.orbitMeters=entry.orbitMeters;}
+     if(Number.isFinite(entry.parkingHeightRg))object.routeParkingHeightMeters=entry.parkingHeightRg*this.massScale*REFERENCE_RG_METERS;
      this.updateObject(object.id,entry);if(entry.key)keys.set(entry.key,object.id);
     }
     if(cacheable){
@@ -875,8 +1267,11 @@ export class BlackHoleRenderer {
     }
    }finally{this.buildingScene=false;this.sceneBuildObjects=null;}
   }
+  for(const o of this.objects)if(limitedCrew(o.type))this.applyCrewOrbitDefault(o);
   if(this.state.warp){const ship=this.objects.find(o=>o.type==='enterprise')||this.addObject('enterprise',14,1.3,1);if(ship){this.warpObjectId=ship.id;this.selectedId=ship.id;const raw=this.objects.find(o=>o.id===ship.id);raw.warpEnabled=true;}}
-  this.bridgeObjectId=this.state.bridge?this.objects.find(o=>['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'].includes(o.type))?.id||null:null;this.sceneFocusId=Number.isInteger(preset.camera?.focusIndex)?this.objects[preset.camera.focusIndex]?.id||null:this.state.warp&&this.state.warpScenario==='isolated'?this.warpObjectId:null;this.refreshConfiguration();return this.resetCamera();
+  this.bridgeObjectId=this.state.bridge?this.objects.find(o=>['enterprise','shuttle','astronaut','heighliner','blackhole','whitehole'].includes(o.type))?.id||null:null;this.sceneFocusId=Number.isInteger(preset.camera?.focusIndex)?this.objects[preset.camera.focusIndex]?.id||null:this.state.warp&&this.state.warpScenario==='isolated'?this.warpObjectId:null;this.refreshConfiguration();configureAutopilot(this,preset);
+  if(preset.startInDrive&&this.warpObjectId)this.setNavigationMode(this.warpObjectId,'manual');
+  return this.resetCamera();
  }
  loadWarpScenario(mode='isolated'){return this.loadScene(mode==='orbit'?'warp-orbit':mode==='excursion'?'warp-excursion':'warp-lab');}
  getObjects(){
@@ -910,7 +1305,8 @@ export class BlackHoleRenderer {
    return item;
   });
  }
- getState(){const objectTree=this.getObjectTree(),objects=this.getObjects(),sceneTargets=this.getSceneTargets(objects,objectTree),observerRadius=Math.hypot(...(this.cameraFrame?.observer||[0,0,this.camera.distance])),throat=(this.configCache.bridgeRadius||1)/2;return {...this.state,playbackSpeedLimit:this.playbackSpeedLimit(),effectivePlaybackSpeed:this.effectivePlaybackSpeed(),orbitDisplayPeriodSeconds:this.orbitDisplayPeriodSeconds(),flight:this.getFlightState(),travelTransfer:this.getTravelState(),mergerProgress:this.mergerProgress||0,mergerComplete:!!this.mergerComplete,objectTree,lastTreeError:this.lastTreeError||'',driveId:this.driveId||null,objectContext:this.getObjectContext(),bridgeRegion:observerRadius>throat*1.04?'near':observerRadius<throat*.96?'far':'throat',bridgePhase:bridgeJourney(this.bridgeTime,this.configCache.bridgeRadius,this.state.bridgeLifecycle).phase,fps:Math.round(this.fps||0),scale:this.renderScale||0,steps:this.steps,width:this.canvas.width||0,height:this.canvas.height||0,webgl:this.webgl2?2:1,sceneId:this.sceneId,vrActive:!!this.xr?.active,vrError:this.xr?.lastError||'',photoActive:this.photoActive,camera:{...this.camera},distance:this.cameraFrame?Math.hypot(...this.cameraFrame.observer)/this.massScale:this.camera.distance/this.massScale,worldDistance:this.cameraFrame?Math.hypot(...this.cameraFrame.observer):this.camera.distance,horizonRg:horizonRg(this.state.spin),iscoRg:iscoRg(this.state.spin),quality:this.quality,effectiveQuality:this.budget.effectiveQuality,adaptiveLevel:this.budget.level,adaptiveStatus:this.budget.adaptiveStatus,adaptiveReason:this.budget.adaptiveReason,targetFps:30,minimumFps:15,probePending:this.budget.probing,qualityReduced:this.budget.pixelScale<1,adaptivePixelScale:this.budget.pixelScale,surfaceRefining:!!this.planetTextures?.pending,surfaceWarning:this.textureError||'',shaderCompiling:!!this.pendingProgram||this.warmupFrames>0||!!this.gpuFence?.warmup,presentationPaused:this.presentationPaused,gpuWaiting:!!this.gpuFence,frameBudgetMs:this.budget.frameMs,objectCount:this.objects.length,travel:this.travel,maxObjects:MAX_SCENE_OBJECTS,renderedObjectCount:this.objectCount||0,gpuObjectLimit:this.gpuObjectLimit||12,uniformVectorLimit:this.uniformVectorLimit||null,viewYaw:this.camera.lookYaw*180/Math.PI,viewPitch:this.camera.lookPitch*180/Math.PI,selectedId:this.selectedId,focusId:this.focusId,focusMode:this.focusMode,focusLabel:sceneTargets.find(t=>t.id===this.focusId)?.label||null,warpObjectId:this.warpObjectId,bridgeObjectId:this.bridgeObjectId,cameraDistanceMeters:this.focusId?Math.hypot(...(this.cameraFrame?.inspectCamera||[0,0,this.camera.focusDistance]))*(this.getFocusFrame()?.physicalRadius||this.getFocusFrame()?.radius||0)*REFERENCE_RG_METERS:this.camera.distance*REFERENCE_RG_METERS,objects,sceneTargets,warpTravelMeters:this.warpTravelWorld*REFERENCE_RG_METERS,warpSpeedMetersPerSecond:this.warpSpeedWorld()*REFERENCE_RG_METERS};}
+ getBridgeStage(){const b=this.configCache.bridgeRadius;if(this.state.bridge&&this.state.bridgeWorlds==='earth-proxima'){const craft=this.objectById?.get(this.bridgeObjectId)||this.objects.find(o=>o.id===this.bridgeObjectId),position=craft?.drivePosition||this.frameById?.get(this.bridgeObjectId)?.position;return bridgeResearchGateStage(position,b);}return bridgeJourney(this.bridgeTime,b,this.state.bridgeLifecycle);}
+ getState(){const objectTree=this.getObjectTree(),objects=this.getObjects(),sceneTargets=this.getSceneTargets(objects,objectTree),observerRadius=Math.hypot(...(this.cameraFrame?.observer||[0,0,this.camera.distance])),throat=(this.configCache.bridgeRadius||1)/2;return {...this.state,playbackSpeedLimit:this.playbackSpeedLimit(),effectivePlaybackSpeed:this.effectivePlaybackSpeed(),orbitDisplayPeriodSeconds:this.orbitDisplayPeriodSeconds(),flight:this.getFlightState(),travelTransfer:this.getTravelState(),autopilot:autopilotState(this),manualDriveEligibility:this.getManualDriveEligibility(),mergerProgress:this.mergerProgress||0,mergerComplete:!!this.mergerComplete,objectTree,lastTreeError:this.lastTreeError||'',driveId:this.driveId||null,objectContext:this.getObjectContext(),bridgeRegion:observerRadius>throat*1.04?'near':observerRadius<throat*.96?'far':'throat',bridgePhase:this.getBridgeStage().phase,fps:Math.round(this.fps||0),scale:this.renderScale||0,steps:this.steps,width:this.canvas.width||0,height:this.canvas.height||0,webgl:this.webgl2?2:1,sceneId:this.sceneId,vrActive:!!this.xr?.active,vrError:this.xr?.lastError||'',photoActive:this.photoActive,camera:{...this.camera},distance:this.cameraFrame?Math.hypot(...this.cameraFrame.observer)/this.massScale:this.camera.distance/this.massScale,worldDistance:this.cameraFrame?Math.hypot(...this.cameraFrame.observer):this.camera.distance,horizonRg:horizonRg(this.state.spin),iscoRg:iscoRg(this.state.spin),quality:this.quality,effectiveQuality:this.budget.effectiveQuality,adaptiveLevel:this.budget.level,adaptiveStatus:this.budget.adaptiveStatus,adaptiveReason:this.budget.adaptiveReason,targetFps:30,minimumFps:15,probePending:this.budget.probing,qualityReduced:this.budget.pixelScale<1,adaptivePixelScale:this.budget.pixelScale,surfaceRefining:!!this.planetTextures?.pending,surfaceWarning:this.textureError||'',shaderCompiling:!!this.pendingProgram||this.warmupFrames>0||!!this.gpuFence?.warmup,presentationPaused:this.presentationPaused,gpuWaiting:!!this.gpuFence,frameBudgetMs:this.budget.frameMs,objectCount:this.objects.length,travel:this.travel,maxObjects:MAX_SCENE_OBJECTS,renderedObjectCount:this.objectCount||0,gpuObjectLimit:this.gpuObjectLimit||12,uniformVectorLimit:this.uniformVectorLimit||null,viewYaw:this.camera.lookYaw*180/Math.PI,viewPitch:this.camera.lookPitch*180/Math.PI,selectedId:this.selectedId,focusId:this.focusId,focusMode:this.focusMode,focusLabel:sceneTargets.find(t=>t.id===this.focusId)?.label||null,warpObjectId:this.warpObjectId,bridgeObjectId:this.bridgeObjectId,cameraDistanceMeters:this.focusId?Math.hypot(...(this.cameraFrame?.inspectCamera||[0,0,this.camera.focusDistance]))*(this.getFocusFrame()?.physicalRadius||this.getFocusFrame()?.radius||0)*REFERENCE_RG_METERS:this.camera.distance*REFERENCE_RG_METERS,objects,sceneTargets,warpTravelMeters:this.warpTravelWorld*REFERENCE_RG_METERS,warpSpeedMetersPerSecond:this.warpSpeedWorld()*REFERENCE_RG_METERS};}
  fillHoles(){
   const s=this.state,m=this.massScale,h=this.holeData,previous=Array.from(h);h.fill(0);h[3]=m;this.mergerProgress=0;this.mergerComplete=false;this.holeVelocities=[[0,0,0],[0,0,0]];
   this.cancellationFlat=false;this.cancellationFraction=1;
@@ -940,18 +1336,39 @@ export class BlackHoleRenderer {
   const c=this.camera,dir=[Math.cos(c.pitch)*Math.sin(c.yaw),Math.sin(c.pitch),Math.cos(c.pitch)*Math.cos(c.yaw)];
   for(let k=0;k<2;k++){const o=k*4,h=this.holeData,rr=this.configCache.horizon[k]*1.012,x=dir[0]*c.distance-h[o],y=dir[1]*c.distance-h[o+1],z=dir[2]*c.distance-h[o+2];if(x*x+y*y+z*z<rr*rr){const along=dir[0]*h[o]+dir[1]*h[o+1]+dir[2]*h[o+2],perp=h[o]*h[o]+h[o+1]*h[o+1]+h[o+2]*h[o+2]-along*along;c.distance=Math.max(.05*this.massScale,along+Math.sqrt(Math.max(0,rr*rr-perp))+.02*this.massScale);this.target.distance=c.distance;}}
  }
- infallState(object,size){
-  const m=this.massScale,exterior=compactExteriorRadius(this.configCache.horizon[0],size),start=Math.max(exterior+.5*m,object.radius*m),elapsed=Math.max(0,this.time-(object.motionEpoch||0));
+ infallExteriorRadius(object,size){
+  const horizon=this.configCache.horizon[0],minimum=compactExteriorRadius(horizon,size);
+  // Leave enough *actual* room for the nine-suit-radius lens arm on the
+  // inward side of a complete orbit. Positions and crew telemetry share it.
+  return this.sceneId==='radiant-descent'&&object.type==='astronaut'?Math.max(minimum,horizon+Math.max(15/REFERENCE_RG_METERS,12*size)):minimum;
+ }
+ infallState(object,size,sceneTime=this.time){
+  const m=this.massScale,exterior=this.infallExteriorRadius(object,size),start=Math.max(exterior+.5*m,object.radius*m),elapsed=Math.max(0,sceneTime-(object.motionEpoch||0));
+  if(this.sceneId==='radiant-descent'&&object.type==='astronaut'){
+   // The cubic aims at the horizon; take its incoming state when it first
+   // intersects the exterior clearance. Do not replace it with a hover.
+   const H=this.configCache.horizon[0],q=Math.cbrt((exterior-H)/(start-H)),u=Math.max(0,1-elapsed/BLUE_FIRE_ARRIVAL),w=q+(1-q)*u,den=1+q+q*q;
+   const progress=u*(w*w+w*q+q*q)/den,rate=-3*w*w/(BLUE_FIRE_ARRIVAL*den),acc=6*w*(1-q)/(BLUE_FIRE_ARRIVAL**2*den);
+   return {radius:exterior+(start-exterior)*progress,height:object.height*m*progress,radialSpeed:(start-exterior)*rate,heightSpeed:object.height*m*rate,radialAcceleration:(start-exterior)*acc,heightAcceleration:object.height*m*acc,atGap:u===0};
+  }
   if(this.sceneId==='radiant-descent'){
    const remaining=Math.max(0,1-elapsed/10),progress=remaining**3,rate=elapsed<10?-3*remaining*remaining/10:0;
-   return {radius:exterior+(start-exterior)*progress,height:object.height*m*progress,radialSpeed:(start-exterior)*rate,heightSpeed:object.height*m*rate};
+   return {radius:exterior+(start-exterior)*progress,height:object.height*m*progress,radialSpeed:(start-exterior)*rate,heightSpeed:object.height*m*rate,radialAcceleration:(start-exterior)*6*remaining/100,heightAcceleration:object.height*m*6*remaining/100};
   }
   const progress=Math.exp(-elapsed/75),radius=exterior+(start-exterior)*progress,height=object.height*m*radius/start;
-  return {radius,height,radialSpeed:-(radius-exterior)/75,heightSpeed:-height/75};
+  return {radius,height,radialSpeed:-(radius-exterior)/75,heightSpeed:-(height-object.height*m*exterior/start)/75,radialAcceleration:(radius-exterior)/75**2,heightAcceleration:(height-object.height*m*exterior/start)/75**2};
+ }
+ driveGeometryPose(){
+  const object=this.driveId?(this.objectById?.get(this.driveId)||this.objects.find(o=>o.id===this.driveId)):null,f=object?.flight;
+  return object?[object.id,object.parentId,object.placement,!!f?.orbitHold,f?.speed||0,f?.travelDirection||1,f?.escapeBlend||0,...(object.drivePosition||[]),...(object.driveBasis||[]).flat(),...(f?.velocity||[])]:[];
  }
  fillObjects(){
   const metadataChanged=this.lastGeometryRevision!==this.geometryRevision||this.lastGeometryCount!==this.objects.length||this.geometryObjects!==this.objects;
-  if(!metadataChanged&&this.lastGeometryTime===this.time&&this.lastGeometryHoles===(this.holeRevision||0)&&!this.driveId&&!this.objects.some(o=>o.driveReturn)){this.packRenderObjects(this.cameraFrame);return this.objectCount;}
+  const pose=this.driveGeometryPose(),samePose=this.lastGeometryDrivePose?.length===pose.length&&pose.every((v,i)=>v===this.lastGeometryDrivePose[i]);
+  // Controller, clock, annotation and render passes commonly request the same
+  // frame. Reuse the logical catalog when the driven pose has not changed;
+  // swept horizon checks and orbit-return blending must still run explicitly.
+  if(!metadataChanged&&this.lastGeometryTime===this.time&&this.lastGeometryHoles===(this.holeRevision||0)&&samePose&&!this.clockSweepStarts?.size&&!this.objects.some(o=>o.driveReturn)){this.packRenderObjects(this.cameraFrame);return this.objectCount;}
   const previousFrames=this.frameById||new Map();
   this.lastGeometryTime=this.time;this.lastGeometryRevision=this.geometryRevision;this.lastGeometryCount=this.objects.length;this.lastGeometryHoles=this.holeRevision||0;
   const s=this.state,m=this.massScale,b=this.configCache.primaryBasis,h=this.holeData;
@@ -962,11 +1379,18 @@ export class BlackHoleRenderer {
   if(metadataChanged){
    this.geometryObjects=this.objects;this.objectById=new Map(this.objects.map(o=>[o.id,o]));this.barycentricByParent=new Map(this.objects.filter(o=>o.barycentric).map(o=>[o.parentId,o]));
    this.orbitGeometryById=new Map();this.orbitPairs=new Map();
+   // In the flat tour chart each ringed world sits below its own parking
+   // plane. Saturn's rings must not lift the Earth and Moon orbits.
+   this.tourClearances=new Map();
+   if(this.sceneId==='solar-system'||this.sceneId==='enterprise-solar-tour'){
+    const ship=this.objects.find(o=>o.type===(this.sceneId==='solar-system'?'shuttle':'enterprise'));
+    for(const o of this.objects)if(o.type==='ring'||o.type==='disk')this.tourClearances.set(o.parentId,orbitClearance(this,ship,o.parentId));
+   }
    for(const object of this.objects){
-    const parent=this.objectById.get(object.parentId),equator=radians(String(object.orbitReferenceFrame||'').toLowerCase()==='equatorial'?(parent?.axialTilt||0):0),inc=radians(object.orbitInclination||0),node=radians(object.orbitNode||0),peri=radians(object.argumentPeriapsis||0);
+    const parking=isParkingCraft(object),parent=this.objectById.get(object.parentId),equator=parking?0:radians(String(object.orbitReferenceFrame||'').toLowerCase()==='equatorial'?(parent?.axialTilt||0):0),inc=parking?0:radians(object.orbitInclination||0),node=parking?0:radians(object.orbitNode||0),peri=parking?0:radians(object.argumentPeriapsis||0);
     const ci=Math.cos(inc),si=Math.sin(inc),cn=Math.cos(node),sn=Math.sin(node),ce=Math.cos(equator),se=Math.sin(equator);
     const rotate=v=>{const y=v[1]*ci-v[2]*si,z=v[1]*si+v[2]*ci,xx=v[0]*cn+z*sn,zz=-v[0]*sn+z*cn;return transform(b,[xx,y*ce-zz*se,y*se+zz*ce]);};
-    const e=object.eccentricity||0,height=object.orbitMeters?(object.heightMeters||0)/REFERENCE_RG_METERS:(object.height||0)*m;
+    const e=parking?0:object.eccentricity||0,height=parking?Math.max(orbitClearance(this,object,object.parentId),(object.routeParkingHeightMeters||0)/REFERENCE_RG_METERS):(object.orbitMeters?(object.heightMeters||0)/REFERENCE_RG_METERS:(object.height||0)*m);
     const compact=object.type==='blackhole'||object.type==='whitehole',stellarSource=compact?{...object,massSolar:object.massSolar||10,radiusMeters:1,angularVelocity:0}:object,stellar=object.type==='star'||compact?stellarInfo(stellarSource,this.time):null;
     this.orbitGeometryById.set(object.id,{omega:this.orbitalOmega(object),radius:this.objectRadius(object),mass:this.objectMassSolar(object),stellar,stellarSource,compact,style:object.type==='star'?STELLAR_STYLE_IDS.indexOf(object.starStyle):['rocky','gas','ice','ocean'].indexOf(object.planetStyle),e,minorRatio:Math.sqrt(1-e*e),semiMajor:object.orbitMeters?object.orbitMeters/REFERENCE_RG_METERS:object.radius*m,periCos:Math.cos(peri),periSin:Math.sin(peri),basis:[rotate([1,0,0]),rotate([0,1,0]),rotate([0,0,1])],height:transform(b,[0,height*ce,height*se])});
     if(parent&&((OBJECT_CLASS[parent.type]===OBJECT_CLASS[object.type]&&!compactSatellite(object.type,this.objectMassSolar(object),parent.type,this.objectMassSolar(parent)))||object.barycentric))this.orbitPairs.set(parent.id,object);
@@ -981,7 +1405,7 @@ export class BlackHoleRenderer {
    const x=Math.cos(angle)*r,z=Math.sin(angle)*r,ch=Math.cos(headingAngle),sh=Math.sin(headingAngle),bx=b[0],by=b[1],bz=b[2];
    const position=[h[0]+bx[0]*x+by[0]*height+bz[0]*z,h[1]+bx[1]*x+by[1]*height+bz[1]*z,h[2]+bx[2]*x+by[2]*height+bz[2]*z];
    const frame=[[bx[0]*-ch+bz[0]*-sh,bx[1]*-ch+bz[1]*-sh,bx[2]*-ch+bz[2]*-sh],by,[bx[0]*sh+bz[0]*-ch,bx[1]*sh+bz[1]*-ch,bx[2]*sh+bz[2]*-ch]];
-   const entry=previousFrames.get(id)||{};Object.assign(entry,{id,type,index:-1,position,radius:Math.max(1e-14,size),frame,angle,headingAngle,velocity:[0,0,0]});if(metadataChanged||!entry.tint)Object.assign(entry,{tint:baseColor,bodyParams:[0,.35,.35,1],massSolar:type==='star'?1:type==='planet'?3.00349e-6:1e-26,luminosity:1});
+   const entry=previousFrames.get(id)||{};Object.assign(entry,{id,type,index:-1,position,radius:type==='waypoint'?0:Math.max(1e-14,size),frame,angle,headingAngle,velocity:[0,0,0]});if(metadataChanged||!entry.tint)Object.assign(entry,{tint:baseColor,bodyParams:[0,.35,.35,1],massSolar:type==='star'?1:type==='planet'?3.00349e-6:1e-26,luminosity:1});
    this.objectFrames.push(entry);this.frameById.set(id,entry);return entry;
   };
   if(s.planet){const r=s.planetDistance*m,planetWorldMass=s.planetMass*3.00349e-6/(REFERENCE_MASS*1e6),omega=18*Math.sqrt((m+planetWorldMass)/(r*r*r));const entry=put('planet',r,this.componentOrbitPhase('planet',omega,1.15),this.bodyRadius('planet',s.planetRadius),this.configCache.planetColor,.10*m,'planet');entry.massSolar=s.planetMass*3.00349e-6;entry.velocity=add(holeVelocity(0),transform(b,[Math.sin(entry.angle)*r*omega,0,-Math.cos(entry.angle)*r*omega]));}
@@ -1027,7 +1451,7 @@ export class BlackHoleRenderer {
   const resolve=object=>{
    if(resolved.has(object.id)||resolving.has(object.id))return;resolving.add(object.id);
    const entry=this.frameById.get(object.id),parent=this.objectById.get(object.parentId||object.referenceId),legacy=this.objectById.get(object.referenceId);
-   if(entry&&(object.id!==this.bridgeObjectId||object.drivePosition||object.driveReturn)&&(object.id!==this.warpObjectId||s.warpScenario==='orbit'||object.drivePosition||object.driveReturn)){
+   if(entry&&(object.id!==this.bridgeObjectId||object.drivePosition||object.driveReturn)&&(object.id!==this.warpObjectId||s.warpScenario==='orbit'||object.waypointHoldId||object.drivePosition||object.driveReturn)){
     if(object.placement==='local'&&legacy){resolve(legacy);const reference=this.frameById.get(legacy.id),factor=reference.physicalRadius?reference.radius/reference.physicalRadius:1;entry.position=add(reference.position,transform(reference.frame,[object.x||0,object.y||0,object.z||0].map(v=>v/REFERENCE_RG_METERS*factor)));entry.headingAngle=reference.headingAngle+object.phase;entry.velocity=[...reference.velocity];}
     else if(object.placement==='orbit'&&parent){resolve(parent);const reference=this.frameById.get(parent.id);entry.position=['ring','belt','disk','jets','dyson'].includes(object.type)?[...reference.position]:add(reference.position,orbitOffset(object));entry.velocity=add(reference.velocity||[0,0,0],orbitVelocities.get(object.id)||[0,0,0]);
      const companion=object.orbitBarycenter?pairs.get(parent.id):null;if(companion){const ratio=this.orbitGeometryById.get(companion.id).pairRatio;entry.position=add(entry.position,mul(orbitOffset(companion),ratio));entry.velocity=add(entry.velocity,mul(orbitVelocities.get(companion.id)||[0,0,0],ratio));}
@@ -1036,21 +1460,28 @@ export class BlackHoleRenderer {
     else if(object.placement==='orbit'&&['primary','secondary'].includes(object.parentId)&&(!object.motion||object.motion==='orbit')){const k=object.parentId==='secondary'?1:0;entry.position=object.type==='dyson'?Array.from(h.slice(k*4,k*4+3)):add(Array.from(h.slice(k*4,k*4+3)),orbitOffset(object));entry.velocity=add(holeVelocity(k),orbitVelocities.get(object.id)||[0,0,0]);}
     const paired=pairs.get(object.id);if(paired){const ratio=this.orbitGeometryById.get(paired.id).pairRatio;entry.position=add(entry.position,mul(orbitOffset(paired),-ratio));entry.velocity=add(entry.velocity||[0,0,0],mul(orbitVelocities.get(paired.id)||[0,0,0],-ratio));}
     if(['disk','jets'].includes(object.type)&&parent){const reference=this.frameById.get(parent.id);entry.frame=reference.frame.map(v=>[...v]);entry.headingAngle=reference.headingAngle;entry.axialTilt=parent.axialTilt||0;entry.bodyParams[3]=reference.spinParameter||0;}
-    if(object.drivePosition)entry.position=[...object.drivePosition];else if(object.driveReturn){const t=Math.min(1,object.driveReturn.elapsed/3),smooth=t*t*(3-2*t);entry.position=entry.position.map((v,i)=>object.driveReturn.position[i]*(1-smooth)+v*smooth);if(t>=1)delete object.driveReturn;}
-    if(this.driveId===object.id&&object.driveBasis){entry.frame=object.driveBasis.map(v=>[...v]);entry.velocity=object.type==='shuttle'&&object.flight?.velocity?mul(object.flight.velocity,1/REFERENCE_RG_METERS):mul(entry.frame[2],(object.flight?.speed||0)*(object.type==='enterprise'?(object.flight?.travelDirection||1):1)/REFERENCE_RG_METERS);}
+    if(this.driveId===object.id&&object.flight?.orbitHold&&!(s.bridge&&object.id===this.bridgeObjectId&&this.autopilot?.kind==='bridge')){object.drivePosition=[...entry.position];object.flight.position=entry.position.map(v=>v*REFERENCE_RG_METERS);object.flight.velocity=(entry.velocity||[0,0,0]).map(v=>v*LIGHT_SPEED/18);object.flight.speed=Math.hypot(...object.flight.velocity);}
+    if(object.drivePosition)entry.position=[...object.drivePosition];else if(object.driveReturn?.attitudeOnly){if(object.driveReturn.elapsed>=3)delete object.driveReturn;}else if(object.driveReturn){const t=Math.min(1,object.driveReturn.elapsed/3),smooth=t*t*(3-2*t);entry.position=entry.position.map((v,i)=>object.driveReturn.position[i]*(1-smooth)+v*smooth);if(t>=1)delete object.driveReturn;}
+    if(this.driveId===object.id&&object.driveBasis){entry.frame=object.driveBasis.map(v=>[...v]);if(!object.flight?.orbitHold)entry.velocity=object.flight?.velocity?mul(object.type==='enterprise'&&this.transfer?.craftId!==object.id?warpVelocity(object.flight):object.flight.velocity,1/REFERENCE_RG_METERS):mul(entry.frame[2],(object.flight?.speed||0)/REFERENCE_RG_METERS);}
+    else if(object.waypointHoldId&&object.waypointHoldBasis){entry.frame=object.waypointHoldBasis.map(v=>[...v]);entry.velocity=[0,0,0];}
     else if(!(this.sceneId==='gravity-anomaly'&&object.id===this.warpObjectId)){const a=entry.headingAngle,plane=this.orbitGeometryById.get(object.id).basis,ca=Math.cos(a),sa=Math.sin(a);entry.frame=[transform(plane,[-ca,0,-sa]),plane[1],transform(plane,[sa,0,-ca])];}
-    if(object.driveReturn?.basis){const t=Math.min(1,object.driveReturn.elapsed/3),a=t*t*(3-2*t),old=object.driveReturn.basis,forward=directionBlend(old[2],entry.frame[2],a),upGuess=directionBlend(old[1],entry.frame[1],a),right=unit(cross(Math.abs(dot(upGuess,forward))>.999?(Math.abs(forward[1])<.9?[0,1,0]:[1,0,0]):upGuess,forward));entry.frame=[right,unit(cross(forward,right)),forward];}
-    if(s.bridge){entry.physicalRadius=this.objectRadius(object);entry.radius=entry.physicalRadius/bridgeConformal(Math.hypot(...entry.position),this.configCache.bridgeRadius);}
+    if(object.driveReturn?.basis){const t=Math.min(1,object.driveReturn.elapsed/3),a=t*t*t*(10+t*(-15+6*t)),old=object.driveReturn.basis,forward=directionBlend(old[2],entry.frame[2],a),upGuess=directionBlend(old[1],entry.frame[1],a),right=unit(cross(Math.abs(dot(upGuess,forward))>.999?(Math.abs(forward[1])<.9?[0,1,0]:[1,0,0]):upGuess,forward));entry.frame=[right,unit(cross(forward,right)),forward];}
+    if(s.bridge&&object.type!=='waypoint'){entry.physicalRadius=this.objectRadius(object);entry.radius=entry.physicalRadius/bridgeConformal(Math.hypot(...entry.position),this.configCache.bridgeRadius);}
+   }
+   if(entry&&this.routeChartY!=null&&['planet','moon','planetoid','asteroid','star','blackhole','whitehole'].includes(entry.type)){
+    const n=b[1];entry.position=add(entry.position,mul(n,this.routeChartY-(this.tourClearances?.get(entry.id)||0)-dot(entry.position,n)));
+    if(entry.velocity)entry.velocity=add(entry.velocity,mul(n,-dot(entry.velocity,n)));
    }
    resolving.delete(object.id);resolved.add(object.id);
   };
   for(const object of this.objects)resolve(object);
+  if(s.warp&&this.warpObjectId)s.warpRadius=this.warpEnvelope(this.frameById.get(this.warpObjectId),s).radius;
   this.protectClockBodies();
   for(const entry of this.objectFrames){
    const object=this.objectById.get(entry.id);
    if(entry.type==='dyson'){entry.frame=[[1,0,0],[0,1,0],[0,0,1]];const parent=this.frameById.get(object.parentId);entry.bodyParams=[object.dysonCutaway??0,dysonIllumination(parent,entry.radius*REFERENCE_RG_METERS),0,0];entry.massSolar=0;entry.velocity=parent?.velocity?[...parent.velocity]:[0,0,0];}
    if(this.sceneId==='radiant-descent'&&object?.motion==='infall'&&!object.drivePosition){const forward=unit(Array.from(h.slice(0,3)).map((v,i)=>v-entry.position[i])),right=unit(cross(forward,b[1]));entry.frame=[right,cross(right,forward),forward];}
-   if(s.blackHole&&object?.tidalDeformation>0&&object.planetStyle==='ocean'&&['planet','moon'].includes(entry.type)){
+   if(s.blackHole&&object?.tidalDeformation>0&&object.planetStyle==='ocean'&&isPlanetarySurface(entry.type)){
     const shape=tidalShape(entry.position,Array.from(h.slice(0,3)),b,object.tidalDeformation);
     entry.shapeAxes=shape.axes;entry.coreRadius=this.objectRadius({...object,shapeAxes:[1,1,1]});entry.radius=entry.coreRadius*shape.boundRatio;entry.waterCap=shape.waterCap;
     entry.axialTilt=shape.tilt*180/Math.PI;entry.surfaceRotationPhase=shape.phase;
@@ -1064,45 +1495,113 @@ export class BlackHoleRenderer {
   for(const entry of this.objectFrames)this.configCache.bounds=Math.max(this.configCache.bounds,Math.hypot(...entry.position)+entry.radius*3);
   if(this.state.viewMode==='free'&&this.freeReferenceId){const reference=this.getFocusFrame(this.freeReferenceId);if(reference&&this.freeReferencePosition&&this.freePosition&&this.freeTarget){const delta=reference.position.map((v,i)=>v-this.freeReferencePosition[i]);this.freePosition=add(this.freePosition,delta);this.freeTarget=add(this.freeTarget,delta);}this.freeReferencePosition=reference?[...reference.position]:null;}
   this.anomalyFrames=this.anomalyObjects?.length?this.anomalyObjects.map(o=>this.frameById.get(o.id)).filter(Boolean):null;
+  this.lastGeometryDrivePose=this.driveGeometryPose();
   this.packRenderObjects(this.cameraFrame);return this.objectCount;
  }
- // The actual scene remains present at every distance. This compatibility
- // hook is also read by the CPU renderer; there is no far-field replacement.
- isDriveOpenSpace(){return false;}
- displayState(){return this.state;}
+ // A reversible presentation boundary keeps astronomical manual warp travel
+ // from feeding enormous local optical domains to a mobile renderer. Objects
+ // and their original orbit remain intact for Exit Drive.
+ updateDriveEnvironment(obj,dt){
+  const f=obj?.flight;if(!f)return;let desired=0;
+  if(obj.type==='enterprise'&&!this.state.bridge&&!this.transfer?.active&&!f.orbitHold){const parent=this.getFocusFrame(obj.parentId),center=parent?parent.position.map(v=>v*REFERENCE_RG_METERS):f.escapeAnchor||[0,0,0],distance=Math.hypot(...f.position.map((v,i)=>v-center[i])),radius=Math.max(1,f.escapeRadiusMeters||1),x=clamp((distance/radius-2)/3,0,1);desired=x*x*(3-2*x);}
+  f.escapeBlend=(f.escapeBlend||0)+(desired-(f.escapeBlend||0))*(1-Math.exp(-dt*2.8));if(Math.abs(f.escapeBlend-desired)<1e-4)f.escapeBlend=desired;
+ }
+ isDriveOpenSpace(){return !this.state.bridge&&!this.transfer?.active&&(this.objectById?.get(this.driveId)?.flight?.escapeBlend||0)>.999;}
+ displayState(){return this.isDriveOpenSpace()?{...this.state,blackHole:false,binary:false,disk:false,jets:false,secondaryDisk:false,secondaryJets:false,planet:false,tidalStar:false,nebula:this.sceneId==='warp-lab'&&this.state.nebula}:this.state;}
+ warpGridLocalPatch(){return this.hasWarpGridNeighbor;}
  warpGridState(warp,radius){
+  // In a mixed scene the nearby sheet is a ship-frame chart, independent
+  // of the ephemeris, galactic coordinates, and the current bubble radius.
+  if(warp?.type==='enterprise'&&(this.sceneId==='warp-lab'||this.warpGridLocalPatch()))return {offset:[this.warpLocalGridPhase||0,0],rotation:[1,0]};
   const flight=warp&&warp.id===this.driveId?this.objectById.get(warp.id)?.flight:null;
   if(warp?.type==='enterprise'&&flight?.mode==='warp')return {offset:[flight.gridPhase||0,0],rotation:[1,0]};
   const wrap=v=>((v%4096)+4096)%4096,k=this.configCache;
   return {offset:warp?[wrap(dot(warp.position,k.primaryBasis[0])/radius),wrap(dot(warp.position,k.primaryBasis[2])/radius)]:[0,0],rotation:warp?[dot(warp.frame[2],k.primaryBasis[0]),dot(warp.frame[2],k.primaryBasis[2])]:[1,0]};
  }
+ // The laboratory sky is an all-sky background, even after leaving the origin.
+ // Only the highest Drive speeds wash it out. Use smoothed motion, not the slider.
+ labNebulaVisibility(motion){
+  if(!motion.active||this.navigationModes?.[this.driveId]!=='manual')return 1;
+  const warp=warpForSpeed(motion.beta*LIGHT_SPEED),t=clamp((warp-5)/(9.9999-5),0,1);
+  return 1-t*t*(3-2*t);
+ }
  warpMotionState(){
   const pilot=this.objectById?.get(this.driveId),s=this.state;
-  const isolated=pilot?.parentId==='space'&&!s.blackHole&&!s.binary&&!s.planet&&!s.tidalStar&&!s.bridge&&!this.objects.some(o=>['star','planet','moon','blackhole','whitehole','anomaly'].includes(o.type));
-  const active=pilot?.type==='enterprise'&&pilot.flight?.mode!=='impulse'&&!!pilot.flight&&isolated;
+  const isolated=pilot?.parentId==='space'&&!s.blackHole&&!s.binary&&!s.planet&&!s.tidalStar&&!s.bridge&&!this.objects.some(o=>['star','planet','moon','planetoid','asteroid','blackhole','whitehole','anomaly'].includes(o.type));
+  const blend=pilot?.type==='enterprise'&&!s.bridge&&!this.transfer?.active?(isolated?1:pilot.flight?.escapeBlend||0):0,active=blend>0&&pilot.flight?.mode!=='impulse'&&!!pilot.flight;
   const beta=active?Math.max(0,pilot.flight.starBeta||0):0;
-  return {active,phase:active?(pilot.flight.starPhase||0):0,rate:warpStarRate(beta),beta};
+  return {active,blend,phase:active?(pilot.flight.starPhase||0):0,rate:warpStarRate(beta),beta};
+ }
+ // Compact cluster optics have their own fixed bank. Ordinary surface slots
+ // are never allowed to evict a horizon or its disc from the built-in cluster.
+ fillClusterSources(origin=[0,0,0]){
+  const bank=this.clusterSourceBank||(this.clusterSourceBank={count:0,bodies:new Float32Array(96),params:new Float32Array(96),colors:new Float32Array(96),axes:new Float32Array(96),ids:[],depths:new Float64Array(24)});
+  bank.count=0;bank.ids.length=0;for(const key of ['bodies','params','colors','axes'])bank[key].fill(0);
+  const append=(id,position,horizon,mass,spin,inner,outer,tint,density,normal,thickness)=>{
+   if(bank.count>=24||!(horizon>0&&mass>0))return;
+   const offset=bank.count++*4;bank.ids.push(id);
+   bank.bodies.set([...position.map((v,i)=>v-origin[i]),horizon],offset);
+   bank.params.set([mass,spin,inner,outer],offset);bank.colors.set([...tint,density],offset);bank.axes.set([...normal,thickness],offset);
+  };
+  const s=this.state,c=this.configCache;
+  if(s.blackHole)for(let i=0;i<(s.binary?2:1);i++){
+   const mass=this.holeData[i*4+3],disk=i?(s.secondaryDisk??s.disk):s.disk;
+   append(i?'secondary':'primary',Array.from(this.holeData.slice(i*4,i*4+3)),c.horizon[i],mass,i?s.secondarySpin:s.spin,c.isco[i]*mass,disk?c.diskOuter[i]:0,
+    i?color(s.secondaryDiskColor||s.diskColor):c.diskColor,disk?(i?s.secondaryDiskDensity??s.diskDensity:s.diskDensity):0,i?c.secondaryAxis:c.primaryAxis,i?s.secondaryDiskThickness??s.diskThickness:s.diskThickness);
+  }
+  const discs=new Map();for(const body of this.objectFrames)if(body.type==='disk'&&!discs.has(body.parentId))discs.set(body.parentId,body);
+  for(const body of this.objectFrames){
+   if(!body.collapsed&&!isCompactType(body.type))continue;
+   const disc=discs.get(body.id),tilt=radians(body.axialTilt||0),normal=transform(c.primaryBasis,[0,Math.cos(tilt),Math.sin(tilt)]),outer=disc?.radius||0;
+   append(body.id,body.position,body.horizonRadius||body.radius,(body.massSolar||0)/4300000,body.spinParameter||0,
+    outer*(disc?.innerRadiusRatio??.46),outer,disc?.tint||[1,.8,.55],disc?.diskDensity??0,normal,disc?.diskThickness??.45);
+  }
+  // Nineteen cheap insertion-sort entries per frame permit one ordered lens
+  // pass per pixel. No camera-dependent source eviction and no shader N² loop.
+  const observer=this.cameraFrame?.observer||[0,0,0],forward=this.cameraFrame?.forward||[0,0,-1];
+  for(let j=0;j<bank.count;j++)bank.depths[j]=(bank.bodies[j*4]+origin[0]-observer[0])*forward[0]+(bank.bodies[j*4+1]+origin[1]-observer[1])*forward[1]+(bank.bodies[j*4+2]+origin[2]-observer[2])*forward[2];
+  for(let j=1;j<bank.count;j++)for(let k=j;k>0&&bank.depths[k]<bank.depths[k-1];k--){
+   const depth=bank.depths[k];bank.depths[k]=bank.depths[k-1];bank.depths[k-1]=depth;
+   const id=bank.ids[k];bank.ids[k]=bank.ids[k-1];bank.ids[k-1]=id;
+   for(const key of ['bodies','params','colors','axes'])for(let n=0;n<4;n++){const a=k*4+n,b=(k-1)*4+n,v=bank[key][a];bank[key][a]=bank[key][b];bank[key][b]=v;}
+  }
+  return bank;
  }
  packRenderObjects(frame=this.cameraFrame,renderHeight=this.canvas.height){
-  const values=frame?[...frame.observer,...frame.forward,...frame.right,...frame.up,this.canvas.width,renderHeight,this.state.lensing,this.focusId,this.focusMode,this.driveId,this.warpObjectId]:[];
+  const values=frame?[...frame.observer,...(frame.eyeOffset||[]),...frame.forward,...frame.right,...frame.up,this.canvas.width,renderHeight,this.state.lensing,this.focusId,this.focusMode,this.driveId,this.warpObjectId,this.shaderObjectSlots()]:[];
   if(this.packedFrames===this.objectFrames&&this.packedView?.length===values.length&&values.every((v,i)=>v===this.packedView[i])){const focused=this.frameById?.get(this.focusId);if(frame){frame.inspectIndex=this.focusMode==='onboard'?-1:focused?.index??-1;frame.hideIndex=this.focusMode==='onboard'&&focused?.type!=='dyson'?focused?.index??-1:-1;}return;}
   this.packedFrames=this.objectFrames;this.packedView=values;
-  const all=this.isDriveOpenSpace()?this.objectFrames.filter(o=>o.id===this.driveId):this.anomalyObjects?.length?this.objectFrames.filter(o=>o.type!=='anomaly'):this.objectFrames,limit=this.shaderObjectSlots(),selected=[],required=new Set();
+  const all=this.isDriveOpenSpace()?this.objectFrames.filter(o=>o.id===this.driveId):this.hasWaypoints||this.anomalyObjects?.length?this.objectFrames.filter(o=>o.type!=='anomaly'&&o.type!=='waypoint'):this.objectFrames,limit=this.shaderObjectSlots(),selected=[],required=new Set();
   if(this.focusId)required.add(this.focusId);if(this.warpObjectId&&this.state.warp)required.add(this.warpObjectId);if(this.driveId)required.add(this.driveId);
   let ancestor=this.objectById?.get(this.focusId);while(ancestor?.parentId&&required.size<limit){required.add(ancestor.parentId);ancestor=this.objectById.get(ancestor.parentId);}
   for(const entry of all)if(['ring','belt','disk','jets','dyson'].includes(entry.type)&&(entry.parentId===this.focusId||required.has(entry.parentId)))required.add(entry.id);
   const rect=this.canvas.getBoundingClientRect(),aspect=Math.max(.1,rect.width/Math.max(1,rect.height)),fov=.83*Math.max(1,1.35/aspect),pixelHeight=Math.max(2,renderHeight||rect.height),selectionHeight=Math.max(2,rect.height);
+  const lenses=this.state.lensing?all.filter(entry=>entry.collapsed||['star','blackhole','whitehole'].includes(entry.type)):[];
+  if(this.state.lensing&&this.state.blackHole)for(let i=0;i<(this.state.binary?2:1);i++)if(this.holeData[i*4+3]>0)lenses.push({position:Array.from(this.holeData.slice(i*4,i*4+3)),massSolar:this.holeData[i*4+3]*4300000});
   const score=entry=>{
-   if(entry.type==='dyson'&&frame&&Math.hypot(...entry.position.map((v,i)=>v-frame.observer[i]))<entry.radius*1.05)return 1e12;
+   if(!frame)return 1;
+   const q=cameraRelative(entry.position,frame),depth=dot(q,frame.forward),distance=Math.hypot(...q),radius=entry.radius;
+   const planetary=isPlanetarySurface(entry.type)&&!entry.collapsed,source=['star','blackhole','whitehole'].includes(entry.type)||entry.collapsed;
+   let diameter=distance<=radius?Infinity:2*radius/Math.max(1e-30,depth>0?depth:distance)/fov*pixelHeight;
+   // A distant planet can become visible near a compact lens alignment. Keep
+   // that conservative Einstein-cone case for ray tracing rather than culling
+   // it using its unwarped angular diameter alone.
+   if(planetary&&diameter<=1&&depth>0)for(const lens of lenses){
+    const l=cameraRelative(lens.position,frame),dl=Math.hypot(...l),mass=(lens.massSolar||0)/4300000;
+    if(!(dl>0&&dl<distance&&mass>0))continue;
+    const separation=Math.hypot(...q.map((v,i)=>v/distance-l[i]/dl)),einstein=Math.sqrt(4*mass*(distance-dl)/(distance*dl));
+    if(separation<=einstein*2+radius/distance&&einstein*pixelHeight/fov>1){diameter=2;break;}
+   }
+   entry.surfacePixelDiameter=diameter;entry.surfaceCulled=planetary&&diameter<=1;
+   if(entry.surfaceCulled){entry.projectedPixels=diameter*.5;entry.inFrustum=false;return 0;}
+   if(entry.type==='dyson'&&distance<radius*1.05)return 1e12;
    if(required.has(entry.id))return 1e12+(entry.id===this.focusId?1e10:0);
-   if(!frame)return 1;const q=entry.position.map((x,i)=>x-frame.observer[i]),depth=dot(q,frame.forward),distance=Math.hypot(...q),projected=entry.radius/Math.max(1e-30,distance)/fov*selectionHeight;
-   // Selection uses display pixels, so adaptive coarsening does not remove
-   // visible bodies. Weak-lens work below still follows the actual ray pixels.
-   // Off-axis bodies retain a margin for lensing; subpixel bodies are deferred.
+   const mass=(entry.massSolar||0)/4300000,footprint=source&&this.state.lensing?Math.max(radius,Math.sqrt(4*Math.max(0,mass)*distance)):radius;
+   const projected=planetary?diameter*.5*selectionHeight/pixelHeight:footprint/Math.max(1e-30,distance)/fov*selectionHeight;
    const x=Math.abs(dot(q,frame.right)),y=Math.abs(dot(q,frame.up)),margin=this.state.blackHole?1.5:1.12;
-   const visible=depth+entry.radius>0&&x<(Math.max(depth,0)*fov*aspect+entry.radius)*margin&&y<(Math.max(depth,0)*fov+entry.radius)*margin;
+   const visible=depth+footprint>0&&x<(Math.max(depth,0)*fov*aspect+footprint)*margin&&y<(Math.max(depth,0)*fov+footprint)*margin;
    entry.projectedPixels=projected;entry.inFrustum=visible;
-   return visible&&projected>=.25?projected*projected:0;
+   return visible&&(source||projected>=.25)?Math.max(source ? .25 : 0,projected*projected):0;
   };
   const ranked=all.map((entry,order)=>({entry,order,score:score(entry)}));
   // Keep one luminous source for reflected surfaces even when it lies behind
@@ -1116,7 +1615,7 @@ export class BlackHoleRenderer {
     if(included.has(value.entry.id))continue;const parent=['disk','jets'].includes(value.entry.type)?byId.get(value.entry.parentId):null,group=parent&&isCompactType(parent.entry.type)&&!included.has(parent.entry.id)?[parent,value]:[value];
     if(candidates.length+group.length>limit)continue;for(const item of group){included.add(item.entry.id);candidates.push(item);}
    }
-  }else candidates=all.length<=limit?ranked:ranked.filter(v=>v.score>0).sort((a,b)=>b.score-a.score||a.order-b.order).slice(0,limit);
+  }else candidates=ranked.filter(v=>v.score>0).sort((a,b)=>b.score-a.score||a.order-b.order).slice(0,limit);
   // Significant lenses occupy a compact prefix. This bounds each midpoint
   // force evaluation by active curvature sources, not by visible moons/rings.
   for(const value of candidates)value.entry.lensingActive=!!this.state.lensing&&bodyLensingSignificant(value.entry,fov/pixelHeight);
@@ -1127,20 +1626,31 @@ export class BlackHoleRenderer {
   for(let index=0;index<selected.length;index++){
    const entry=selected[index],o=index*4;entry.index=index;this.objectData.set([...entry.position,entry.radius],o);this.colorData.set([...entry.tint,OBJECT_KIND[entry.type]??0],o);this.headingData.set([Math.cos(entry.headingAngle),Math.sin(entry.headingAngle)],index*2);this.bodyMassData[index]=entry.massSolar;this.bodyOpacityData[index]=this.state.spectrum==='geometry'||entry.collapsed||['blackhole','whitehole'].includes(entry.type)?1:clamp(entry.opacity??1,0,1);if(this.bodyOpacityData[index]<.999&&!['ring','belt','disk','jets'].includes(entry.type))this.transparentBodyCount++;this.bodyParamData.set(entry.bodyParams,o);this.luminosityData[index]=entry.type==='probe'?entry.luminosity:packMetricDirection(Math.hypot(...(entry.velocity||[0,0,0]))>entry.radius*1e-7?entry.velocity:[0,0,0]);
    const parent=this.objectById?.get(entry.parentId),tilt=entry.axialTilt??(['ring','belt','disk','jets'].includes(entry.type)?parent?.axialTilt:0)??0,axes=entry.shapeAxes||[1,1,1],maximum=Math.max(...axes);
-   if(entry.type==='probe')this.headingData.set(metricOctDirection(entry.velocity||[0,0,0]),index*2);else if(['star','planet','moon','blackhole','whitehole'].includes(entry.type)){const sign=entry.type==='star'?Math.sign(entry.stellar?.angularVelocity??1):Math.sign(entry.rotationPeriodSeconds||1),angle=radians(tilt);entry.spinAxis=mul(transform(this.configCache.primaryBasis,[0,Math.cos(angle),Math.sin(angle)]),sign||1);const spinning=entry.type==='star'?Math.abs(entry.stellar?.angularVelocity||0)>1e-12:['blackhole','whitehole'].includes(entry.type)?Math.abs(entry.spinParameter||0)>.001:Math.abs(entry.rotationPeriodSeconds||entry.rotation||0)>0;this.headingData.set(metricOctDirection(spinning?entry.spinAxis:[0,0,0]),index*2);}
+   if(entry.type==='probe')this.headingData.set(metricOctDirection(entry.velocity||[0,0,0]),index*2);else if(['star','planet','moon','planetoid','asteroid','blackhole','whitehole'].includes(entry.type)){const sign=entry.type==='star'?Math.sign(entry.stellar?.angularVelocity??1):Math.sign(entry.rotationPeriodSeconds||1),angle=radians(tilt);entry.spinAxis=mul(transform(this.configCache.primaryBasis,[0,Math.cos(angle),Math.sin(angle)]),sign||1);const spinning=entry.type==='star'?Math.abs(entry.stellar?.angularVelocity||0)>1e-12:['blackhole','whitehole'].includes(entry.type)?Math.abs(entry.spinParameter||0)>.001:Math.abs(entry.rotationPeriodSeconds||entry.rotation||0)>0;this.headingData.set(metricOctDirection(spinning?entry.spinAxis:[0,0,0]),index*2);}
    const period=entry.rotationPeriodSeconds,spin=entry.tidallyLocked?entry.headingAngle+Math.PI:Math.abs(period)>1?-this.time*(18*REFERENCE_RG_METERS/299792458)*TAU/period:-this.time*(entry.rotation??1)*.05;
    if(['disk','jets'].includes(entry.type)){const owner=this.frameById?.get(entry.parentId);this.bodyShapeData.set([entry.innerRadiusRatio??Math.max(.05,(owner?.radius||0)/entry.radius),owner?.spinParameter||0,entry.diskPalette==='rainbow'?2:entry.diskPalette==='artistic'?1:0,radians(tilt)],o);}
    this.bodySurfaceData.set([entry.surfaceId||0,radians(tilt),wrap((entry.surfaceRotationPhase||0)+spin),entry.shapeStyle==='watercap'?3:entry.shapeStyle==='contact'?1:entry.shapeStyle==='rubble'?2:0],o);if(!['disk','jets'].includes(entry.type))this.bodyShapeData.set([...(entry.waterCap?[1,entry.waterCap.radiusRatio,entry.waterCap.offsetRatio].map(v=>v*entry.coreRadius/entry.radius):axes.map(v=>v/maximum)),radians(tilt)],o);
-   if(entry.type==='planet'||entry.type==='moon'||entry.type==='probe')this.bodyParamData.set([entry.bodyParams[0]+4*(entry.surfaceId||0),this.bodySurfaceData[o+2],this.bodySurfaceData[o+3],entry.rotation??1],o);
+   if(isPlanetarySurface(entry.type)||entry.type==='probe')this.bodyParamData.set([entry.bodyParams[0]+4*(entry.surfaceId||0),this.bodySurfaceData[o+2],this.bodySurfaceData[o+3],entry.rotation??1],o);
   }
   this.renderObjects=selected;this.objectCount=selected.length;
   if(frame){const focused=this.frameById?.get(this.focusId);frame.inspectIndex=this.focusMode==='onboard'?-1:focused?.index??-1;frame.hideIndex=this.focusMode==='onboard'?focused?.index??-1:-1;}
+ }
+ // The inward pass starts on the same side of the horizon as the scene cover.
+ // Transport that mount with the rendered hull's eased turn, including at rest
+ // when a velocity-derived tangent would be undefined or flip sign abruptly.
+ excursionFrame(ship){
+  if(this.sceneId!=='warp-excursion'||ship?.type!=='enterprise'||this.focusMode!=='track'||this.navigationModes?.[ship.id]==='manual')return null;
+  return [mul(ship.frame[0],-1),ship.frame[1],mul(ship.frame[2],-1)];
+ }
+ warpEnvelope(ship,s=this.state){
+  const shield=ship?.type==='enterprise'?shieldDemand(ship.position,this.holeData,s.blackHole?this.configCache.horizon:[],this.objectFrames,REFERENCE_MASS*1e6):0;
+  return combinedWarpEnvelope(s.warpFactor,shield);
  }
  // Every field-size change resumes fitting, including braking and reset. Keep
  // the chosen orbit angles; only recenter a look-pan that puts the subject
  // behind the camera or underneath a control, where no zoom can possibly fit.
  resumeWarpCameraFit(){
-  if(this.focusMode!=='track'||this.getFocusFrame()?.type!=='enterprise')return false;
+  if(this.focusMode!=='track'||this.getFocusFrame()?.type!=='enterprise'||this.bridgeHullCamera(this.focusId))return false;
   this.cameraGuide='warp-side';
   if(this.fitWarpCamera())return true;
   this.camera.lookYaw=this.target.lookYaw=0;this.camera.lookPitch=this.target.lookPitch=0;
@@ -1151,30 +1661,69 @@ export class BlackHoleRenderer {
  // Zoom outward immediately to keep a growing wall inside the safe bounds;
  // existing camera easing brings a shrinking field/hull inward smoothly.
  fitWarpCamera(snap=false){
-  const body=this.getFocusFrame();if(body?.type!=='enterprise'||this.focusMode!=='track')return false;
-  const rect=this.canvas.getBoundingClientRect(),enabled=this.state.warp&&this.focusId===this.warpObjectId,key=[rect.width,rect.height,this.state.warpFactor,enabled,this.target.yaw,this.target.pitch,this.target.lookYaw,this.target.lookPitch,!!this.driveId,window.innerWidth||rect.width,window.innerHeight||rect.height].join('/');
-  if(key!==this.warpFitKey){this.warpFitKey=key;this.warpFit=warpSideFraming(rect.width,rect.height,this.state.warpFactor,{enabled,yaw:this.target.yaw,pitch:this.target.pitch,lookYaw:this.target.lookYaw,lookPitch:this.target.lookPitch,driving:!!this.driveId,cssWidth:window.innerWidth||rect.width,cssHeight:window.innerHeight||rect.height});}
+  const body=this.getFocusFrame();if(body?.type!=='enterprise'||this.focusMode!=='track'||this.bridgeHullCamera(body.id))return false;
+  const rect=this.canvas.getBoundingClientRect();
+  const enabled=this.state.warp&&this.focusId===this.warpObjectId,field=enabled?this.warpEnvelope(body):null;
+  let fieldRadius=field?.strength>0?field.radius:0;
+  if(enabled&&this.sceneId==='warp-excursion'&&this.navigationModes?.[body.id]!=='manual'){
+   // Leave room for the inner turnaround without zooming away the growth.
+   const cruise=Math.max(this.state.warpFactor,...(this.flightSequences[body.id]?.nodes||[]).map(n=>n.warpFactor??0));
+   fieldRadius=Math.max(fieldRadius,combinedWarpEnvelope(cruise,8).radius);
+  }
+  const key=[rect.width,rect.height,fieldRadius,enabled,this.target.yaw,this.target.pitch,this.target.lookYaw,this.target.lookPitch,!!this.driveId,window.innerWidth||rect.width,window.innerHeight||rect.height].join('/');
+  if(key!==this.warpFitKey){this.warpFitKey=key;this.warpFit=warpSideFraming(rect.width,rect.height,this.state.warpFactor,{enabled,fieldRadius,yaw:this.target.yaw,pitch:this.target.pitch,lookYaw:this.target.lookYaw,lookPitch:this.target.lookPitch,driving:!!this.driveId,cssWidth:window.innerWidth||rect.width,cssHeight:window.innerHeight||rect.height});}
   const fit=this.warpFit;if(!Number.isFinite(fit.distance))return false;
   this.target.focusDistance=fit.distance;
   let minimum=fit.distance;
   // The hull's silhouette changes during an orbit. Fit both the destination
   // and the currently displayed heading so easing cannot briefly clip it.
   if(!snap&&['yaw','pitch','lookYaw','lookPitch'].some(k=>Math.abs(this.camera[k]-this.target[k])>1e-6)){
-   const current=warpSideFraming(rect.width,rect.height,this.state.warpFactor,{enabled,yaw:this.camera.yaw,pitch:this.camera.pitch,lookYaw:this.camera.lookYaw,lookPitch:this.camera.lookPitch,driving:!!this.driveId,cssWidth:window.innerWidth||rect.width,cssHeight:window.innerHeight||rect.height});
+   const current=warpSideFraming(rect.width,rect.height,this.state.warpFactor,{enabled,fieldRadius,yaw:this.camera.yaw,pitch:this.camera.pitch,lookYaw:this.camera.lookYaw,lookPitch:this.camera.lookPitch,driving:!!this.driveId,cssWidth:window.innerWidth||rect.width,cssHeight:window.innerHeight||rect.height});
    if(Number.isFinite(current.distance))minimum=Math.max(minimum,current.distance);
   }
   if(snap||this.camera.focusDistance<minimum)this.camera.focusDistance=minimum;
   return true;
  }
+ bridgeHullCamera(id){
+  return this.state.bridge&&id===this.bridgeObjectId&&BRIDGE_HULL_CAMERAS[this.sceneId]||null;
+ }
  updateCameraFrame(){
-  const c=this.camera,focused=this.focusId?this.getFocusFrame():null;let observer,forward,right,up,inspectCamera=[0,0,6],inspectForward=[0,0,-1],inspectRight=[1,0,0],inspectUp=[0,1,0],inspectIndex=-1,hideIndex=-1;
+  const c=this.camera,focused=this.focusId?this.getFocusFrame():null;let observer,forward,right,up,preciseEye=null,inspectCamera=[0,0,6],inspectForward=[0,0,-1],inspectRight=[1,0,0],inspectUp=[0,1,0],inspectIndex=-1,hideIndex=-1;
   if(focused){
-   const reference=this.focusMode==='track'&&this.focusReferenceFrame?.id===focused.id?this.focusReferenceFrame.basis:focused.frame;
+   const hullMount=this.bridgeHullCamera(focused.id),parkedGuide=hullMount?null:updateParkedCamera(this,focused);
+   const excursion=this.excursionFrame(focused),reference=hullMount?focused.frame:excursion||(this.focusMode==='track'&&this.focusReferenceFrame?.id===focused.id?this.focusReferenceFrame.basis:focused.frame);
    if(this.cameraGuide==='warp-side'&&focused.type==='enterprise'&&this.focusMode==='track')this.fitWarpCamera();
    const onboard=this.focusMode==='onboard',chase=this.focusMode==='chase';
-   let eye=chase?[0,Math.max(1.1,c.focusDistance*.24),-Math.max(2.6,c.focusDistance*.72)]:onboard?(focused.type==='hole'?[0,0,1.04]:focused.type==='dyson'?[0,0,.65]:['planet','moon','star'].includes(focused.type)?[0,.25,1.03]:focused.type==='astronaut'?[0,.55,.30]:focused.type==='enterprise'?[0,.22,.35]:focused.type==='shuttle'?[0,.28,.65]:[0,.3,.8]):[Math.cos(c.pitch)*Math.sin(c.yaw)*c.focusDistance,Math.sin(c.pitch)*c.focusDistance,Math.cos(c.pitch)*Math.cos(c.yaw)*c.focusDistance];
-   if(this.state.blackHole&&!(this.state.interiorView&&this.state.spectrum==='geometry')){let clampedObserver=false,actual=add(focused.position,transform(reference,mul(eye,focused.radius)));for(let k=0;k<(this.state.binary?2:1);k++){const center=Array.from(this.holeData.slice(k*4,k*4+3)),delta=actual.map((x,i)=>x-center[i]),distance=Math.hypot(...delta),minimum=this.configCache.horizon[k]*1.013;if(distance<minimum){const outward=distance>1e-15?mul(delta,1/distance):unit(focused.position.map((x,i)=>x-center[i]));actual=add(center,mul(outward,minimum));clampedObserver=true;}}if(clampedObserver)eye=mul(inverse(reference,actual.map((x,i)=>x-focused.position[i])),1/focused.radius);}
-   const baseForward=onboard&&focused.type==='dyson'?[0,0,-1]:onboard||chase?[0,0,1]:unit(mul(eye,-1)),baseRight=unit(cross(baseForward,[0,1,0])),baseUp=cross(baseRight,baseForward);
+   const blueFire=focused.type==='astronaut'&&this.sceneId==='radiant-descent'&&this.objectById?.get(focused.id)?.motion==='infall'&&this.state.blackHole;
+   if(blueFire&&this.cameraGuide==='blue-fire-edge'&&this.focusMode==='track'){
+    // Put the camera *behind* the explorer on the ray to the apparent right
+    // limb. The avatar stays in the shot as the capture cone opens around it.
+    const delta=focused.position.map((v,i)=>v-this.holeData[i]),distance=Math.hypot(...delta),angle=this.state.lensing?apparentCaptureAngle(distance,this.holeData[3]):Math.asin(Math.min(1,this.configCache.horizon[0]/distance));
+    const sinceStop=Math.max(0,this.time-(this.objectById.get(focused.id).motionEpoch||0)-BLUE_FIRE_ARRIVAL)+(this.gapOrbitTime||0);
+    // Integrated raised-cosine speed: start at rest, then one turn every 32s.
+    // Absolute simulation time makes pause, stills and restored scenes agree.
+    const ramp=4,t=Math.min(sinceStop,ramp),phase=TAU/32*((t-ramp/Math.PI*Math.sin(Math.PI*t/ramp))/2+Math.max(0,sinceStop-ramp));
+    // An inclined circuit lifts the outward view clear of the bright
+    // equatorial ribbons before returning across the disc to the shadow.
+    const bearing=angle+phase,tilt=.42*Math.sin(phase)+.07*(1-Math.cos(phase)),cos=Math.cos(tilt);
+    const arm=inverse(reference,transform(focused.frame,[Math.sin(bearing)*cos,Math.sin(tilt),-Math.cos(bearing)*cos]));
+    // Bake the guide into the ordinary track coordinates: releasing it with
+    // a drag or zoom continues from exactly the visible pose.
+    c.yaw=this.target.yaw=Math.atan2(arm[0],arm[2]);c.pitch=this.target.pitch=Math.asin(clamp(arm[1],-1,1));
+   }
+   let eye=chase?[0,Math.max(1.1,c.focusDistance*.24),-Math.max(2.6,c.focusDistance*.72)]:onboard?(focused.type==='hole'?[0,0,1.04]:focused.type==='dyson'?[0,0,.65]:(isPlanetarySurface(focused.type)||focused.type==='star')?[0,.25,1.03]:focused.type==='astronaut'?[0,.55,.30]:focused.type==='enterprise'?[0,.22,.35]:focused.type==='shuttle'?[0,.28,.65]:[0,.3,.8]):[Math.cos(c.pitch)*Math.sin(c.yaw)*c.focusDistance,Math.sin(c.pitch)*c.focusDistance,Math.cos(c.pitch)*Math.cos(c.yaw)*c.focusDistance];
+   if(this.state.blackHole&&!(this.state.interiorView&&this.state.spectrum==='geometry')){let clampedObserver=false,actual=add(focused.position,transform(reference,mul(eye,focused.radius)));for(let k=0;k<(this.state.binary?2:1);k++){const center=Array.from(this.holeData.slice(k*4,k*4+3)),delta=actual.map((x,i)=>x-center[i]),distance=Math.hypot(...delta),minimum=limitedCrew(focused.type)?compactExteriorRadius(this.configCache.horizon[k],0):this.configCache.horizon[k]*1.013;if(distance<minimum){const outward=distance>1e-15?mul(delta,1/distance):unit(focused.position.map((x,i)=>x-center[i]));actual=add(center,mul(outward,minimum));clampedObserver=true;}}if(clampedObserver)eye=mul(inverse(reference,actual.map((x,i)=>x-focused.position[i])),1/focused.radius);}
+   // Follow a local point ahead of the craft, rather than aiming across an
+   // entire solar system. A slight downward composition puts the visible
+   // route in the upper-middle and keeps the shuttle below it, in the frame.
+   const trip=this.transfer?.active&&!this.transfer.radiusTransfer?this.transfer:parkedGuide,guide=!hullMount&&!excursion&&this.focusMode==='track'&&trip?.craftId===focused.id&&this.focusReferenceFrame?.id===focused.id&&trip.cameraAimOffset?trip:null;
+   let aim=guide?unit(inverse(reference,guide.cameraAimOffset.map((v,i)=>v-transform(reference,mul(eye,focused.radius))[i]))):null;
+   if(guide?.cameraTargetBody&&guide.cameraTargetOffset){const parentAim=unit(inverse(reference,guide.cameraTargetOffset.map((v,i)=>v-transform(reference,mul(eye,focused.radius))[i])));aim=directionBlend(aim||unit(mul(eye,-1)),parentAim,guide.cameraTargetBlend??1);}
+   if(aim){const center=unit(mul(eye,-1)),cosine=clamp(dot(center,aim),-1,1),angle=Math.acos(cosine),limit=.13+(guide?.cameraTargetBody ? .09*(guide.cameraTargetBlend??1) : 0);if(angle>limit){const lateral=unit(aim.map((v,i)=>v-center[i]*cosine));aim=add(mul(center,Math.cos(limit)),mul(lateral,Math.sin(limit)));}}
+   const aimUp=guide?.cameraPathUp?inverse(reference,guide.cameraPathUp):[0,1,0];
+   let baseForward=aim||(onboard&&focused.type==='dyson'?[0,0,-1]:onboard||chase?[0,0,1]:unit(mul(eye,-1)));
+   const baseRight=unit(cross(baseForward,Math.abs(dot(baseForward,aimUp))>.9999?(Math.abs(baseForward[2])<.9?[0,0,1]:[1,0,0]):aimUp));let baseUp=cross(baseRight,baseForward);
+   if(guide){const rect=this.canvas.getBoundingClientRect(),fov=.83*Math.max(1,1.35*rect.height/rect.width),tilt=Number.isFinite(guide.cameraCompositionY)?Math.atan(guide.cameraCompositionY*fov):.045*(guide.cameraGuideBlend||0);baseForward=unit(add(mul(baseForward,Math.cos(tilt)),mul(baseUp,-Math.sin(tilt))));baseUp=cross(baseRight,baseForward);}
    if(this.cameraGuide==='blue-fire-edge'&&onboard&&this.state.blackHole){
     const position=add(focused.position,transform(reference,mul(eye,focused.radius))),center=Array.from(this.holeData.slice(0,3)),delta=center.map((v,i)=>v-position[i]),distance=Math.hypot(...delta),inward=unit(delta),rawRight=unit(cross(inward,this.configCache.primaryAxis)),edgeRight=mul(rawRight,dot(rawRight,transform(reference,baseRight))<0?-1:1),angle=this.state.lensing?apparentCaptureAngle(distance,this.holeData[3]):Math.asin(Math.min(1,this.configCache.horizon[0]/distance));
     const direction=inverse(reference,add(mul(inward,Math.cos(angle)),mul(edgeRight,Math.sin(angle))));
@@ -1185,7 +1734,14 @@ export class BlackHoleRenderer {
    }
    const horizontal=add(mul(baseForward,Math.cos(c.lookYaw)),mul(baseRight,Math.sin(c.lookYaw)));
    inspectForward=unit(add(mul(horizontal,Math.cos(c.lookPitch)),mul(baseUp,Math.sin(c.lookPitch))));inspectRight=unit(add(mul(baseRight,Math.cos(c.lookYaw)),mul(baseForward,-Math.sin(c.lookYaw))));inspectUp=cross(inspectRight,inspectForward);inspectCamera=eye;
-   observer=add(focused.position,transform(reference,mul(eye,focused.radius)));forward=transform(reference,inspectForward);right=transform(reference,inspectRight);up=transform(reference,inspectUp);if(reference!==focused.frame){inspectCamera=inverse(focused.frame,transform(reference,eye));inspectForward=inverse(focused.frame,forward);inspectRight=inverse(focused.frame,right);inspectUp=inverse(focused.frame,up);}inspectIndex=onboard?-1:focused.index;hideIndex=onboard?focused.index:-1;
+   const eyeOffset=transform(reference,mul(eye,focused.radius));
+   observer=add(focused.position,eyeOffset);
+   if(!this.state.bridge&&Math.hypot(...focused.position)>1e11*focused.radius)preciseEye={eyeOrigin:[...focused.position],eyeOffset};
+   forward=transform(reference,inspectForward);right=transform(reference,inspectRight);up=transform(reference,inspectUp);
+   // Lock screen roll after applying manual look too. The camera may pitch
+   // above or below the orbit, but the disk always has the same skyward side.
+   if(guide?.cameraPathUp){const across=cross(forward,guide.cameraPathUp);if(Math.hypot(...across)>1e-8){right=unit(across);up=unit(cross(right,forward));inspectRight=inverse(reference,right);inspectUp=inverse(reference,up);}}
+   if(reference!==focused.frame){inspectCamera=inverse(focused.frame,transform(reference,eye));inspectForward=inverse(focused.frame,forward);inspectRight=inverse(focused.frame,right);inspectUp=inverse(focused.frame,up);}inspectIndex=onboard?-1:focused.index;hideIndex=onboard?focused.index:-1;
   }else if(this.state.viewMode==='free'&&this.freePosition&&this.freeBasis){
    observer=[...this.freePosition];const b=this.freeBasis,horizontal=add(mul(b.forward,Math.cos(c.lookYaw)),mul(b.right,Math.sin(c.lookYaw)));
    forward=unit(add(mul(horizontal,Math.cos(c.lookPitch)),mul(b.up,Math.sin(c.lookPitch))));right=unit(add(mul(b.right,Math.cos(c.lookYaw)),mul(b.forward,-Math.sin(c.lookYaw))));up=cross(right,forward);
@@ -1195,7 +1751,7 @@ export class BlackHoleRenderer {
    forward=unit(add(mul(horizontal,Math.cos(c.lookPitch)),mul(baseUp,Math.sin(c.lookPitch))));right=unit(add(mul(baseRight,Math.cos(c.lookYaw)),mul(baseForward,-Math.sin(c.lookYaw))));up=cross(right,forward);
   }
   if(this.state.bridge){const minimum=this.configCache.bridgeRadius*.003,r=Math.hypot(...observer);if(r<minimum)observer=mul(r>1e-20?unit(observer):[0,0,1],minimum);}
-  this.cameraFrame={observer,forward,right,up,inspectIndex,hideIndex,inspectCamera,inspectForward,inspectRight,inspectUp};this.packRenderObjects(this.cameraFrame);this.focusSurfaceId=focused?.surfaceId||[...(this.renderObjects||[])].filter(o=>o.surfaceId>0).sort((a,b)=>(b.projectedPixels||0)-(a.projectedPixels||0))[0]?.surfaceId||0;
+  this.cameraFrame={...preciseEye,observer,forward,right,up,inspectIndex,hideIndex,inspectCamera,inspectForward,inspectRight,inspectUp};this.packRenderObjects(this.cameraFrame);this.focusSurfaceId=focused?.surfaceId||[...(this.renderObjects||[])].filter(o=>o.surfaceId>0).sort((a,b)=>(b.projectedPixels||0)-(a.projectedPixels||0))[0]?.surfaceId||0;
  }
  validateFrameGeometry(frame=this.cameraFrame){
   // Validate the actual frame before either backend publishes it. A dark sky is
@@ -1206,7 +1762,7 @@ export class BlackHoleRenderer {
   else if(!finiteVector(this.holeData,8)||!finiteVector(k.horizon,2)||!finiteVector(k.isco,2)||!finiteVector(k.diskOuter,2)||k.horizon.some((v,i)=>v<0||(i===0&&this.state.blackHole&&v===0&&!(this.state.mergerOutcome==='illustrative-cancellation'&&this.mergerComplete)))||k.isco.some(v=>v<=0)||this.state.disk&&this.holeData[3]>0&&!(k.diskOuter[0]>0))reason='invalid gravitational geometry';
   else if(this.state.bridge&&(!(k.bridgeRadius>0)||!Number.isFinite(k.bridgeRadius)))reason='invalid bridge dimensions';
   else if(!finiteVector(this.bodySurfaceData,48)||!finiteVector(this.bodyShapeData,48)||!finiteVector(this.bodyMassData,12)||!finiteVector(this.bodyOpacityData,12)||!finiteVector(this.bodyParamData,48)||!finiteVector(this.objectData,48)||!finiteVector(this.colorData,48)||!finiteVector(this.headingData,24)||!finiteVector(this.luminosityData,12)||!finiteVector(this.tidalData,4))reason='invalid object coordinates';
-  else for(const body of this.objectFrames){if(!finiteVector(body.position,3)||!(body.radius>0)||!Number.isFinite(body.radius)||!validBasis(body.frame?.[0],body.frame?.[1],body.frame?.[2])||(body.physicalRadius!==undefined&&(!(body.physicalRadius>0)||!Number.isFinite(body.physicalRadius)))){reason='invalid object dimensions';break;}}
+  else for(const body of this.objectFrames){if(!finiteVector(body.position,3)||(body.type==='waypoint'?body.radius!==0:!(body.radius>0))||!Number.isFinite(body.radius)||!validBasis(body.frame?.[0],body.frame?.[1],body.frame?.[2])||(body.physicalRadius!==undefined&&(!(body.physicalRadius>0)||!Number.isFinite(body.physicalRadius)))){reason='invalid object dimensions';break;}}
   if(reason){const message=`Scene geometry could not be rendered: ${reason}. Reset the view or choose another scene.`;if(this.geometryError!==message){this.geometryError=message;this.onError(message);}return false;}
   this.geometryError='';return true;
  }
@@ -1218,14 +1774,19 @@ export class BlackHoleRenderer {
   // precision even when their whole system is millions of r_g from a hole.
   const focused=this.getFocusFrame(),origin=s.bridge?[0,0,0]:focused?[...focused.position]:Math.hypot(...frame.observer)>64?[...frame.observer]:[0,0,0];
   this.renderOrigin=origin;
-  const observer=frame.observer.map((v,i)=>v-origin[i]),objects=new Float32Array(48),holes=new Float32Array(8);
+  const observer=cameraRelative(origin,frame).map(v=>-v),objects=new Float32Array(48),holes=new Float32Array(8);
   for(const body of this.renderObjects||[])objects.set([...body.position.map((v,i)=>v-origin[i]),body.radius],body.index*4);
   for(let j=0;j<2;j++)holes.set([this.holeData[j*4]-origin[0],this.holeData[j*4+1]-origin[1],this.holeData[j*4+2]-origin[2],this.holeData[j*4+3]],j*4);
+  if(this.isDriveOpenSpace()){holes[3]=0;holes[7]=0;}
   const normal=s.binary?[0,1,0]:k.primaryAxis,chart=s.binary?origin:inverse(k.primaryBasis,origin);
-  const gridScale=s.blackHole?Math.max(this.massScale,1e-12):Math.max(1e-10,focused?Math.max(focused.radius*.5,Math.hypot(...frame.observer.map((v,i)=>v-focused.position[i]))*.035):Math.hypot(...frame.observer)*.035);
+  const gridScale=s.blackHole?Math.max(this.massScale,1e-12):Math.max(1e-10,focused?Math.max(focused.radius*.5,Math.hypot(...cameraRelative(focused.position,frame))*.035):Math.hypot(...frame.observer)*.035);
   const scaled=[chart[0]/gridScale,chart[2]/gridScale],high=scaled.map(v=>Math.floor((v+.75*512)/(.75*1024))*1024),low=scaled.map((v,i)=>v-high[i]*.75);
-  let gridBody=null;if(s.grid&&!s.blackHole)for(const body of this.objectFrames){if((body.type==='star'||body.type==='planet'||body.type==='moon')&&body.massSolar>0&&(!gridBody||body.massSolar>gridBody.massSolar))gridBody=body;}
-  g.uniform1f(u.uGridFlowWindow,gridBody?weakGridFlowWindow(gridBody.radius,gridBody.massSolar/4300000):0);
+  let gridBody=null;if(s.grid&&!s.blackHole)for(const body of this.objectFrames){if((body.type==='star'||isPlanetarySurface(body.type))&&body.massSolar>0&&(!gridBody||body.massSolar>gridBody.massSolar))gridBody=body;}
+  // A collapsing surface changes radius every frame. Use a fixed reference
+  // radius and signal the illustrative collapse clock with a negative window.
+  const collapseGrid=gridBody?.collapseEnabled;
+  const windowRadius=collapseGrid?Math.max(gridBody.collapseRadiusMax/REFERENCE_RG_METERS,gridBody.horizonRadius):gridBody?.radius;
+  g.uniform1f(u.uGridFlowWindow,gridBody?(collapseGrid?-1:1)*weakGridFlowWindow(windowRadius,gridBody.massSolar/4300000):0);
   g.uniform4f(u.uGridAnchor,low[0],low[1],-dot(origin,normal),gridScale);g.uniform2fv(u.uGridHigh,high);g.uniform3fv(u.uWorldOrigin,origin);
   let opticalBounds=s.blackHole?Math.max(...[0,...(s.binary?[1]:[])].map(j=>Math.hypot(...[holes[j*4],holes[j*4+1],holes[j*4+2]])+Math.max(this.massScale*26,k.diskOuter[j]*1.25,(s.jets||s.secondaryJets)?this.massScale*60:0))):1e-8;
   for(const body of this.renderObjects||[])opticalBounds=Math.max(opticalBounds,Math.hypot(...body.position.map((v,i)=>v-origin[i]))+body.radius*4);
@@ -1237,12 +1798,13 @@ export class BlackHoleRenderer {
   if(s.bridge)opticalBounds=k.bounds;
   const driven=this.objectFrames.find(f=>f.id===this.driveId)||this.objectFrames.find(f=>this.objectById?.get(f.id)?.driveReturn)||this.objectFrames.find(f=>f.id===this.warpObjectId),df=driven?.frame||[[1,0,0],[0,1,0],[0,0,1]];g.uniform1i(u.uDriveIndex,driven?.index??-1);g.uniform3fv(u.uDriveRight,df[0]);g.uniform3fv(u.uDriveUp,df[1]);g.uniform3fv(u.uDriveForward,df[2]);
   g.uniform3fv(u.uObserver,observer);g.uniform3fv(u.uForward,frame.forward);g.uniform3fv(u.uRight,frame.right);g.uniform3fv(u.uUp,frame.up);g.uniform1i(u.uInspectIndex,s.metrics||s.spectrum==='geometry'?-1:frame.inspectIndex);g.uniform1i(u.uHideObjectIndex,frame.hideIndex);g.uniform3fv(u.uInspectCamera,frame.inspectCamera);g.uniform3fv(u.uInspectForward,frame.inspectForward);g.uniform3fv(u.uInspectRight,frame.inspectRight);g.uniform3fv(u.uInspectUp,frame.inspectUp);g.uniform2fv(u['uHeadings[0]'],this.headingData.subarray(0,(this.activeProgram?.features.objectSlots||this.shaderObjectSlots())*2));g.uniform1i(u.uCockpitMode,0);
-  const warp=(this.warpObjectId?this.objectFrames.find(o=>o.id===this.warpObjectId):null)||driven||null,warpRadius=warp?warp.radius*(s.warp?effectiveWarpRadius(s.warpFactor):6):1,warpCenter=warp?.position||[0,0,0];g.uniform3fv(u.uWarpCenter,warpCenter.map((v,i)=>v-origin[i]));g.uniform3fv(u.uWarpAxis,warp?.frame[2]||[0,0,1]);g.uniform1f(u.uWarpRadius,warpRadius);g.uniform1f(u.uWarpStrength,s.warp?warpDisplayStrength(s.warpFactor):0);g.uniform1f(u.uWarpThickness,Math.min(20,s.warpThickness*(1+s.warpFactor*.04)));g.uniform4f(u.uWarpFlags,s.warp&&warp?1:0,s.warpField?1:0,s.warpGrid?1:0,s.blackHole&&(this.holeData[3]>0||this.holeData[7]>0)?1:0);g.uniform3fv(u.uWarpObserver,frame.observer.map((x,i)=>(x-warpCenter[i])/warpRadius));g.uniform1i(u.uWarpObjectIndex,warp?.index??-1);const gridMotion=this.warpGridState(warp,warpRadius);g.uniform2f(u.uWarpGridOffset,...gridMotion.offset);g.uniform2f(u.uWarpGridRotation,...gridMotion.rotation);const motion=this.warpMotionState();g.uniform4f(u.uWarpMotion,motion.phase,motion.rate,motion.beta,motion.active?1:0);g.uniform1f(u.uDetail,detail);
-  const flight=this.getFlightState();g.uniform4f(u.uFlightMetrics,flight.active?flight.throttle:0,flight.active?flight.steeringInput:0,this.time,flight.active&&flight.type==='shuttle'?1:0);
+  const warp=(this.warpObjectId?this.objectFrames.find(o=>o.id===this.warpObjectId):null)||driven||null,envelope=s.warp&&warp?this.warpEnvelope(warp,s):null,displayStrength=envelope?.strength||0,warpRadius=warp?warp.radius*(envelope?.radius??6):1,warpCenter=warp?.position||[0,0,0];g.uniform3fv(u.uWarpCenter,warpCenter.map((v,i)=>v-origin[i]));g.uniform3fv(u.uWarpAxis,warp?.frame[2]||[0,0,1]);g.uniform1f(u.uWarpRadius,warpRadius);g.uniform1f(u.uWarpStrength,displayStrength);g.uniform1f(u.uWarpThickness,Math.min(20,s.warpThickness*(1+s.warpFactor*.04)));g.uniform4f(u.uWarpFlags,s.warp&&warp?1:0,s.warpField?1:0,s.warpGrid?1:0,s.blackHole&&(this.holeData[3]>0||this.holeData[7]>0)?1:0);g.uniform3fv(u.uWarpObserver,cameraRelative(warpCenter,frame).map(v=>-v/warpRadius));g.uniform1i(u.uWarpObjectIndex,warp?.index??-1);const gridMotion=this.warpGridState(warp,warpRadius);g.uniform1f(u.uWarpGridLocalPatch,s.warp&&warp?.type==='enterprise'&&this.warpGridLocalPatch()?1:0);g.uniform2f(u.uWarpGridOffset,...gridMotion.offset);g.uniform2f(u.uWarpGridRotation,...gridMotion.rotation);const motion=this.warpMotionState(),labHaze=this.sceneId==='warp-lab'?this.labNebulaVisibility(motion):-1;g.uniform1f(u.uLabNebulaVisibility,labHaze);g.uniform4f(u.uWarpMotion,motion.phase,motion.rate,motion.beta,motion.active?motion.blend:0);const starStyle=warpStarVisuals(motion.beta);g.uniform4f(u.uWarpStarStyle,starStyle.elongation,starStyle.trailRadians,starStyle.whiteness,starStyle.warp);g.uniform1f(u.uDetail,detail);
+  const priorityCraft=this.getFocusFrame(this.transfer?.craftId||this.driveId||this.focusId),priorityType=OBJECT_KIND[priorityCraft?.type];g.uniform1f(u.uCraftFocusType,(priorityType>=3&&priorityType<=6||priorityType===12)?priorityType:-1);
+  const flight=this.getFlightState();g.uniform4f(u.uFlightMetrics,flight.active?flight.throttle:0,flight.active?flight.steeringInput:0,this.time+(this.routeVisualTime||0),flight.active&&flight.type==='shuttle'?1:0);
   g.uniform4f(u.uMetricOptions,0,s.gravitationalWaves?(s.waveAmplitude??.3)*(this.cancellationFraction??1):0,s.waveFrequency??1,s.interiorView&&s.spectrum==='geometry'?1:0);g.uniform4f(u.uSceneOptions,s.secondaryWhiteHole?1:0,s.bridgeMode==='crossed'?1:0,s.diskPalette==='rainbow'?2:s.diskPalette==='artistic'?1:0,s.secondaryDiskPalette==='rainbow'?2:s.secondaryDiskPalette==='artistic'?1:0);g.uniform2f(u.uJetStructure,Math.max(0,ENUMS.jetStructure.indexOf(s.jetStructure))+packMetricDirection(this.holeVelocities?.[0]||[0,0,0])/4194304,Math.max(0,ENUMS.secondaryJetStructure.indexOf(s.secondaryJetStructure))+packMetricDirection(this.holeVelocities?.[1]||[0,0,0])/4194304);
   g.uniform2f(u.uResolution,width,height);
-  g.uniform4f(u.uRayViewport,...viewport);g.uniform1i(u.uProjectionMode,projectionMode);g.uniformMatrix4fv(u.uInverseProjection,false,inverseProjection);g.uniform4f(u.uBridge,s.bridge?1:0,k.bridgeRadius||1,s.bridgeSurfaces?1:0,s.bridgeWorlds==='earth-proxima'?1:0);g.uniform3fv(u.uBridgeGridAxis,s.bridgeGridOrientation==='parallel'?k.primaryBasis[1]:k.primaryBasis[2]);const bridgeStage=bridgeJourney(this.bridgeTime,k.bridgeRadius,s.bridgeLifecycle);g.uniform3f(u.uBridgeStage,bridgeStage.open,bridgeStage.far?1:0,s.bridgeLifecycle==='open-transit-close'?1:0);const bridgeCraft=s.bridge?this.frameById.get(this.bridgeObjectId):null,bridgeBubble=bridgeCraft?.type==='enterprise'&&this.driveId===bridgeCraft.id&&s.warp&&s.warpFactor>0;g.uniform4f(u.uBridgeBubble,...(bridgeCraft?.position||[0,0,0]),bridgeBubble?bridgeCraft.radius*effectiveWarpRadius(s.warpFactor):0);g.uniform3fv(u.uBridgeBubbleAxis,bridgeCraft?.frame?.[2]||k.primaryBasis[2]);g.uniform1f(u.uWhiteHole,s.whiteHole?1:0);g.uniform3fv(u.uBridgeSkyColor,k.bridgeOtherColor);g.uniform1f(u.uBridgeOtherNebula,s.bridgeOtherNebula?1:0);g.uniform4f(u.uBridgeSkyParams,ENUMS.bridgeOtherShape.indexOf(s.bridgeOtherShape),s.bridgeOtherScale,s.bridgeOtherIntensity,radians(s.bridgeOtherRotation));
-  const scalar={uTime:this.time,uStellarTime:this.stellarVisualTime(),uExposure:s.exposure,uDistance:c.distance,uYaw:c.yaw,uPitch:c.pitch,uLookYaw:c.lookYaw,uLookPitch:c.lookPitch,uMass:this.massScale,uBounds:opticalBounds,uStars:s.starDensity};
+  g.uniform4f(u.uRayViewport,...viewport);g.uniform1i(u.uProjectionMode,projectionMode);g.uniformMatrix4fv(u.uInverseProjection,false,inverseProjection);g.uniform4f(u.uBridge,s.bridge?1:0,k.bridgeRadius||1,s.bridgeSurfaces?1:0,s.bridgeWorlds==='earth-proxima'?1:0);g.uniform3fv(u.uBridgeGridAxis,s.bridgeGridOrientation==='parallel'?k.primaryBasis[1]:k.primaryBasis[2]);const bridgeStage=this.getBridgeStage();g.uniform3f(u.uBridgeStage,bridgeStage.open,bridgeStage.far?1:0,s.bridgeLifecycle==='open-transit-close'?1:0);const bridgeCraft=s.bridge?this.frameById.get(this.bridgeObjectId):null,bridgeBubble=bridgeCraft?.type==='enterprise'&&this.driveId===bridgeCraft.id&&s.warp&&s.warpFactor>0;g.uniform4f(u.uBridgeBubble,...(bridgeCraft?.position||[0,0,0]),bridgeBubble?bridgeCraft.radius*effectiveWarpRadius(s.warpFactor):0);g.uniform3fv(u.uBridgeBubbleAxis,bridgeCraft?.frame?.[2]||k.primaryBasis[2]);g.uniform1f(u.uWhiteHole,s.whiteHole?1:0);g.uniform3fv(u.uBridgeSkyColor,k.bridgeOtherColor);g.uniform1f(u.uBridgeOtherNebula,s.bridgeOtherNebula?1:0);g.uniform4f(u.uBridgeSkyParams,ENUMS.bridgeOtherShape.indexOf(s.bridgeOtherShape),s.bridgeOtherScale,s.bridgeOtherIntensity,radians(s.bridgeOtherRotation));
+  const scalar={uTime:this.time+(this.routeVisualTime||0),uStellarTime:this.stellarVisualTime()+(this.routeVisualTime||0),uExposure:s.exposure,uDistance:c.distance,uYaw:c.yaw,uPitch:c.pitch,uLookYaw:c.lookYaw,uLookPitch:c.lookPitch,uMass:this.massScale,uBounds:opticalBounds,uStars:s.starDensity};
   for(const name in scalar)g.uniform1f(u[name],scalar[name]);
   g.uniform3fv(u.uPrimaryAxis,k.primaryAxis);g.uniform3fv(u.uSecondaryAxis,k.secondaryAxis);
   g.uniform2f(u.uSpin,s.spin,s.secondarySpin);g.uniform2f(u.uHorizon,...k.horizon);g.uniform2f(u.uIsco,...k.isco);g.uniform2f(u.uDiskOuter,...k.diskOuter);
@@ -1250,6 +1812,16 @@ export class BlackHoleRenderer {
   g.uniform4f(u.uDiskSecondaryParams,ENUMS.secondaryDiskStyle.indexOf(s.secondaryDiskStyle),s.secondaryDiskThickness??s.diskThickness,s.secondaryDiskDensity??s.diskDensity,s.binary&&this.holeData[7]>0&&s.secondaryDisk?1:0);g.uniform3fv(u.uDiskSecondaryColor,color(s.secondaryDiskColor||s.diskColor));g.uniform4f(u.uJetSecondaryParams,s.secondaryJetSpread??s.jetSpread,s.secondaryJetLength??s.jetLength,s.secondaryJetIntensity??s.jetIntensity,s.binary&&this.holeData[7]>0&&s.secondaryJets?1:0);g.uniform3fv(u.uJetSecondaryColor,color(s.secondaryJetColor||s.jetColor));
   g.uniform4f(u.uDiskParams,ENUMS.diskStyle.indexOf(s.diskStyle),s.diskThickness,s.diskDensity,0);g.uniform3fv(u.uDiskColor,k.diskColor);
   g.uniform4f(u.uNebulaParams,ENUMS.nebulaShape.indexOf(s.nebulaShape),s.nebulaScale,s.nebulaIntensity,radians(s.nebulaRotation));g.uniform3fv(u.uNebulaColor,k.nebulaColor);
+  const volumeScale=this.nebulaWorldScale(),volumeSamples=this.photoActive?12:(({low:3,medium:4,high:8,ultra:12})[this.budget.effectiveQuality]||3);
+  g.uniform4f(u.uNebulaVolume,s.nebulaVolume&&s.spectrum!=='geometry'?1:0,ENUMS.nebulaVolumePreset.indexOf(s.nebulaVolumePreset),(s.nebulaVolumeDensity??.45)*(labHaze<0?1:labHaze),s.nebulaVolumeDepth??1);
+  g.uniform4f(u.uNebulaVolumeStyle,s.nebulaVolumeScale??1,s.nebulaVolumeSpeed??1,0,volumeSamples);
+  g.uniform4f(u.uNebulaVolumeWorld,origin[0]/volumeScale,origin[1]/volumeScale,origin[2]/volumeScale,volumeScale);
+  g.uniform2f(u.uNebulaMulticolor,s.nebulaMulticolor?1:0,s.nebulaColorMix??.45);g.uniform3fv(u.uNebulaSecondaryColor,k.nebulaSecondaryColor);
+  if(this.sceneId==='horizon-hierarchy'){
+   const cluster=this.fillClusterSources(origin);g.uniform1i(u.uClusterCount,cluster.count);
+   g.uniform4fv(u['uClusterBodies[0]'],cluster.bodies);g.uniform4fv(u['uClusterParams[0]'],cluster.params);g.uniform4fv(u['uClusterColors[0]'],cluster.colors);g.uniform4fv(u['uClusterAxes[0]'],cluster.axes);
+  }else if(u.uClusterCount!=null)g.uniform1i(u.uClusterCount,0);
+
   g.uniform4f(u.uJets,s.jetSpread,s.jetLength,s.jetIntensity,0);g.uniform3fv(u.uJetColor,k.jetColor);g.uniform3fv(u.uStarColor,k.starColor);
   g.uniform1i(u.uSpectrum,ENUMS.spectrum.indexOf(s.spectrum));g.uniform1i(u.uBinary,s.binary&&this.holeData[7]>0?1:0);g.uniform1i(u.uSteps,steps);
   g.uniform1i(u.uObjectCount,this.objectCount||0);g.uniform1i(u.uGravityCount,this.gravityCount||0);g.uniform4fv(u['uObjects[0]'],objects.subarray(0,(this.activeProgram?.features.objectSlots||this.shaderObjectSlots())*4));g.uniform4fv(u['uColors[0]'],this.colorData.subarray(0,(this.activeProgram?.features.objectSlots||this.shaderObjectSlots())*4));g.uniform1fv(u['uLuminosities[0]'],this.luminosityData.subarray(0,this.activeProgram?.features.objectSlots||this.shaderObjectSlots()));g.uniform4fv(u['uBodyParams[0]'],this.bodyParamData.subarray(0,(this.activeProgram?.features.objectSlots||this.shaderObjectSlots())*4));g.uniform1fv(u['uBodyMasses[0]'],this.bodyMassData.subarray(0,this.activeProgram?.features.objectSlots||this.shaderObjectSlots()));g.uniform4fv(u['uBodyOpacity[0]'],this.bodyOpacityData);g.uniform1i(u.uTransparentBodies,this.transparentBodyCount);g.uniform4fv(u['uBodyShape[0]'],this.bodyShapeData.subarray(0,(this.activeProgram?.features.objectSlots||this.shaderObjectSlots())*4));g.uniform2f(u.uBridgeStars,s.stars?s.starDensity:0,s.bridgeOtherStars===false?0:(s.bridgeOtherStarDensity??1));g.uniform4f(u.uSkyParams,s.starBrightness??1,s.starVariety??1,s.bridgeOtherStarBrightness??1,s.bridgeOtherStarVariety??1);g.uniform4fv(u.uTidal,this.tidalData);
@@ -1261,7 +1833,7 @@ export class BlackHoleRenderer {
    observer:[...observer],forward:[...frame.forward],right:[...frame.right],up:[...frame.up],
    holes:Array.from(holes),objects:Array.from(objects.subarray(0,(this.objectCount||0)*4)),
    bodyOpacity:Array.from(this.bodyOpacityData.subarray(0,this.objectCount||0)),transparentBodies:this.transparentBodyCount,bodyMasses:Array.from(this.bodyMassData.subarray(0,this.objectCount||0)),bodyParams:Array.from(this.bodyParamData.subarray(0,(this.objectCount||0)*4)),bodyTypes:Array.from(this.colorData.subarray(0,(this.objectCount||0)*4)),
-   warp:{enabled:!!s.warp,index:warp?.index??-1,center:warpCenter.map((v,i)=>v-origin[i]),axis:[...(warp?.frame[2]||[0,0,1])],radius:warpRadius,strength:s.warp?warpDisplayStrength(s.warpFactor):0,thickness:Math.min(20,s.warpThickness*(1+s.warpFactor*.04)),local:!!warp&&(!s.blackHole||frame.inspectIndex===warp.index||frame.hideIndex===warp.index)},
+   warp:{enabled:!!s.warp,index:warp?.index??-1,center:warpCenter.map((v,i)=>v-origin[i]),axis:[...(warp?.frame[2]||[0,0,1])],radius:warpRadius,strength:displayStrength,thickness:Math.min(20,s.warpThickness*(1+s.warpFactor*.04)),local:!!warp&&(!s.blackHole||frame.inspectIndex===warp.index||frame.hideIndex===warp.index)},
    inspectIndex:s.metrics||s.spectrum==='geometry'?-1:frame.inspectIndex,hideIndex:frame.hideIndex
   };
  }
@@ -1290,10 +1862,17 @@ export class BlackHoleRenderer {
  exitVR(){return this.xr?.exit()||Promise.resolve();}
  render(now=this.now(),fromFrame=false){
   if(this.disposed||this.contextLost||document.hidden||(this.presentationPaused&&!this.captureDrawing)||this.photoActive||this.xr?.active)return false;
+  // Retire the outstanding draw before shader compilation/activation. A
+  // slow frame must get its budget reduction before another costly GPU job.
+  if(!this.gpuAvailable(now))return false;
+  if(this.warpProbeDraw)this.completeWarpWorkload(this.warpProbeDraw,now,Math.max(40,now-this.warpProbeDraw.started));
   this.pollProgram();this.requestProgram();
+  const poweredWarp=!!this.state.warp&&this.state.warpFactor>0;
+  if(this.driveId&&poweredWarp&&!this.lastWarpRendered&&this.quality==='adaptive'&&this.budget.profile.pixels>32768){this.warpWorkloadProbe={};this.resizePending=true;}
+  this.lastWarpRendered=poweredWarp;
   // Keep the previous complete image while a newly requested feature compiles.
   // Rendering it with an incompatible program would silently omit its objects.
-  if(!this.ready||!this.programSupports(this.shaderFeatures())||!this.gpuAvailable(now))return false;
+  if(!this.ready||!this.programSupports(this.shaderFeatures()))return false;
   // Legacy contexts without fences/queries keep a bounded submission cadence.
   if(fromFrame&&!this.canFence&&this.nextSubmit&&now+.25<this.nextSubmit)return false;
   if(this.resizePending)this.resize();
@@ -1304,7 +1883,7 @@ export class BlackHoleRenderer {
    const surface=this.getFocusFrame()?.surfaceId?this.getFocusFrame():[...(this.renderObjects||[])].filter(o=>o.surfaceId>0).sort((a,b)=>(b.projectedPixels||0)-(a.projectedPixels||0))[0];
    const pixels=surface?surface.radius/Math.max(surface.radius,Math.hypot(...surface.position.map((v,i)=>v-this.cameraFrame.observer[i])))*this.canvas.height/.83:0;
    this.focusSurfaceId=pixels>=40?surface?.surfaceId||0:0;
-   const cap=({low:512,medium:1024,high:2048,ultra:4096})[this.budget.effectiveQuality]||1024,size=Math.min(cap,Math.max(256,2**Math.ceil(Math.log2(Math.max(1,pixels*4)))));
+   const cap=({low:512,medium:1024,high:2048,ultra:4096})[this.scenePreview?'low':this.budget.effectiveQuality]||1024,size=Math.min(cap,Math.max(256,2**Math.ceil(Math.log2(Math.max(1,pixels*4)))));
    // Draw procedural surfaces immediately; refine with the atlas/map when its
    // local decode finishes. A failed optional texture must not blank the scene.
    this.textureError=this.planetTextures.error?'Included surface detail unavailable; using procedural/atlas surfaces.':'';
@@ -1314,10 +1893,12 @@ export class BlackHoleRenderer {
   let drawn;try{drawn=this.drawScene();}finally{if(query)this.completionQuery.endQueryEXT(this.completionQuery.TIME_ELAPSED_EXT);}
   if(!drawn){if(query)this.completionQuery.deleteQueryEXT(query);return false;}
   this.captureFreshFrame();
-  const warmup=this.warmupFrames>0;if(warmup)this.warmupFrames--;
-  if(this.canFence){const sync=this.nativeFence?g.fenceSync(g.SYNC_GPU_COMMANDS_COMPLETE,0):null;if(sync||query){this.gpuFence={sync,query,started:now,generation:this.budget.generation,warmup,polls:0};g.flush();}else this.canFence=false;}
+  const warmup=this.warmupFrames>0,refiningProgram=!!this.pendingProgram||this.shaderFeatures().ultra!==!!this.activeProgram?.features.ultra;if(warmup)this.warmupFrames--;
+  const workload={workloadProbe:this.warpWorkloadProbe,sceneGeneration:this.sceneGeneration,pixels:this.canvas.width*this.canvas.height,steps:this.steps,started:now};
+  if(this.canFence){const sync=this.nativeFence?g.fenceSync(g.SYNC_GPU_COMMANDS_COMPLETE,0):null;if(sync||query){this.gpuFence={sync,query,...workload,generation:this.budget.generation,scenePreview:!!this.scenePreview,warmup,refiningProgram,polls:0};g.flush();}else this.canFence=false;}
   if(!this.canFence){
-   this.frames++;if(this.budget.noteCompletion(now,{eligible:!warmup}))this.resizePending=true;
+   if(this.warpWorkloadProbe)this.warpProbeDraw=workload;
+   this.completeScenePreview();this.frames++;if(this.budget.noteCompletion(now,{eligible:!warmup&&!refiningProgram}))this.resizePending=true;
    // A 40Hz ceiling leaves room to measure >30 FPS and probe higher quality.
    // Preserve its phase at 60/120/144Hz rather than rounding every interval.
    const interval=1000/40;this.nextSubmit=this.nextSubmit&&now-this.nextSubmit<interval*2?this.nextSubmit+interval:now+interval;
@@ -1329,15 +1910,85 @@ export class BlackHoleRenderer {
   if(this.contextLost){this.lastTime=0;return;}
   this.advanceSimulation(now);this.render(now,true);this.emitStats(now);
  }
+ // Build a flat local navigation chart without changing the published catalog
+ // elements. Its height passes through the current orbital parent, so neither
+ // the starting world nor its parked vehicle jumps on chart activation.
+ enablePlanarRouteChart(craftId=this.selectedId){
+  if(this.state.bridge||this.routeChartY!=null)return;
+  this.fillHoles();this.fillObjects();
+  const craft=this.objects.find(o=>o.id===craftId)||this.objects.find(o=>['shuttle','enterprise'].includes(o.type));
+  const parent=this.getFocusFrame(craft?.parentId),normal=this.configCache.primaryBasis[1];
+  this.routeChartY=parent?dot(parent.position,normal):0;
+  this.lastGeometryTime=null;this.fillObjects();
+ }
+ // Advance each wall-clock interval once. A frame crossing a join spends
+ // its remainder in the new stage instead of consuming the frame twice.
+ advanceChartStages(seconds){
+  let left=seconds>1?.1:Math.max(0,seconds);
+  for(let stage=0;left>1e-12&&stage<6;stage++){
+   if(this.transfer?.active){
+    const t=this.transfer,step=Math.min(left,Math.max(0,t.wallSeconds-t.elapsed));
+    this.advanceTravel(step);left-=step;
+    if(!this.transfer?.active)advanceAutopilot(this,Number.EPSILON);
+    continue;
+   }
+   const q=Object.values(this.flightSequences||{}).find(q=>q.active&&!q.holding);
+   if(!q)break;
+   if(q.orbitWait||q.pointTurn){const step=Math.min(left,Math.max(1e-10,q.waitSeconds));advanceAutopilot(this,step);left-=step;}
+   else {advanceAutopilot(this,Number.EPSILON);if(!q.orbitWait&&!q.pointTurn&&!this.transfer?.active)break;}
+  }
+ }
  advanceSimulation(now){
-  const gap=this.lastTime?Math.max(0,now-this.lastTime):0;if(this.budget.noteFrame(now,gap))this.resizePending=true;
+  const priorSceneTime=this.time,gap=this.lastTime?Math.max(0,now-this.lastTime):0;if(this.budget.noteFrame(now,gap))this.resizePending=true;
   const dt=gap?Math.min(.1,gap/1000):1/60,previousWarp=this.state.warpFactor;this.lastTime=now;this.transferClockObjectId=null;
-  if(!this.state.paused){this.time+=dt*this.effectivePlaybackSpeed()*this.simulationTimeScale();const transferring=!!this.transfer?.active;if(transferring&&!this.presentationPaused&&!document.hidden&&!this.photoActive&&!this.photoRunning&&this.sceneLoad?.state!=='loading'){const travelDt=gap/1000,steps=Math.max(1,Math.min(4,Math.ceil(travelDt/.1)));for(let i=0;i<steps&&this.transfer?.active;i++)this.advanceTravel(travelDt/steps);}const obj=this.objects.find(o=>o.id===this.driveId);if(obj?.flight&&!transferring){const before=[...obj.flight.position];if(obj.type==='shuttle'){this.clockSweepStarts??=new Map();this.clockSweepStarts.set(obj.id,before.map(v=>v/REFERENCE_RG_METERS));}integratePlanar(obj.flight,dt*this.state.speed,this.flightInput,{lengthMeters:OBJECT_DIMENSIONS[obj.type].lengthMeters,maxSpeed:obj.type==='enterprise'?speedForWarp(9.9999):undefined,warp:obj.type==='enterprise',maxThrustG:obj.type==='enterprise'?ENTERPRISE_THRUST_MAX_G:SHUTTLE_THRUST_MAX_G,clockExempt:obj.type==='enterprise',controlled:true});if(this.state.bridge&&obj.id===this.bridgeObjectId){
+  const localDrive=this.driveId&&this.driveId===this.warpObjectId?this.objectById.get(this.driveId)?.flight:null;
+  const previousDrivePhase=localDrive?.gridPhase||0;
+  if(!this.state.paused){
+   const q=this.state.bridge?null:Object.values(this.flightSequences||{}).find(q=>q.active&&!q.holding&&q.nodes?.length>0);
+   // Drive coasts in the same fixed-epoch chart as the playlist. Restarting
+   // the accelerated planetary ephemeris here would move Earth through a
+   // shuttle that advances only real SI seconds along its departure tangent.
+   const manualChart=this.routeChartY!=null&&this.navigationModes?.[this.driveId]==='manual'&&this.flightSequences?.[this.driveId]?.nodes?.length;
+   const chart=!this.state.bridge&&(q||this.transfer?.active||manualChart),ready=!this.presentationPaused&&!document.hidden&&!this.photoActive&&!this.photoRunning&&this.sceneLoad?.state!=='loading';
+   const wasTransferring=!!this.transfer?.active,heldCraft=!this.state.bridge&&this.driveId&&this.objectById?.get(this.driveId),heldPhase=heldCraft?.flight?.orbitHold?this.currentPhase(heldCraft):0;
+   if(chart){
+    // Ephemeris stays at the last visible date for this chart; there is no
+    // accumulated epoch jump when Play returns to normal orbital propagation.
+    this.routeVisualTime=(this.routeVisualTime||0)+dt*this.effectivePlaybackSpeed();
+    if(ready)this.advanceChartStages(gap/1000);
+   }else{
+    const step=dt*this.effectivePlaybackSpeed()*this.simulationTimeScale();
+    const subject=this.sceneId==='radiant-descent'&&this.state.blackHole&&this.objectById?.get(this.sceneFocusId);
+    if(subject?.type==='astronaut'&&subject.motion==='infall'&&!subject.drivePosition){
+     if(ready){
+      const stop=(subject.motionEpoch||0)+BLUE_FIRE_ARRIVAL,worldStep=Math.min(step,Math.max(0,stop-this.time));
+      this.time+=worldStep;
+      if(Math.abs(this.time-stop)<1e-12)this.time=stop;
+      if(this.time>=stop)this.gapOrbitTime=(this.gapOrbitTime||0)+Math.max(0,step-worldStep);
+      else this.gapOrbitTime=0;
+     }
+    }else{this.time+=step;this.gapOrbitTime=0;}
+    if(ready){advanceAutopilot(this,gap/1000);if(this.transfer?.active){const travelDt=gap/1000,steps=Math.max(1,Math.min(4,Math.ceil(travelDt/.1)));for(let i=0;i<steps&&this.transfer?.active;i++)this.advanceTravel(travelDt/steps);}}
+   }
+   const transferring=wasTransferring||!!this.transfer?.active;const obj=this.objects.find(o=>o.id===this.driveId);if(obj?.flight&&!transferring){if(obj.flight.orbitHold&&((this.flightInput?.speed||0)>0||obj.flight.thrust>0||obj.type==='enterprise'&&(obj.flight.warpSetting||0)>0))this.releaseOrbitHold(obj);if(heldCraft===obj&&obj.flight.orbitHold){
+    // Transport a steered attitude with the circular tangent. This turns
+    // the hull with its orbit without turning the orbital velocity vector
+    // toward the nose when the user changes heading.
+    const angle=heldPhase-this.currentPhase(obj),normal=this.configCache.primaryBasis[1],co=Math.cos(angle),si=Math.sin(angle);
+    if(angle)obj.flight.basis=obj.flight.basis.map(v=>add(add(mul(v,co),mul(cross(normal,v),si)),mul(normal,dot(normal,v)*(1-co))));
+   }const before=[...obj.flight.position];if(obj.type==='shuttle'){this.clockSweepStarts??=new Map();this.clockSweepStarts.set(obj.id,before.map(v=>v/REFERENCE_RG_METERS));}integratePlanar(obj.flight,dt*this.state.speed,this.flightInput,{lengthMeters:OBJECT_DIMENSIONS[obj.type].lengthMeters,maxSpeed:obj.type==='enterprise'?speedForWarp(9.9999):undefined,warp:obj.type==='enterprise',maxThrustG:obj.type==='enterprise'?ENTERPRISE_THRUST_MAX_G:SHUTTLE_THRUST_MAX_G,clockExempt:obj.type==='enterprise',controlled:true});if(obj.flight.orbitHold)obj.flight.position=before;if(obj.waypointHoldId&&obj.flight.speed>0){delete obj.waypointHoldId;delete obj.waypointHoldBasis;}this.updateDriveEnvironment(obj,dt);if(this.state.bridge&&obj.id===this.bridgeObjectId&&!obj.flight.orbitHold){
  const f=obj.flight,b=this.configCache.bridgeRadius*REFERENCE_RG_METERS,nominal=Math.hypot(...f.position.map((v,i)=>v-before[i])),limit=b*.40*dt*this.state.speed*Math.min(3,obj.type==='enterprise'?warpForSpeed(f.speed)/4:f.speed/100),travel=Math.min(nominal,limit),direction=nominal>0?f.position.map((v,i)=>(v-before[i])/nominal*(obj.type==='enterprise'?(f.travelDirection||1):1)):[0,0,0];
  f.position=[...before];for(let j=0;j<12;j++){const r=Math.hypot(...f.position),conformal=bridgeConformal(r,b),step=travel/12/conformal;f.position=f.position.map((v,i)=>v+direction[i]*step);const radius=Math.hypot(...f.position);if(radius<b*.025)f.position=f.position.map(v=>v/radius*b*.025);}
  f.travelCompression=nominal>0?Math.max(1e-15,travel/nominal):1;
  }obj.drivePosition=obj.flight.position.map(v=>v/REFERENCE_RG_METERS);obj.driveBasis=obj.flight.basis.map(v=>[...v]);if(obj.type==='enterprise'&&obj.id===this.warpObjectId)this.state.warpFactor=this.getFlightState().warpFactor;this.state.warpRadius=effectiveWarpRadius(this.state.warpFactor);}}for(const object of this.objects)if(object.driveReturn)object.driveReturn.elapsed+=dt;
-  if(!this.transfer?.active&&previousWarp!==this.state.warpFactor&&this.focusId===this.warpObjectId)this.resumeWarpCameraFit();
+  // Copy the laboratory's displacement, not its absolute phase: switching
+  // Drive/Auto must not slide the lines to a different starting position.
+  if(!this.state.paused&&this.state.warp&&this.warpObjectId&&(this.sceneId==='warp-lab'||this.warpGridLocalPatch())){
+   const step=this.sceneId==='warp-lab'?dt*this.effectivePlaybackSpeed()*.07*this.state.warpFactor*(localDrive?.travelDirection||1):localDrive?.mode==='warp'?((localDrive.gridPhase||0)-previousDrivePhase)*(localDrive.travelDirection||1):dt*this.effectivePlaybackSpeed()*.07*this.state.warpFactor;
+   this.warpLocalGridPhase=(((this.warpLocalGridPhase||0)+step)%4096+4096)%4096;
+  }
+  // Coming to rest in the excursion is part of the same camera shot; preserve a manual zoom.
+  if(!this.transfer?.active&&previousWarp!==this.state.warpFactor&&this.focusId===this.warpObjectId&&!this.excursionFrame(this.getFocusFrame()))this.resumeWarpCameraFit();
   const isLooking=this.state.viewMode==='free'||this.state.viewMode==='look'||Math.abs(this.target.lookYaw)+Math.abs(this.target.lookPitch)>.0001;
   if(this.state.autoRotate&&!this.pointers.size&&!isLooking)this.target.yaw+=dt*.055;
   const smooth=1-Math.exp(-dt*8),travelSmooth=1-Math.exp(-dt*.22);
@@ -1345,7 +1996,7 @@ export class BlackHoleRenderer {
   this.camera.distance+=(this.target.distance-this.camera.distance)*(this.travel?travelSmooth:smooth);
   if(this.state.viewMode==='free'&&this.freePosition&&this.freeTarget)this.freePosition=this.freePosition.map((v,i)=>v+(this.freeTarget[i]-v)*smooth);
   if(this.travel&&Math.abs(this.target.distance-this.camera.distance)<.04*this.massScale)this.travel=false;
-  if(!this.state.paused&&!this.presentationPaused&&!document.hidden&&!this.photoActive&&!this.photoRunning&&this.sceneLoad?.state!=='loading'&&this.clockActors?.length)this.advanceClocks(gap/1000);
+  if(!this.state.paused&&!this.presentationPaused&&!document.hidden&&!this.photoActive&&!this.photoRunning&&this.sceneLoad?.state!=='loading'&&this.clockActors?.length)this.advanceClocks(gap/1000,Math.max(0,this.time-priorSceneTime));
   return dt;
  }
  emitStats(now){

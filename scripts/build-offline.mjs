@@ -63,8 +63,9 @@ const config = await import('../dist/config.js');
 const atlas = Object.fromEntries(await Promise.all(config.SCENE_PRESETS.map(async scene => [scene.id,
   'data:image/webp;base64,' + (await readFile(path.join(source, `assets/atlas-${scene.id}.webp`))).toString('base64')
 ])));
-const webAtlas=Object.fromEntries(Object.entries(atlas).map(([id,uri])=>[id,`assets/atlas-${id}.webp?v=${digest(uri)}`]));
-let webJavascript=`'use strict';\n(() => {\nconst __modules=Object.create(null);\nconst __atlasImages=Object.fromEntries(Object.entries(${JSON.stringify(webAtlas)}).map(([id,url])=>[id,(globalThis.__EVENT_HORIZON_ASSET_BASE||'')+url]));\n`;
+// Ship scene screenshots atomically with this release. Opening later cards
+// must not depend on a delayed asset request or an expired hosting session.
+let webJavascript=`'use strict';\n(() => {\nconst __modules=Object.create(null);\nconst __atlasImages=${JSON.stringify(atlas)};\n`;
 let javascript = `'use strict';\n(() => {\nconst __modules = Object.create(null);\nconst __atlasImages = ${JSON.stringify(atlas)};\n`;
 for (const name of order) {
   let code = modules.get(name);

@@ -1,6 +1,6 @@
 // Attached flows share their parent's frame; they have extent and material,
 // not an independent gravitating mass or Kepler orbit.
-const choices={diskStyle:[['thermal','Thermal plasma'],['hydrogen','Hydrogen-rich glow'],['helium','Helium-rich glow'],['dust','Cool dust'],['nebula','Nebulous gas'],['radiant','Radiant white / cyan'],['ribbons','Electric-blue ribbons']],diskPalette:[['physical','Physical emission palette'],['artistic','Artistic · chosen color'],['rainbow','Rainbow · artistic']],jetStructure:[['steady','Continuous outflow'],['knots','Bright knots'],['helix','Helical filaments']]};
+const choices={diskStyle:[['thermal','Thermal plasma'],['hydrogen','Hydrogen-rich glow'],['helium','Helium-rich glow'],['dust','Cool dust'],['nebula','Nebulous gas'],['radiant','Radiant white / cyan'],['ribbons','Electric-blue ribbons'],['aurora','Auroral curtains']],diskPalette:[['physical','Physical emission palette'],['artistic','Artistic · chosen color'],['rainbow','Rainbow · artistic']],jetStructure:[['steady','Continuous outflow'],['knots','Bright knots'],['helix','Helical filaments']]};
 export function installAttachmentControls(api){
  const mount=document.createElement('section');mount.className='stellar-controls attachment-controls';mount.hidden=true;api.container.prepend(mount);
  const select=(key,label)=>`<label class="field-label" for="attachment-${key}">${label}</label><select id="attachment-${key}">${choices[key].map(([id,label])=>`<option value="${id}">${label}</option>`).join('')}</select>`;

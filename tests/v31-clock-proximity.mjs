@@ -3,7 +3,7 @@ import {fixture} from './render-fixture.mjs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {CpuRenderer} from '../dist/cpu-renderer.js';
 import {CpuCommandCanvas} from '../dist/cpu-commands.js';
-import {CLOCK_HORIZON_EPSILON,compactExteriorRadius,clockRate,advanceObjectClock,createObjectClock} from '../dist/object-clocks.js';
+import {CLOCK_HORIZON_EPSILON,compactExteriorRadius,clockRate,tickAtClockRate,createObjectClock} from '../dist/object-clocks.js';
 import {REFERENCE_RG_METERS} from '../dist/objects.js';
 
 for(const Cls of [BlackHoleRenderer,CpuRenderer]){
@@ -24,20 +24,23 @@ for(const Cls of [BlackHoleRenderer,CpuRenderer]){
  assert(Number.isFinite(close.rateFactor)&&close.rateFactor>1000,'A physically close shuttle has a large finite factor');
  const life=structuredClone(shuttle.clock);r.setFreeDrive(shuttle.id,true);r.setFreeDrive(shuttle.id,false);assert.deepEqual(shuttle.clock,life);
  r.loadScene('radiant-descent');const falling=r.objects.find(o=>o.type==='astronaut');r.time=10;r.fillObjects();
- let prior=1;
+ let prior=null;
  for(const t of [0,2,5,8,9,9.5,9.9,10]){
   r.time=t;r.fillObjects();const current=r.getObjectClock(falling.id);
-  assert(current.rateFactor>=prior&&Number.isFinite(current.rateFactor));assert(current.prescribedRadialClock);prior=current.rateFactor;
+  assert(current.rateFactor>=1&&Number.isFinite(current.rateFactor));assert(current.prescribedRadialClock);
+  // Braking reduces the kinematic contribution; only the gravitational
+  // factor must grow monotonically on a prescribed descent.
+  if(prior)assert(current.gravityFactor>=prior.gravityFactor);prior=current;
   // Identical path physics applies to all eligible types, not just astronauts.
   for(const type of ['shuttle','iss']){const comparison={...falling,type};assert.equal(r.clockRateForObject(comparison).rateFactor,current.rateFactor);}
  }
  const frame=r.getFocusFrame(falling.id),clock=r.getObjectClock(falling.id),horizon=r.configCache.horizon[0];
- const actualRadius=Math.hypot(...frame.position),expectedRadius=compactExteriorRadius(horizon,r.objectRadius(falling));
+ const actualRadius=Math.hypot(...frame.position),expectedRadius=r.infallExteriorRadius(falling,r.objectRadius(falling));
  assert(Math.abs(actualRadius/expectedRadius-1)<1e-12);assert(actualRadius>horizon*(1+CLOCK_HORIZON_EPSILON*.99));
  assert(Number.isFinite(clock.rateFactor)&&clock.rateFactor>1000);assert(!clock.horizonLimit);
  const same=clockRate({id:falling.id,positionMeters:frame.position.map(x=>x*REFERENCE_RG_METERS),velocityMetersPerSecond:[0,0,0],sources:r.clockSources()});
- assert(Math.abs(same.rateFactor/clock.rateFactor-1)<1e-12,'Endpoint clock uses actual position without hidden clearance subtraction');
- const total=createObjectClock();advanceObjectClock(total,10,clock);assert(Math.abs(total.coordinateSeconds/(10*clock.rateFactor)-1)<1e-12,'Wall seconds are proper time, so displayed t grows by the full rate');
+ assert(Math.abs(same.rateFactor*clock.kinematicFactor/clock.rateFactor-1)<1e-12,'Endpoint clock uses actual position and inbound local speed');
+ const total=createObjectClock();tickAtClockRate(total,10,clock);assert(Math.abs(total.coordinateSeconds/(10*clock.rateFactor)-1)<1e-12,'Distant time per proper second includes the incoming local speed');
  r.dispose();
 }
 console.log('PASS: shared actual-radius clocks, deep adjustable proximity, finite epsilon endpoint, persistent Drive clock, integrated distant time on GPU/CPU controllers.');

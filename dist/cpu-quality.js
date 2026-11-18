@@ -1,5 +1,5 @@
 // Canvas profiles have their own geometry/pixel budgets; these are not GPU
-// ray-tracing tiers. Adaptive starts cheaply and targets 15–30 displayed FPS.
+// ray-tracing tiers. Adaptive starts cheaply and targets a 25–35 FPS capacity band around 30 FPS.
 // The object budgets are unchanged: degrade decoration before scene contents.
 export const CPU_QUALITY_PROFILES=Object.freeze({
  low:Object.freeze({width:224,height:148,stars:60,gridLines:3,gridSamples:4,weakBodies:2,diskRings:4,circleStep:4,ringBands:2,ringSegments:16,shadowRows:16,bodies:8,dysonCells:144,craters:3,detailPixels:18}),
@@ -7,45 +7,93 @@ export const CPU_QUALITY_PROFILES=Object.freeze({
  high:Object.freeze({width:448,height:296,stars:180,gridLines:6,gridSamples:8,weakBodies:5,diskRings:10,circleStep:2,ringBands:5,ringSegments:40,shadowRows:48,bodies:20,dysonCells:720,craters:10,detailPixels:8}),
  ultra:Object.freeze({width:720,height:472,stars:360,gridLines:12,gridSamples:16,weakBodies:8,diskRings:16,circleStep:1,ringBands:9,ringSegments:72,shadowRows:96,bodies:32,dysonCells:1800,craters:22,detailPixels:3})
 });
-const levels=['low','medium','high'];
+// Small internal steps avoid the old 224 → 320 → 448 pixel jumps. These
+// profiles never add public quality choices and retain Low's object budget.
+const low=CPU_QUALITY_PROFILES.low;
+export const CPU_STARTUP_PROFILE=Object.freeze({...low,width:64,height:42,stars:16,gridLines:2,gridSamples:3,diskRings:2,circleStep:6,ringBands:1,ringSegments:8,shadowRows:6,dysonCells:64,craters:1,detailPixels:24});
+const widths=[64,73,83,95,108,123,140,159,181,203,224,246,270,296,320,350,382,416,448,493,542,596,655,720];
+const anchor={low:10,medium:14,high:18,ultra:23};
+function interpolate(a,b,t,width,level){
+ const result={};for(const key of Object.keys(a))result[key]=Math.round(a[key]+(b[key]-a[key])*t);
+ // Emergency resolution reduces decoration, never the number of body slots.
+ if(width<=low.width)result.bodies=low.bodies;
+ return Object.freeze({...result,width,level});
+}
+export const CPU_ADAPTIVE_PROFILES=Object.freeze(widths.map(width=>{
+ const [a,b,level]=width<=224?[CPU_STARTUP_PROFILE,low,'low']:width<=320?[low,CPU_QUALITY_PROFILES.medium,'medium']:width<=448?[CPU_QUALITY_PROFILES.medium,CPU_QUALITY_PROFILES.high,'high']:[CPU_QUALITY_PROFILES.high,CPU_QUALITY_PROFILES.ultra,'ultra'];
+ return interpolate(a,b,Math.log(width/a.width)/Math.log(b.width/a.width),width,level);
+}));
 export class CpuQualityBudget{
- constructor(){this.mode='adaptive';this.level='low';this.cost=0;this.samples=0;this.changedAt=0;this.fastSince=null;this.slowSince=null;this.retryAfter=0;this.relief=0;this.reliefProfile=null;this.reason='Starting with a lightweight CPU preview';}
+ constructor(){this.mode='adaptive';this.rung=0;this.startup=true;this.cost=0;this.samples=0;this.changedAt=-Infinity;this.fastSince=null;this.slowSince=null;this.retryAfter=0;this.interactionUntil=0;this.reason='Starting with a lightweight CPU preview';this.slowRung=Infinity;}
+ get level(){return this.startup?'low':this.mode==='adaptive'?CPU_ADAPTIVE_PROFILES[this.rung].level:this.mode;}
+ set level(value){this.rung=anchor[value]??anchor.low;this.startup=false;if(this.mode!=='adaptive')this.mode=value;}
+ get relief(){return this.rung<anchor.low?2*(anchor.low-this.rung)/anchor.low:0;}
+ set relief(value){this.rung=Math.max(0,Math.min(anchor.low,Math.round(anchor.low*(1-Math.max(0,Math.min(2,value))/2))));}
  select(value){
   const mode=value==='adaptive'||Object.hasOwn(CPU_QUALITY_PROFILES,value)?value:'adaptive';
   if(mode===this.mode)return false;
-  this.mode=mode;this.level=mode==='adaptive'?'low':mode;this.cost=0;this.samples=0;this.fastSince=null;this.slowSince=null;this.changedAt=0;this.retryAfter=0;this.relief=0;this.reliefProfile=null;this.reason=mode==='adaptive'?'Measuring CPU frame time':'Selected CPU quality';return true;
+  this.mode=mode;this.startup=false;if(mode!=='adaptive')this.rung=anchor[mode];this.reset();this.changedAt=-Infinity;this.interactionUntil=0;
+  if(mode==='adaptive')this.beginScene();else this.reason='Selected CPU quality';return true;
  }
- note(cost,now){
-  if(!Number.isFinite(cost)||cost<0||!Number.isFinite(now))return false;
-  this.cost=this.samples?this.cost*.75+cost*.25:cost;this.samples++;
-  if(this.mode!=='adaptive')return false;
-  const index=levels.indexOf(this.level);
-  if(cost>100||this.cost>1000/15){
-   this.fastSince=null;this.slowSince??=now;
-   if(cost>100||now-this.slowSince>=500){
-    if(index>0){this.retryAfter=now+12000;return this.change(levels[index-1],now,'Reducing CPU detail below 15 FPS');}
-    if(this.relief<2){this.retryAfter=now+12000;return this.setRelief(this.relief+1,now);}
-    this.reason='Minimum CPU detail; this device is below 15 FPS';
-   }
-  }else this.slowSince=null;
-  // Rendering is paced at 30 Hz, so use measured available frame capacity
-  // rather than expecting a deliberately capped presentation to exceed 30 Hz.
-  if(this.cost<31&&cost<1000/30&&this.samples>=8){
-   this.fastSince??=now;
-   if(now>=this.retryAfter&&now-this.fastSince>=4000&&now-this.changedAt>=5000){
-    if(this.relief>0)return this.setRelief(this.relief-1,now);
-    if(index<levels.length-1)return this.change(levels[index+1],now,'Testing CPU detail with more than 30 FPS of headroom');
-   }
-  }else this.fastSince=null;
-  if(this.cost>=1000/30&&this.cost<=1000/15)this.reason='Holding CPU detail within 15–30 FPS';
+ reset(){this.cost=0;this.samples=0;this.fastSince=null;this.slowSince=null;this.retryAfter=0;}
+ beginScene(now=0,{cold=false}={}){
+  // Scene/Drive transitions retain their actual profile. Only initial setup or
+  // a renderer restart explicitly asks for the inexpensive first preview.
+  if(cold){this.rung=0;this.startup=true;}
+  this.reset();this.changedAt=now;this.interactionUntil=0;this.slowRung=Infinity;
+  this.reason=this.startup?'Starting with a lightweight CPU preview':'Measuring the new view at current CPU detail';return true;
+ }
+ noteInteraction(now){
+  this.interactionUntil=now+250;this.fastSince=null;
+  // Camera input blocks refinement; measured work determines any reduction.
   return false;
  }
- change(level,now,reason){this.level=level;this.changedAt=now;this.reason=reason;this.fastSince=null;this.slowSince=null;this.samples=0;return true;}
- setRelief(value,now){
-  this.relief=value;
-  const base=CPU_QUALITY_PROFILES.low,ratio=value===1?.75:.5;
-  this.reliefProfile=value?Object.freeze({...base,width:Math.round(base.width*ratio),height:Math.round(base.height*ratio),stars:Math.max(24,Math.round(base.stars*ratio)),gridLines:2,diskRings:3,shadowRows:Math.max(8,Math.round(base.shadowRows*ratio)),dysonCells:Math.max(64,Math.round(base.dysonCells*ratio)),craters:2}):null;
-  return this.change('low',now,value?'Reducing CPU resolution and decoration below 15 FPS':'Restoring CPU Low detail with available headroom');
+ note(cost,now,{complete=true}={}){
+  if(!Number.isFinite(cost)||cost<0||!Number.isFinite(now))return false;
+  // Preparation or state transport is not evidence that a first frame exists.
+  if(this.startup){
+   if(!complete)return false;
+   this.startup=false;this.reset();this.changedAt=now;this.reason=this.mode==='adaptive'?'Measuring CPU frame capacity':'Selected CPU quality';
+   if(this.mode!=='adaptive')return true;
+  }
+  this.cost=this.samples?this.cost*.35+cost*.65:cost;this.samples++;
+  if(this.mode!=='adaptive')return false;
+  // This renderer deliberately paces at 30Hz. Measure full-frame work
+  // capacity, excluding deliberate idle; unfinished work may still downshift.
+  const slowCost=Math.max(cost,this.cost);
+  if(slowCost>40+1e-6){
+   this.fastSince=null;
+   const delay=Math.max(0,120-2*(slowCost-40));
+   if(now-this.changedAt>=delay){
+    const decrement=slowCost>=1000?this.rung:Math.max(1,Math.ceil(3*Math.log2(slowCost/(1000/30))));
+    if(this.rung>0){this.slowRung=this.rung;return this.move(Math.max(0,this.rung-decrement),now,'Below 25 FPS; reducing CPU resolution');}
+   }
+   this.reason=this.rung===0?'Minimum CPU detail; frame capacity below 25 FPS':'Reducing CPU work toward 30 FPS';
+   return false;
+  }
+  this.slowSince=null;
+  const fps=1000/Math.max(.01,cost,this.cost);
+  if(fps>35+1e-6&&complete&&now>=this.interactionUntil){
+   this.fastSince??=now;
+   // Near the target, make small measured adjustments. At 60FPS, a brief
+   // confirmation permits the five internal steps from full High to Ultra.
+   const delay=Math.max(60,500-17.6*(fps-35));
+   const increment=Math.min(5,Math.max(1,Math.floor((fps-30+1e-6)/6)));
+   // A failed large step brackets the useful range. Try its intermediate
+   // rung instead of repeatedly skipping it; this is not a lasting ceiling.
+   const next=Math.min(this.rung+increment,Math.max(this.rung+1,this.slowRung-1));
+   if(this.samples>=2&&now-this.fastSince>=delay&&now-this.changedAt>=delay&&this.rung<CPU_ADAPTIVE_PROFILES.length-1)return this.move(next,now,'Above 35 FPS; increasing CPU resolution');
+  }else this.fastSince=null;
+  if(fps>=25-1e-6&&fps<=35+1e-6)this.reason='Holding CPU detail within 25–35 FPS';
+  else if(this.rung===CPU_ADAPTIVE_PROFILES.length-1)this.reason='Ultra; targeting 30 FPS';
+  return false;
  }
- get profile(){return this.mode==='adaptive'&&this.level==='low'&&this.reliefProfile||CPU_QUALITY_PROFILES[this.level];}
+
+ move(rung,now,reason){
+  if(rung===this.rung)return false;
+  this.rung=Math.max(0,Math.min(CPU_ADAPTIVE_PROFILES.length-1,rung));this.changedAt=now;this.reason=reason;this.reset();return true;
+ }
+ change(level,now,reason){this.startup=false;return this.move(anchor[level]??0,now,reason);}
+ setRelief(value,now){this.startup=false;const rung=Math.round(anchor.low*(1-Math.max(0,Math.min(2,value))/2));return this.move(rung,now,value?'Reducing CPU resolution':'Restoring CPU Low detail');}
+ get profile(){return this.startup?CPU_STARTUP_PROFILE:this.mode==='adaptive'?CPU_ADAPTIVE_PROFILES[this.rung]:CPU_QUALITY_PROFILES[this.mode];}
 }

@@ -1,3 +1,4 @@
+import {renderNotebookEquation} from './math-typeset.js';
 /* A self-contained route from local inertial physics to the scene metrics.
  * MathML and SVG only; generated lazily when the notebook is opened. */
 const I=s=>'<mi>'+s+'</mi>',N=s=>'<mn>'+s+'</mn>',O=s=>'<mo>'+s+'</mo>',T=s=>'<mtext>'+s+'</mtext>';
@@ -6,7 +7,7 @@ const Q=a=>'<msqrt><mrow>'+a+'</mrow></msqrt>',B=a=>R(O('('),R(a),O(')')),V=s=>'
 const trig2=(name,arg)=>R(P('<mi mathvariant="normal">'+name+'</mi>',N(2)),arg);
 const D=a=>R(I('d'),a);
 const row=(...lines)=>'<mtable columnalign="left" rowspacing="0.7em">'+lines.map(x=>'<mtr><mtd>'+x+'</mtd></mtr>').join('')+'</mtable>';
-const eq=(x,label)=>'<div class="equation" aria-label="'+label+'"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">'+x+'</math></div>';
+const eq=(source,label='')=>renderNotebookEquation(source,label);
 const part=(id,title,body,open=false)=>'<details class="math-section" id="rel-'+id+'"'+(open?' open':'')+'><summary><span class="math-index">'+id+'</span><span>'+title+'</span><span class="math-chevron" aria-hidden="true">＋</span></summary><div class="math-section-body">'+body+'</div></details>';
 const link=(url,label)=>'<a href="'+url+'" target="_blank" rel="noopener noreferrer">'+label+' ↗</a>';
 const c=I('c'),t=I('t'),tau=I('τ'),x=I('x'),r=I('r'),G=I('G'),M=I('M'),a=I('a'),v=I('v'),gamma=I('γ'),beta=I('β'),phi=I('Φ'),theta=I('θ'),az=I('φ'),rg=S(r,I('g')),rs=S(r,I('s'));
@@ -98,7 +99,7 @@ export function renderRelativityGuide(container){
  '<p>For an isolated, stationary, uncharged rotating black hole, axial symmetry replaces spherical symmetry. The Kerr solution contains mass M and angular momentum J. Define a = J/(Mc), χ = a/r<sub>g</sub>, Σ = r² + a²cos²θ, and Δ = r² − 2r<sub>g</sub>r + a². In Boyer–Lindquist coordinates:</p>'+eq(kerr,'Kerr metric in SI units with radial spin length a')+
  eq(R(S(r,O('±')),equal,rg,O('±'),Q(R(sq(rg),minus,sq(a))),equal,rg,B(R(N(1),O('±'),Q(R(N(1),minus,sq(I('χ'))))))),'Kerr coordinate horizon radii')+
  '<p>The dt dφ term is the signature of frame dragging in these coordinates. The outer event horizon is r₊; r₋ is the ideal inner Cauchy horizon. The ergosurface, where stationary observers cease to be possible, is distinct from r₊ away from the axis. The ring singularity has Σ = 0. Setting a = 0 returns Schwarzschild. These formulas apply to the ideal subextremal solution |χ| &lt; 1; the app’s spin control remains below extremality.</p>'+
- '<p>Clock comparisons near a rotating hole depend on latitude and the observer’s angular motion. Aligning a Schwarzschild clock formula with a Kerr horizon is only a proxy. The existing notebook separates the exact metric from the renderer’s bounded-cost approximation.</p>')+
+ '<p>Clock comparisons near a rotating hole depend on latitude and the observer’s angular motion. The clock uses the Kerr lapse at the traveler’s radius and latitude, with a Lorentz factor for motion relative to the locally nonrotating frame. The shuttle’s close track is prescribed rather than a stable free orbit.</p>')+
  part('11','Alcubierre: prescribe a moving shift',
  '<p>A 3+1 split describes spatial geometry γ<sub>ij</sub>, lapse α, and dimensionless shift β<sup>i</sup>. It is a way to write a metric, not a new gravity law:</p>'+eq(R(sq(D(I('s'))),equal,minus,sq(I('α')),sq(c),sq(D(t)),plus,S(I('γ'),R(I('i'),I('j'))),B(R(D(X('i')),plus,P(beta,I('i')),c,D(t))),B(R(D(X('j')),plus,P(beta,I('j')),c,D(t)))),'ADM metric with dimensionless shift and x-zero equals ct')+
  '<p>Alcubierre chooses α = 1, γ<sub>ij</sub> = δ<sub>ij</sub>, and β = −v<sub>s</sub>(t)f(r<sub>s</sub>)/c around a prescribed center x<sub>s</sub>(t):</p>'+eq(row(R(sq(D(I('s'))),equal,minus,sq(c),sq(D(t)),plus,sq(B(R(D(V('x')),minus,I('f'),B(S(r,I('s'))),S(V('v'),I('s')),D(t))))),R(S(r,I('s')),equal,O('|'),V('x'),minus,S(V('x'),I('s')),B(t),O('|'),O(','),T('   '),S(V('v'),I('s')),equal,F(D(S(V('x'),I('s'))),D(t))),shape),'Alcubierre vector-shift metric and smooth finite wall profile')+

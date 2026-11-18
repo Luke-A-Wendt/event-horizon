@@ -8,21 +8,32 @@ export const FLIGHT_WARP_RATE=.45;
 // Standard gravity is an educational acceleration unit, not a claim about
 // the real Space Shuttle's propulsion or sustained acceleration capability.
 export const FLIGHT_STANDARD_GRAVITY=9.80665;
-export const SHUTTLE_THRUST_MAX_G=10;
+export const SHUTTLE_THRUST_MAX_G=1;
 // Fictional Enterprise inertial dampeners permit this illustrative impulse range.
 export const ENTERPRISE_THRUST_MAX_G=1000;
-export const SHUTTLE_THRUST_STEP_G=.5;
+export const SHUTTLE_THRUST_STEP_G=.1;
 export function shuttleThrustSetting(value){return impulseThrustSetting(value);}
-export function impulseThrustSetting(value,maxG=SHUTTLE_THRUST_MAX_G){const step=maxG>SHUTTLE_THRUST_MAX_G?1:SHUTTLE_THRUST_STEP_G;return Math.round(clamp(Number(value)||0,0,maxG)/step)*step;}
+export function impulseThrustSetting(value,maxG=SHUTTLE_THRUST_MAX_G){const step=maxG>SHUTTLE_THRUST_MAX_G?1:SHUTTLE_THRUST_STEP_G;return Number((Math.round(clamp(Number(value)||0,0,maxG)/step)*step).toFixed(1));}
 const WARP_NINE_SPEED=9**(10/3),WARP_SPEED_CAP=199516;
 // Below nine this is the familiar TNG reference convention. The finite
 // interpolation above nine is a display choice, never a canonical speed law
 // or the infinite-velocity limit at W=10.
 export function speedForWarp(factor){const w=clamp(Number(factor)||0,0,FLIGHT_WARP_MAX);return FLIGHT_LIGHT_SPEED*(w<=9?w**(10/3):WARP_NINE_SPEED*Math.exp((w-9)/.9999*Math.log(WARP_SPEED_CAP/WARP_NINE_SPEED)));}
 export function warpForSpeed(speed){const ratio=Math.max(0,Number(speed)||0)/FLIGHT_LIGHT_SPEED;return ratio<=WARP_NINE_SPEED?ratio**.3:clamp(9+.9999*Math.log(ratio/WARP_NINE_SPEED)/Math.log(WARP_SPEED_CAP/WARP_NINE_SPEED),9,FLIGHT_WARP_MAX);}
-// Cinematic screen-space flow: steeply faster near Warp 10, while a bounded
-// rate and periodic phase keep low-frame-rate devices stable.
-export function warpStarRate(beta=0){const b=clamp(Number(beta)||0,0,WARP_SPEED_CAP),w=warpForSpeed(b*FLIGHT_LIGHT_SPEED),t=clamp((w-8)/(FLIGHT_WARP_MAX-8),0,1),smooth=t*t*(3-2*t);return .004*Math.log1p(b)+.60*smooth**3;}
+// Cinematic milestones, independent of the craft's physical speed convention.
+// Warp ten scrolls at the former warp-eight rate; trail shape still reaches
+// white, elongated streaks. Every integer has its own progression; soft interpolation avoids a threshold
+// jump near nine. Long exposure is angular, not limited to one tiny star cell.
+export const WARP_STAR_MILESTONES=Object.freeze([
+ [0,0,0,0],[.001,0,0,0],[.008,0,.0004,0],[.017,.035,.002,0],
+ [.042,.09,.006,.02],[.090,.18,.015,.06],[.170,.32,.030,.14],
+ [.295,.50,.055,.25],[.480,.72,.100,.42],[.650,.87,.180,.72],[.850,1,.300,1]
+].map(Object.freeze));
+export function warpStarVisuals(beta=0){
+ const w=warpForSpeed(clamp(Number(beta)||0,0,WARP_SPEED_CAP)*FLIGHT_LIGHT_SPEED),i=Math.min(9,Math.floor(w)),x=clamp(w-i,0,1),t=x*x*(3-2*x),a=WARP_STAR_MILESTONES[i],b=WARP_STAR_MILESTONES[i+1],value=k=>a[k]+(b[k]-a[k])*t;
+ return {warp:w,rate:value(0),elongation:value(1),trailRadians:value(2),whiteness:value(3)};
+}
+export function warpStarRate(beta=0){return warpStarVisuals(beta).rate;}
 export function flightControlRates(flight,options={}){
  const warp=options.warp===true,v=Math.max(0,Number(flight.speed)||0),scale=Math.max(v,warp?FLIGHT_LIGHT_SPEED:60);
  const factor=warpForSpeed(v),dw=FLIGHT_WARP_RATE;
@@ -69,7 +80,7 @@ function ordinaryVelocity(u){const gamma=Math.hypot(1,...u.map(x=>x/FLIGHT_LIGHT
 function properImpulse(u,a){const gamma=Math.hypot(1,...u.map(x=>x/FLIGHT_LIGHT_SPEED)),projection=dot(u,a)/(c2*gamma*(gamma+1));return a.map((x,i)=>x/gamma+u[i]*projection);}
 function coordinateAcceleration(v,a){const beta=Math.min(1-8*Number.EPSILON,Math.hypot(...v)/FLIGHT_LIGHT_SPEED),invGamma=Math.sqrt((1-beta)*(1+beta)),projection=dot(v,a)/c2;return a.map((x,i)=>invGamma*invGamma*(x-v[i]*projection/(1+invGamma)));}
 export function shuttleRelativity(flight,options={}){
- const velocity=finiteVelocity(flight),speed=Math.hypot(...velocity),beta=speed/FLIGHT_LIGHT_SPEED,invGamma=Math.sqrt(Math.max(0,(1-beta)*(1+beta))),properAcceleration=(flight.brakeSpeed?Math.max(0,flight.thrust||0):impulseThrustSetting(flight.thrust,options.maxThrustG))*FLIGHT_STANDARD_GRAVITY,vector=coordinateAcceleration(velocity,flight.basis[2].map(x=>x*properAcceleration));
+ const velocity=finiteVelocity(flight),speed=Math.hypot(...velocity),beta=speed/FLIGHT_LIGHT_SPEED,invGamma=Math.sqrt(Math.max(0,(1-beta)*(1+beta))),properAcceleration=(flight.brakeSpeed?clamp(flight.thrust||0,0,options.maxThrustG??SHUTTLE_THRUST_MAX_G):impulseThrustSetting(flight.thrust,options.maxThrustG))*FLIGHT_STANDARD_GRAVITY,vector=coordinateAcceleration(velocity,flight.basis[2].map(x=>x*properAcceleration));
  return {velocity,speed,beta,lorentzFactor:1/Math.max(invGamma,1e-15),properAcceleration,coordinateAcceleration:Math.hypot(...vector),coordinateAccelerationVector:vector};
 }
 function clockLagRate(velocity){const b=Math.min(1,Math.hypot(...velocity)/FLIGHT_LIGHT_SPEED),b2=b*b;return b2/(1+Math.sqrt(Math.max(0,(1-b)*(1+b))));}
@@ -87,7 +98,7 @@ export function resetFlightClocks(flight){flight.coordinateTimeSeconds=0;flight.
 export function setPlanarHeading(flight,radians){
  if(!flight||!Number.isFinite(radians))return false;
  const heading=Number.isFinite(flight.headingAngle)?flight.headingAngle:0;
- flight.headingAngle=heading;flight.headingTarget=heading+Math.atan2(Math.sin(radians-heading),Math.cos(radians-heading));flight.brakeTurn=false;return true;
+ flight.jetStart=heading;flight.headingAngle=heading;flight.headingTarget=heading+Math.atan2(Math.sin(radians-heading),Math.cos(radians-heading));flight.brakeTurn=false;return true;
 }
 function planarTurn(flight,dt,input,controlled){
  if(!controlled&&!Number.isFinite(flight.headingTarget)){
@@ -106,28 +117,36 @@ function planarTurn(flight,dt,input,controlled){
  target=heading+error;
  let angle=(previous+(desired-previous)*(1-Math.exp(-8*dt)))*dt;
  if(Math.sign(angle)===Math.sign(error)&&Math.abs(angle)>Math.abs(error)||Math.abs(error)<1e-6)angle=error;
+ const span=target-(flight.jetStart??heading),progress=span?(heading+angle/2-(flight.jetStart??heading))/span:1;
+ flight.visualJet=Math.abs(error)>1e-4&&progress>=0&&progress<1?Math.sign(span)*(progress<.5?1:-1)*Math.min(1,Math.abs(span)*7):0;
  flight.headingTarget=target;flight.headingAngle=heading+angle;flight.angularVelocity=angle/dt;
  return flight.angularVelocity;
 }
 
+export function warpVelocity(f){
+ const d=f.coastDirection||[0,0,1],v=f.speed*(f.travelDirection||1);
+ return f.basis[2].map((_,i)=>v*(d[0]*f.basis[0][i]+d[1]*f.basis[1][i]+d[2]*f.basis[2][i]));
+}
 export function integratePlanar(flight,dt,input={},options={}){
  dt=clamp(Number(dt)||0,0,1);if(!dt)return flight;
  if(!options.warp)return integrateShuttlePlanar(flight,dt,input,options);
  advanceFlightClocks(flight,dt);
  if(input.speed)flight.brakeSpeed=false;if(input.curvature)flight.brakeTurn=false;
  if(flight.brakeSpeed){flight.speed=options.warp?speedForWarp(Math.max(0,warpForSpeed(flight.speed)-1.5*dt)):Math.max(0,(flight.speed||0)-Math.max(10,flight.brakeInitialSpeed/2)*dt);if(flight.speed<1e-6){flight.speed=0;flight.brakeSpeed=false;}}
- else if(options.warp){flight.speed=speedForWarp(warpForSpeed(flight.speed)+(input.speed||0)*FLIGHT_WARP_RATE*dt);}
+ else if(options.warp){if(input.speed)flight.speed=speedForWarp(warpForSpeed(flight.speed)+input.speed*FLIGHT_WARP_RATE*dt);}
  else flight.speed=clamp((flight.speed||0)+(input.speed||0)*flightControlRates(flight,options).speedRate*dt,0,options.maxSpeed||12000);
  planarTurn(flight,dt,input,options.controlled===true);
  flight.torsion=0;flight.curvature=flight.speed>0?flight.angularVelocity/flight.speed:0;
  const [N,B,T]=orthonormalFrame(flight.basis),w=flight.angularVelocity,a=w*dt;
  const forward=Math.abs(w)>1e-12?Math.sin(a)/w:dt,side=Math.abs(w)>1e-12?2*Math.sin(a*.5)**2/w:0;
- flight.position=flight.position.map((x,i)=>x+flight.speed*(T[i]*forward+N[i]*side));
- flight.basis=[rotate(N,B,a),B,rotate(T,B,a)];flight.travelCompression=1;
- // The starfield is a cinematic, logarithmically compressed visualization.
- // Smooth its rate independently of the SI vehicle velocity to avoid aliasing.
+ const d=flight.coastDirection||[0,0,1];
+ flight.position=flight.position.map((x,i)=>x+flight.speed*(N[i]*(d[0]*forward+d[2]*side)+B[i]*d[1]*dt+T[i]*(d[2]*forward-d[0]*side)));
+ flight.basis=[rotate(N,B,a),B,rotate(T,B,a)];flight.velocity=warpVelocity(flight);flight.travelCompression=1;
+ // Smooth visual warp, not the enormous SI speed range: a jump to warp ten
+ // must visibly pass through the lower milestones instead of leaping to nine.
  const previousBeta=Math.max(0,flight.starBeta||0),beta=flight.speed/FLIGHT_LIGHT_SPEED;
- flight.starBeta=previousBeta+(beta-previousBeta)*(1-Math.exp(-4*dt));
+ const previousWarp=warpForSpeed(previousBeta*FLIGHT_LIGHT_SPEED),targetWarp=warpForSpeed(beta*FLIGHT_LIGHT_SPEED);
+ flight.starBeta=speedForWarp(previousWarp+(targetWarp-previousWarp)*(1-Math.exp(-4*dt)))/FLIGHT_LIGHT_SPEED;
  flight.starPhase=((flight.starPhase||0)+(warpStarRate(previousBeta)+warpStarRate(flight.starBeta))*.5*dt)%1024;
  flight.gridPhase=((flight.gridPhase||0)+.12*Math.log1p(flight.starBeta)*dt)%4096;return flight;
 }
@@ -140,7 +159,7 @@ export function integratePlanar(flight,dt,input={},options={}){
 export function integrateShuttlePlanar(flight,dt,input={},options={}){
  dt=clamp(Number(dt)||0,0,1);if(!dt)return flight;
  if(input.curvature)flight.brakeTurn=false;
- if(flight.brakeSpeed){flight.thrust=Math.max(0,(flight.thrust||0)-Math.max(.5,flight.brakeInitialSpeed||flight.thrust||.5)*dt/1.2);if(flight.thrust===0)flight.brakeSpeed=false;}
+ if(flight.brakeSpeed){flight.thrust=Math.max(0,clamp(flight.thrust||0,0,options.maxThrustG??SHUTTLE_THRUST_MAX_G)-clamp(flight.brakeInitialSpeed||flight.thrust||.1,.1,options.maxThrustG??SHUTTLE_THRUST_MAX_G)*dt/1.2);if(flight.thrust===0)flight.brakeSpeed=false;}
  else flight.thrust=impulseThrustSetting(flight.thrust,options.maxThrustG);
  planarTurn(flight,dt,input,options.controlled===true);
  const [N,B,T]=orthonormalFrame(flight.basis),w=flight.angularVelocity,x=w*dt,x2=x*x;

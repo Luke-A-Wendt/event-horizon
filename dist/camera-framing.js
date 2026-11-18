@@ -23,11 +23,11 @@ export function warpViewObstacles(width,height,driving=false,cssWidth=width,cssH
 
 // Exact perspective extent for the bubble's bounding sphere; projected hull
 // bounds at zero warp, so a long, flat Enterprise is not fitted as a sphere.
-export function warpSideFraming(width,height,factor=4,{enabled=true,yaw=-Math.PI/2,pitch=0,lookYaw=0,lookPitch=0,driving=false,cssWidth=width,cssHeight=height}={}){
+export function warpSideFraming(width,height,factor=4,{enabled=true,fieldRadius,yaw=-Math.PI/2,pitch=0,lookYaw=0,lookPitch=0,driving=false,cssWidth=width,cssHeight=height}={}){
  width=Math.max(1,width);height=Math.max(1,height);
  const aspect=width/height,fov=.83*Math.max(1,1.35/aspect),projection=height/fov,margin=12,cx=width*.5,cy=height*.5,obstacles=warpViewObstacles(width,height,driving,cssWidth,cssHeight);
  const nearest=([x0,y0,x1,y1])=>Math.hypot(Math.max(x0-cx,0,cx-x1),Math.max(y0-cy,0,cy-y1));
- const pixels=Math.max(18,Math.min(cx,cy,...obstacles.map(nearest))-margin),warp=Math.max(0,Math.min(10,Number(factor)||0)),radius=enabled&&warp>0?effectiveWarpRadius(warp)*1.18:0;
+ const pixels=Math.max(18,Math.min(cx,cy,...obstacles.map(nearest))-margin),warp=Math.max(0,Math.min(10,Number(factor)||0)),radius=enabled?(fieldRadius??(warp>0?effectiveWarpRadius(warp):0))*1.18:0;
  let distance;
  const centered=Math.abs(lookYaw)+Math.abs(lookPitch)<1e-10;
  if(radius&&centered)distance=radius*Math.sqrt(1+(projection/pixels)**2);
@@ -64,4 +64,11 @@ export function apparentCaptureAngle(radius,mass){
  const r=Math.max(1e-12,radius/Math.max(mass,1e-20));
  const sin=Math.min(1,Math.sqrt(27/(r*r+54/r)));
  const angle=Math.asin(sin);return r>=3?angle:Math.PI-angle;
+}
+
+// Keep the craft-scale eye displacement separate when a galactic position
+// is too large to add a meter to it in double precision.
+export function cameraRelative(point,frame){
+ const origin=frame.eyeOrigin,offset=frame.eyeOffset;
+ return origin&&offset?point.map((v,i)=>(v-origin[i])-offset[i]):point.map((v,i)=>v-frame.observer[i]);
 }

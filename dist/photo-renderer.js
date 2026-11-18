@@ -1,14 +1,15 @@
+import { applyPhotoLens } from './photo-lens.js';
 import { VERTEX, createFragment } from './shaders.js';
 
 // Picture mode resolves procedural structure unavailable to live variants,
 // with progressively finer ray integration and genuinely distinct subpixel rays.
 // It does not wait out a timer or change the interactive quality preset.
 export const PHOTO_PRESETS = Object.freeze([
- Object.freeze({id:'quick',label:'Quick · Good screenshot',width:0,samples:1,steps:0,detail:0,budgetMs:0}),
- Object.freeze({id:'high',label:'Higher resolution · 10 seconds',width:2560,samples:4,steps:1024,detail:1,budgetMs:10000}),
- Object.freeze({id:'maximum',label:'Maximum · 2 minutes',width:3840,samples:16,steps:3072,detail:3,budgetMs:120000})
+ Object.freeze({id:'quick',label:'Quick · current frame',width:0,samples:1,steps:0,detail:0,budgetMs:0}),
+ Object.freeze({id:'high',label:'Studio · up to 4K · 1 minute',width:3840,samples:8,steps:1536,detail:2,budgetMs:60000}),
+ Object.freeze({id:'maximum',label:'Exhibition · up to 5K · 6 minutes',width:5120,samples:32,steps:3072,detail:3,budgetMs:360000})
 ]);
-const MAX_PIXELS=3840*2160;
+const MAX_PIXELS=5120*2880;
 export const PHOTO_TILE_SIZE=64;
 const TILE_SIZE=PHOTO_TILE_SIZE;
 // Keep even Maximum below 26 million maximum ray iterations in flight. The
@@ -34,7 +35,7 @@ async function withinBudget(promise,deadline,signal){
 export function photoDimensions(viewWidth,viewHeight,longEdge=1920){
  const aspect=Number(viewWidth)/Number(viewHeight);
  if(!Number.isFinite(aspect)||aspect<=0||Number(viewWidth)<=0||Number(viewHeight)<=0)throw new Error('The view needs a nonzero size before rendering a picture.');
- const edge=Math.max(64,Math.min(3840,Math.round(Number(longEdge)||1920)));
+ const edge=Math.max(64,Math.min(5120,Math.round(Number(longEdge)||1920)));
  let width=aspect>=1?edge:edge*aspect,height=aspect>=1?edge/aspect:edge;
  const scale=Math.min(1,Math.sqrt(MAX_PIXELS/(width*height)));
  return {width:Math.max(1,Math.floor(width*scale)),height:Math.max(1,Math.floor(height*scale))};
@@ -57,8 +58,8 @@ export function photoProgressiveSampleOffset(index){
  return [inverse(index,2)-.5,inverse(index,3)-.5];
 }
 
-// Bounded 16-bit linear-light means cost six bytes/pixel (under 50 MiB at
-// 3840×2160), not a growing sample history or a full-image float accumulator.
+// Bounded 16-bit linear-light means cost six bytes/pixel (under 85 MiB at
+// 5120×2880), not a growing sample history or a full-image float accumulator.
 // Each tile has its own sample count, so a deadline during another pass still
 // leaves a completely initialized image; only its local noise level differs.
 export function mergePhotoTile(mean,imageWidth,tile,sum,samples,previousSamples,destination){
@@ -197,16 +198,23 @@ async function renderPicture(renderer,{presetId='high',onProgress=()=>{},signal,
  let budgetLimited=false,completedPasses=0,output=null,completed=0,total=0,lastProgress=-Infinity,progressFloor=0,renderStarted=0,stageIndex=0;
  let accumulation=null,tileCounts=null,activeStage=null,activeTiles=null,activeWidth=0,activeHeight=0,completeImage=false,encodingMs=0;
  let renderDeadline=deadline;
- const stages=preset.id==='maximum'?[
-  {width:1920,samples:1,steps:1536,detail:2,share:.18},
-  {...preset,samples:1,share:.65}
- ]:[{width:1920,samples:1,steps:preset.steps,detail:preset.detail,share:.18},{...preset,samples:1,share:.65}];
+ // Keep a complete fallback, then size the final pass for genuine multi-ray
+ // coverage. A single large, aliased frame is not the final quality target.
+ const stages=[{width:1920,samples:1,steps:preset.id==='maximum'?1536:preset.steps,detail:preset.detail,share:.20},
+  {...preset,samples:preset.id==='maximum'?4:2,share:.76}];
  const report=(phase,force=false)=>{
   const elapsedMs=now()-started;if(!force&&elapsedMs-lastProgress<100)return;lastProgress=elapsedMs;
   const progress=phase==='Picture ready'?1:Math.max(progressFloor,Math.min(.99,workBudgetMs>0?elapsedMs/workBudgetMs:0));progressFloor=progress;
   const remainingBudgetMs=Math.max(0,deadline-now());
   const remainingMs=remainingBudgetMs;
   onProgress({phase,progress,indeterminate:phase!=='Picture ready'&&(!total||/Preparing|Measuring/.test(phase)),completed,total,elapsedMs,remainingMs,remainingBudgetMs,workBudgetMs,completedPasses});
+ };
+ // Rebuild each complete checkpoint from the unchanged radiance means.
+ // A previous checkpoint's halo must never become the next pass's light.
+ const encodeFinishedFrame=async()=>{
+  report('Resolving camera glare and halos',true);
+  await applyPhotoLens(accumulation,activeWidth,activeHeight,output.getContext('2d',{alpha:false}),()=>{usable(renderer,signal);checkBudget(deadline);});
+  return encodeCanvas(output);
  };
  usable(renderer,signal);
  const snapshot=renderer.beginPhotoCapture(),gl=renderer.gl;
@@ -289,7 +297,7 @@ async function renderPicture(renderer,{presetId='high',onProgress=()=>{},signal,
    for(let i=0;i<tiles.length;i++)await renderTile(tiles[i],stage,context,height,i);
    completeImage=true;
    usable(renderer,signal);checkBudget(deadline);report('Encoding complete image',true);
-   const encodingAt=now(),blob=await withinBudget(encodeCanvas(output),deadline,signal);encodingMs=Math.max(encodingMs,now()-encodingAt);usable(renderer,signal);
+   const encodingAt=now(),blob=await withinBudget(encodeFinishedFrame(),deadline,signal);encodingMs=Math.max(encodingMs,now()-encodingAt);usable(renderer,signal);
    if(!blob?.size)throw new Error('The picture was empty. Try Quick.');
    tileSampleMs=Math.max(tileSampleMs,(now()-renderStarted)/total*preset.steps/stage.steps);
    best={blob,width,height,samples:stage.samples,steps:stage.steps,detail:stage.detail,fallback:false};completedPasses++;
@@ -313,14 +321,14 @@ async function renderPicture(renderer,{presetId='high',onProgress=()=>{},signal,
      // budget repeatedly encoding PNGs instead of improving their samples.
      if((pass&(pass-1))===0&&now()-lastCheckpoint>Math.min(3000,workBudgetMs*.15)){
       report('Saving refinement checkpoint',true);const encodeAt=now();
-      const blob=await withinBudget(encodeCanvas(output),deadline,signal);usable(renderer,signal);
+      const blob=await withinBudget(encodeFinishedFrame(),deadline,signal);usable(renderer,signal);
       if(blob?.size){best={blob,width:activeWidth,height:activeHeight,samples:Math.min(...tileCounts),samplesMax:Math.max(...tileCounts),steps:activeStage.steps,detail:activeStage.detail,fallback:false};dirty=false;}
       encodingMs=Math.max(encodingMs,now()-encodeAt);renderDeadline=deadline-Math.max(40,Math.min(1500,encodingMs*1.7+30));lastCheckpoint=now();
      }
     }
    }catch(error){if(error?.name!=='PhotoBudgetError')throw error;budgetLimited=true;}
    if(dirty&&now()<deadline){
-    report('Encoding refined image',true);const blob=await withinBudget(encodeCanvas(output),deadline,signal);usable(renderer,signal);
+    report('Encoding refined image',true);const blob=await withinBudget(encodeFinishedFrame(),deadline,signal);usable(renderer,signal);
     if(blob?.size)best={blob,width:activeWidth,height:activeHeight,samples:Math.min(...tileCounts),samplesMax:Math.max(...tileCounts),steps:activeStage.steps,detail:activeStage.detail,fallback:false};
    }
   }

@@ -14,6 +14,19 @@ export function bridgeConformal(radius, throatRadius) {
  const r=Math.max(Number.MIN_VALUE,Math.abs(radius)),b=Math.abs(throatRadius);
  return 1+b*b/(4*r*r);
 }
+// Proper length along a straight isotropic-chart ray integrates
+// (1 + b²/(4r²)) ds. Invert monotonically without stepping through the
+// far-side coordinate pole, even when the stopping distance is very large.
+export function bridgeRayStep(start,direction,b,properLength){
+ if(!(properLength>0))return 0;
+ const a=start.reduce((v,x,i)=>v+x*direction[i],0),impact=Math.hypot(...start.map((x,i)=>x-a*direction[i])),k=b*b*.25;
+ const path=s=>impact>Math.max(1e-18,Math.abs(a)*1e-12)
+  ?s+k/impact*Math.atan2(impact*s,impact*impact+a*(a+s))
+  :a<0&&s>=-a?Infinity:s+k*s/(a*(a+s));
+ let lo=0,hi=Math.min(properLength,a<0&&impact<=Math.abs(a)*1e-12?-a:Infinity);
+ for(let i=0;i<72;i++){const mid=(lo+hi)*.5;if(path(mid)<properLength)lo=mid;else hi=mid;}
+ return (lo+hi)*.5;
+}
 export function bridgeGradient(position, throatRadius) {
  const radius2=Math.max(1e-30,position.reduce((n,x)=>n+x*x,0)),b2=throatRadius*throatRadius;
  const scale=-2*b2/(radius2*(4*radius2+b2));
@@ -21,7 +34,7 @@ export function bridgeGradient(position, throatRadius) {
 }
 export function bridgePath(time, throatRadius, travel=true) {
  const phase=travel?Math.max(0,time)*.12:0,l=6*throatRadius*Math.cos(phase);
- return {l,r:bridgeIsotropicRadius(l,throatRadius),inward:Math.sin(phase)>=0};
+ return {l,r:bridgeIsotropicRadius(l,throatRadius),inward:Math.sin(phase)>=0,properSpeed:travel?-6*throatRadius*.12*Math.sin(phase):0,properAcceleration:travel?-(.12**2)*l:0};
 }
 
 // Cinematic gate construction, not a time-dependent Einstein-equation solution.
@@ -41,18 +54,37 @@ export function bridgeJourney(time,throatRadius,lifecycle='steady'){
  const leg=Math.floor(t/legDuration),local=t-leg*legDuration,returning=leg%2===1,direction=returning?-1:1;
  const phaseTime=Math.max(0,Math.min(Math.PI/.12,local-departure)),l=direction*(HEIGHLINER_PASSAGE.endpoint/HEIGHLINER_PASSAGE.throatRadius)*throatRadius*Math.cos(phaseTime*.12),path={l,r:bridgeIsotropicRadius(l,throatRadius)};
  const destination=returning?'Caladan':'Arakas',turn=smooth((local-closed)/3),headingAngle=(returning?Math.PI:0)+Math.PI*turn;
- return {...path,inward:!returning,headingAngle,open:local<departure?smooth((local-2)/5):local<arrival?1:1-smooth((local-arrival)/5),far:l<0,phase:local<2?'Preparing passage':local<departure?'Opening bridge':local<arrival?'Crossing to '+destination:local<closed?'Closing bridge':turn<1?'Turning for the return':'Arrived at '+destination};
+ const moving=local>=departure&&local<arrival;
+ return {...path,properSpeed:moving?-direction*(HEIGHLINER_PASSAGE.endpoint/HEIGHLINER_PASSAGE.throatRadius)*throatRadius*.12*Math.sin(.12*phaseTime):0,properAcceleration:moving?-(.12**2)*l:0,inward:!returning,headingAngle,open:local<departure?smooth((local-2)/5):local<arrival?1:1-smooth((local-arrival)/5),far:l<0,phase:local<2?'Preparing passage':local<departure?'Opening bridge':local<arrival?'Crossing to '+destination:local<closed?'Closing bridge':turn<1?'Turning for the return':'Arrived at '+destination};
 }
 
-// One vehicle-relative orbit eye for ship bridge presets.
+// Standard eye for other ship bridge presets.
 // It occupies the standard chase-6 position, but looks at the vehicle center
 // and retains normal drag-to-orbit controls.
 export const BRIDGE_VEHICLE_CAMERA=Object.freeze({mode:'track',lookYaw:0,lookPitch:0,yaw:Math.PI,pitch:Math.atan2(1.44,4.32),focusDistance:Math.hypot(1.44,4.32)});
+
+// The radial crossing keeps the Einstein–Rosen mouth on the ship's axis on
+// either side. At rest the hull supplies a continuous frame for the turn,
+// when a tangent inferred from velocity would be undefined.
+export const BRIDGE_HULL_CAMERAS=Object.freeze({
+ 'bridge':Object.freeze({...BRIDGE_VEHICLE_CAMERA,pitch:0,focusDistance:5.4}),
+ 'bridge-nebulae':Object.freeze({...BRIDGE_VEHICLE_CAMERA,yaw:-Math.PI/2,pitch:0,focusDistance:5})
+});
 
 // Geometric throat radius during gate construction. On the departure chart
 // it grows from zero. After transit, its reciprocal gives the same shrinking
 // throat in the inverted arrival chart without moving the nearby traveler.
 export function bridgeMetricScale(open,far=false){const radius=Math.max(1e-4,Math.min(1,Number(open)||0));return far?1/radius:radius;}
+
+// A proximity-operated research gate. It is entirely open before the craft
+// reaches the throat and closes only after it clears the opening on either
+// side. Its phase is derived from the live pose, so pause/save/manual flight
+// and render-worker snapshots cannot desynchronize an extra gate timer.
+export function bridgeResearchGateStage(position,throatRadius){
+ const b=Math.max(1e-30,throatRadius),r=Math.max(1e-30,Math.hypot(...(position||[0,0,6*b]))),l=bridgeProperRadius(r,b),distance=Math.abs(l)/b;
+ const t=Math.max(0,Math.min(1,(distance-1.25)/2.25)),open=1-t*t*(3-2*t);
+ return {r,l,open,far:l<0,phase:open<=0?'Gate on standby':open>=1?'Gate open':'Gate activating'};
+}
 
 // A robust Gaussian line integral used by the jet sampler. This independent
 // numerical counterpart makes subpixel, oblique jet crossings testable.

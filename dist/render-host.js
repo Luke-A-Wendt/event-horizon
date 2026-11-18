@@ -10,8 +10,8 @@ import { snapshotRenderer, restoreRenderer, renderSignature, LatestStateMailbox,
 
 const nextPaint=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 const hostMethods=new Set(['startup','getState','captureImage','renderPicture','getVRSupport','enterVR','exitVR','dispose','restartRendering','workerMode','requestSceneLoad','prepareMutation','finishMutation','getDiagnostics','didRestoreSnapshot','loadScene','loadSnapshot','loadWarpScenario','setPresentationPaused','noteInteraction']);
-const interactionMethods=new Set(['update','updateStellar','setFlightInput','setFlightPower','setFlightMode','setFlightHeading','nudgeFlightTurn','resetFlight','brakeFlight','reverseFlight','updateObject','updateTreeObject','addObject','addChildObject','removeObject','removeTreeObject','reparentObject','clearObjects','setObjectWarp','setBridgeTraveler','exploreWarp','setFreeDrive','startTravel','cancelTravel','freeRoamRelative','setQuality','setViewMode','setCameraPreset','setDistanceRg','setDistanceMeters','setOrbitRadiusMeters','focusTarget','focusObject','releaseFocus','resetCamera','resetSceneView','look','rotate','zoom','moveForward','resetAll']);
-const hostFrameKey=renderer=>JSON.stringify([renderer.controlRevision,renderer.geometryRevision,renderer.sceneRevision,renderer.sceneId,renderer.quality,renderer.state,renderer.camera,renderer.target,renderer.focusId,renderer.focusMode,renderer.selectedId,renderer.driveId,renderer.objects.find(o=>o.driveReturn)?.driveReturn.elapsed,renderer.state.viewMode==='free'?renderer.freePosition:null,renderer.freeTarget,renderer.freeBasis,renderer.time,renderer.objects.length]);
+const interactionMethods=new Set(['update','updateStellar','setFlightInput','setFlightPower','setFlightMode','setFlightHeading','nudgeFlightTurn','resetFlight','brakeFlight','reverseFlight','setNavigationMode','setFlightSequence','startFlightSequence','stopFlightSequence','updateObject','updateTreeObject','addObject','addChildObject','removeObject','removeTreeObject','reparentObject','clearObjects','setObjectWarp','setBridgeTraveler','exploreWarp','setFreeDrive','startTravel','setTravelPreview','cancelTravel','freeRoamRelative','setQuality','setViewMode','setCameraPreset','setDistanceRg','setDistanceMeters','setOrbitRadiusMeters','setShuttleOrbitSpeed','focusTarget','focusObject','releaseFocus','resetCamera','resetSceneView','look','rotate','zoom','moveForward','resetAll']);
+const hostFrameKey=renderer=>JSON.stringify([renderer.controlRevision,renderer.geometryRevision,renderer.sceneRevision,renderer.sceneId,renderer.quality,renderer.state,renderer.camera,renderer.target,renderer.focusId,renderer.focusMode,renderer.selectedId,renderer.driveId,renderer.objects.find(o=>o.driveReturn)?.driveReturn.elapsed,renderer.state.viewMode==='free'?renderer.freePosition:null,renderer.freeTarget,renderer.freeBasis,renderer.time,renderer.gapOrbitTime,renderer.routeVisualTime,renderer.warpLocalGridPhase,Object.values(renderer.flightSequences||{}).filter(q=>q.active&&q.orbitWait).map(q=>[q.craftId,q.orbitWait.lastPhase]),renderer.objects.length]);
 const viewport=canvas=>{const r=canvas.getBoundingClientRect();return {width:Math.max(2,r.width),height:Math.max(2,r.height),dpr:Math.min(3,window.devicePixelRatio||1),cssWidth:window.innerWidth||r.width,cssHeight:window.innerHeight||r.height};};
 const workerAvailable=()=>typeof Worker==='function'&&typeof Blob==='function'&&typeof URL?.createObjectURL==='function';
 export function workerRenderingSupported(canvas){return workerAvailable()&&typeof canvas?.transferControlToOffscreen==='function';}
@@ -24,6 +24,7 @@ export class RenderHost extends BlackHoleRenderer {
   this.callbacks=callbacks;this.cpu=!!options.cpu;this.presentationPaused=!!options.presentationPaused;this.cpuMode=this.cpu;this.isCPU=this.cpu;this.workerMode=false;this.worker=null;this.delegate=null;this.pendingRequests=new Map();this.requestId=0;this.workerStats={};this.workerReady=false;this.lastWorkerAt=0;this.lastFrameAt=0;this.frameSeen=false;this.lastUiStats=0;this.hostDisposed=false;this.photoRunning=false;this.gpuUnavailable=false;this.awaitingBackendChoice=false;this.commandPlayer=null;this.commandMode=false;this.cpuProducer=null;this.lastHostFrame=0;this.lastStatsNotice=0;
   if(this.cpu)this.gl=null;
   this.sceneLoad=new SceneLoadLifecycle({cpu:this.cpu,now:()=>this.now()});this.sceneRevision=this.sceneLoad.revision;
+  if(this.canvas?.parentElement?.classList?.contains?.('scene-awaiting-frame'))this.pendingPresentationRevision=this.sceneRevision;
   this.monitorAt=this.now();this.uiLagMs=0;this.loadReason='Starting local renderer';
   this.controlRevision=0;
   this.loadMonitor=setInterval(()=>{const now=this.now();this.uiLagMs=document.hidden?0:Math.max(0,now-this.monitorAt-250);this.monitorAt=now;this.checkSceneLoad();if(!document.hidden)this.emitHostStats();},250);
@@ -45,45 +46,64 @@ export class RenderHost extends BlackHoleRenderer {
  resize(){this.noteInteraction();this.hostViewport=null;this.resizeSnapshotPending=true;if(this.worker)this.queueSnapshot();}
  render(){return false;}
  currentSignature(){return renderSignature(this.delegate||this);}
- requestSceneLoad(){
+ requestSceneLoad({blank=false,notify=true,hold=false}={}){
   this.noteInteraction();
+  // An explicit scene choice must not queue behind a driver call that has
+  // already stalled the old worker. Restart only after the new scene state is
+  // installed; ordinary quick transitions keep their compiled-program cache.
+  // A previously ready scene can also stall when Drive changes its camera or
+  // geometry. Use the active, suspension-aware frame deadline in both states.
+  this.restartForSceneLoad=!!(this.worker&&this.sceneLoad?.elapsed>=10000);
   this.loadReason='Preparing this scene';this.sceneRevision=this.sceneLoad.begin();if(this.delegate)this.delegate.sceneRevision=this.sceneRevision;
-  this.preparedSceneLoad=true;this.cancelCpuWork();this.onError('');this.emitHostStats(true);return this.sceneRevision;
+  // Hide the old presentation without a GL call or an extra scene compilation.
+  // Canvas input stays active; only a completed frame for this revision reveals it.
+  if(blank||this.pendingPresentationRevision!=null){this.pendingPresentationRevision=this.sceneRevision;this.canvas?.parentElement?.classList?.add('scene-awaiting-frame');}
+  this.preparedSceneLoad=true;this.deferSceneStats=!notify;
+  if(hold)this.setPresentationPaused(true);else this.cancelCpuWork();
+  this.onError('');if(notify)this.emitHostStats(true);return this.sceneRevision;
  }
- prepareMutation(reason='Updating scene…'){const revision=this.requestSceneLoad();this.loadReason=String(reason);return revision;}
- finishMutation(){this.preparedSceneLoad=false;this.queueSnapshot();this.emitHostStats(true);}
- didRestoreSnapshot(){if(!this.sceneLoad||this.restoringScene)return;this.sceneRevision=this.sceneLoad.begin();if(this.delegate)this.delegate.sceneRevision=this.sceneRevision;this.preparedSceneLoad=false;}
+ prepareMutation(reason='Updating scene…'){const revision=this.requestSceneLoad();(this.delegate||this).beginSceneRendering();this.loadReason=String(reason);return revision;}
+ finishMutation(){this.preparedSceneLoad=false;const restart=this.restartForSceneLoad;this.restartForSceneLoad=false;if(restart)this.restartRendering();this.queueSnapshot();this.emitHostStats(true);}
+ didRestoreSnapshot(){if(!this.sceneLoad||this.restoringScene)return;this.sceneRevision=this.sceneLoad.begin();if(this.delegate)this.delegate.sceneRevision=this.sceneRevision;if(this.canvas?.parentElement?.classList?.contains?.('scene-awaiting-frame'))this.pendingPresentationRevision=this.sceneRevision;this.preparedSceneLoad=false;}
  // The parsed file is already validated. Its transport revision and backend
  // cannot override this renderer's current lifecycle or explicit CPU choice.
  loadSnapshot(snapshot){
-  if(!this.preparedSceneLoad)this.requestSceneLoad();
+  if(!this.preparedSceneLoad)this.requestSceneLoad({blank:true});
   const revision=this.sceneRevision,source=this.delegate||this;
   const saved={...snapshot,sceneRevision:revision,state:{...snapshot.state,paused:true},quality:snapshot.quality==='cpu'?'adaptive':snapshot.quality};
   this.restoringScene=true;
   try{
    restoreRenderer(source,saved);this.sceneRevision=source.sceneRevision=revision;
    this.preparedSceneLoad=false;this.lastSnapshotKey=null;this.preparedFrameKey=null;this.noteInteraction();
-   if(this.gpuUnavailable||this.cpuProducer&&!this.cpuProducer.ready)this.restartRendering();
+   const restart=this.restartForSceneLoad;this.restartForSceneLoad=false;
+   if(restart||this.gpuUnavailable||this.cpuProducer&&!this.cpuProducer.ready)this.restartRendering();
    this.queueSnapshot();this.emitHostStats(true);return this.getState();
   }catch(error){this.preparedSceneLoad=false;this.workerFailed('This scene could not load: '+(error?.message||error),{allowFallback:false});return this.getState();}
   finally{this.restoringScene=false;}
  }
  loadScene(id='disk'){
-  if(!this.preparedSceneLoad)this.requestSceneLoad();this.preparedSceneLoad=false;
+  if(!this.preparedSceneLoad)this.requestSceneLoad({blank:true});this.preparedSceneLoad=false;
   try{
    const result=this.delegate?this.delegate.loadScene(id):super.loadScene(id);
-   if(this.gpuUnavailable||this.cpuProducer&&!this.cpuProducer.ready)this.restartRendering();
+   const restart=this.restartForSceneLoad;this.restartForSceneLoad=false;
+   if(restart||this.gpuUnavailable||this.cpuProducer&&!this.cpuProducer.ready)this.restartRendering();
    this.queueSnapshot();this.emitHostStats(true);return result;
   }catch(error){this.workerFailed('This scene could not load: '+(error?.message||error));return this.getState();}
  }
  checkSceneLoad(){
-  if(this.hostDisposed||!this.sceneLoad)return;
+  if(this.hostDisposed||!this.sceneLoad||this.preparedSceneLoad&&this.deferSceneStats)return;
   const renderer=this.delegate||this,suspended=!!(this.awaitingBackendChoice||document.hidden||renderer.presentationPaused||this.photoRunning||renderer.photoActive||renderer.xr?.active);
-  if(this.sceneLoad.check(suspended))this.workerFailed(this.sceneLoad.error,{allowFallback:false});
+  const loading=this.sceneLoad.state==='loading',phase=this.getDiagnostics().phase;
+  if(this.sceneLoad.check(suspended)){
+   const stage=phase==='compiling'?'Graphics preparation':phase==='starting'?'The local renderer':phase==='presenting'?'Frame presentation':this.cpu?'The CPU preview':'The first GPU frame';
+   this.workerFailed(loading?`${stage} did not finish within 60 seconds. Retry graphics or choose another scene.`:this.sceneLoad.error,{allowFallback:false});
+  }
  }
  completedFrame(signature,revision=this.sceneRevision){
-  if(this.preparedSceneLoad||signature!==this.currentSignature()||revision!==this.sceneRevision||this.sceneLoad?.state==='failed')return false;
-  this.frameSeen=true;this.lastFrameAt=this.now();this.workerStats.renderedSignature=signature;this.workerStats.frameReady=true;this.sceneLoad?.complete(revision);return true;
+  if(this.hostDisposed||this.preparedSceneLoad||signature!==this.currentSignature()||revision!==this.sceneRevision||this.sceneLoad?.state==='failed')return false;
+  this.restartForSceneLoad=false;this.frameSeen=true;this.lastFrameAt=this.now();this.workerStats.renderedSignature=signature;this.workerStats.frameReady=true;this.sceneLoad?.complete(revision);
+  if(this.pendingPresentationRevision!=null&&revision>=this.pendingPresentationRevision){this.pendingPresentationRevision=null;this.canvas?.parentElement?.classList?.remove('scene-awaiting-frame');}
+  return true;
  }
  presentAnnotations(frame,signature,revision=this.sceneRevision){
   if(!frame||this.hostDisposed||this.preparedSceneLoad||signature!==this.currentSignature()||revision!==this.sceneRevision||this.sceneLoad?.state==='failed')return;
@@ -91,7 +111,7 @@ export class RenderHost extends BlackHoleRenderer {
  }
  frame(now){
   this.raf=0;if(this.hostDisposed||this.delegate||document.hidden||this.presentationPaused||this.photoRunning){this.lastTime=0;return;}
-  this.raf=requestAnimationFrame(this.frame);if(this.cpu&&now-this.lastHostFrame<1000/30-1)return;this.lastHostFrame=now;
+  this.raf=requestAnimationFrame(this.frame);if(this.preparedSceneLoad)return;if(this.cpu&&now-this.lastHostFrame<1000/30-1)return;this.lastHostFrame=now;
   // The initial snapshot already contains the complete paused scene. Do not
   // rebuild its CPU geometry every animation frame while a worker starts.
   if(!this.workerReady&&!this.cpuProducer){this.lastTime=now;return;}
@@ -104,7 +124,9 @@ export class RenderHost extends BlackHoleRenderer {
  }
  getDiagnostics(){
   const now=this.now(),source=this.delegate||this,backend=this.cpu?(this.cpuProducer?'cooperative-main':this.commandMode?'worker-commands':'worker-canvas'):this.delegate?'main-gpu':'worker-gpu',failed=this.sceneLoad?.state==='failed';
-  const phase=failed?'failed':this.awaitingBackendChoice?'waiting-choice':this.preparedSceneLoad?'preparing':!(this.workerReady||this.cpuProducer||this.delegate)?'starting':this.commandPlayer?.busy?'presenting':(source.pendingProgram||this.workerStats.shaderCompiling)?'compiling':this.sceneLoad?.state==='loading'?'drawing':'ready';
+  const signature=this.currentSignature(),matching=this.workerStats.renderedSignature===signature;
+  const workerPhase=this.workerStats.phaseSignature===signature&&this.workerStats.phaseRevision===this.sceneRevision?this.workerStats.renderPhase:null;
+  const phase=failed?'failed':this.awaitingBackendChoice?'waiting-choice':this.preparedSceneLoad?'preparing':!(this.workerReady||this.cpuProducer||this.delegate)?'starting':this.commandPlayer?.busy?'presenting':this.delegate&&source.pendingProgram?'compiling':workerPhase||((this.sceneLoad?.state==='loading'||!this.frameSeen||!matching)?'drawing':'ready');
   const detail=backend==='main-gpu'?'Graphics runs on the page because worker WebGL is unavailable. Driver compilation may pause this browser.':backend==='cooperative-main'?'Workers are unavailable. CPU work yields in short batches; a browser task can still overrun.':backend==='worker-commands'?'Geometry runs in a local worker; complete frames are painted in short batches.':'Rendering runs in a local worker, separate from page controls.';
   return {backend,phase,suspended:!!this.sceneLoad?.suspended,mainThread:backend==='main-gpu'||backend==='cooperative-main',frameAgeMs:this.frameSeen?Math.max(0,now-this.lastFrameAt):null,loadElapsedMs:this.sceneLoad?.elapsed||0,deadlineMs:this.sceneLoad?.timeout||0,workerAgeMs:this.lastWorkerAt?Math.max(0,now-this.lastWorkerAt):null,queuedStates:this.mailbox?.inflight?1:0,presentationBusy:!!this.commandPlayer?.busy,uiLagMs:this.uiLagMs||0,detail:detail+(source.textureError||this.workerStats.surfaceWarning||(!this.cpu&&source.shaderFeatures().planetary&&PLANET_TEXTURE_DATA.error)?' '+(source.textureError||this.workerStats.surfaceWarning||PLANET_TEXTURE_DATA.error):''),error:this.sceneLoad?.error||''};
  }
@@ -118,10 +140,10 @@ export class RenderHost extends BlackHoleRenderer {
   const backend=this.cpu?(this.cpuProducer?'cooperative-main':this.commandMode?'worker-commands':'worker-canvas'):this.delegate?'main-gpu':'worker-gpu';
   return {...base,...(this.delegate?{}:this.workerStats),objects:base.objects,sceneTargets:base.sceneTargets,travelTransfer:base.travelTransfer,cpu:this.cpu?true:base.cpu,quality:source.quality,workerMode:this.workerMode,renderBackend:backend,cpuBackend:this.cpu?backend:undefined,renderReady:matching&&!failed,renderBusy:waiting&&!failed&&!this.awaitingBackendChoice,awaitingBackendChoice:this.awaitingBackendChoice,renderFailed:failed,loadingReason:failed?'Scene failed to load':!(this.workerReady||this.cpuProducer||this.delegate)?'Starting local renderer':waiting?this.loadReason||'Preparing this view':'',diagnostics:this.getDiagnostics(),fps:stale?0:(this.delegate?base.fps:this.workerStats.fps||0),shaderCompiling:waiting&&!failed&&!this.awaitingBackendChoice,surfaceWarning:base.surfaceWarning||this.workerStats.surfaceWarning||(!this.cpu&&source.shaderFeatures().planetary?PLANET_TEXTURE_DATA.error||'':''),photoActive:this.photoRunning||base.photoActive,...this.sceneLoad?.stats};
  }
- emitHostStats(force=false){const now=this.now();if(!force&&now-this.lastStatsNotice<(this.cpu?250:200))return;this.lastStatsNotice=now;this.onStats(this.getState());}
+ emitHostStats(force=false){if(this.preparedSceneLoad&&this.deferSceneStats)return;const now=this.now();if(!force&&now-this.lastStatsNotice<(this.cpu?250:200))return;this.lastStatsNotice=now;this.onStats(this.getState());}
  queueSnapshot(){
-  if(!this.cpu&&!PLANET_TEXTURE_DATA.atlas&&this.shaderFeatures().planetary)globalThis.__EVENT_HORIZON_LOAD_PLANETS?.();
   if(!this.mailbox||this.hostDisposed||this.delegate||!this.workerReady||this.photoRunning||this.preparedSceneLoad)return;
+  if(!this.cpu&&!PLANET_TEXTURE_DATA.atlas&&this.shaderFeatures().planetary)globalThis.__EVENT_HORIZON_LOAD_PLANETS?.();
   // Do not repeatedly clone a scene while its worker is busy. The next ACK
   // takes a fresh snapshot, retaining only the latest user intent.
   if(this.mailbox.inflight){this.snapshotDirty=true;return;}this.snapshotDirty=false;
@@ -130,18 +152,19 @@ export class RenderHost extends BlackHoleRenderer {
   const signature=renderSignature(this);if(this.commandPlayer?.busy&&this.commandSignature!==signature)this.commandPlayer.cancelFrame();
   // Orbital time and camera changes do not mutate the catalog. Transfer its
   // 515+ records only after a model edit; the worker retains the prior copy.
-  const dynamicObjects=!!this.driveId||this.objects.some(o=>o.driveReturn);
-  const includeObjects=this.lastSnapshotObjects!==this.objects||this.lastSnapshotGeometry!==this.geometryRevision||dynamicObjects||this.lastSnapshotDynamic;
-  this.mailbox.push({snapshot:snapshotRenderer(this,{includeObjects}),viewport:this.hostViewport||(this.hostViewport=viewport(this.canvas)),signature,presentationPaused:this.presentationPaused||document.hidden,...(assetsPending?{assets:PLANET_TEXTURE_DATA}:{})});
+  const dynamicIds=this.objects.filter(o=>o.id===this.driveId||o.driveReturn||this.bridgeParking?.[o.id]||this.flightSequences?.[o.id]?.orbitWait).map(o=>o.id);
+  const includeObjects=this.lastSnapshotObjects!==this.objects||this.lastSnapshotGeometry!==this.geometryRevision;
+  const objectIds=[...new Set([...dynamicIds,...(this.lastSnapshotDynamicIds||[])])];
+  this.mailbox.push({snapshot:snapshotRenderer(this,{includeObjects,includeInteraction:true,objectIds}),viewport:this.hostViewport||(this.hostViewport=viewport(this.canvas)),signature,presentationPaused:this.presentationPaused||document.hidden,...(assetsPending?{assets:PLANET_TEXTURE_DATA}:{})});
   if(assetsPending)this.workerAssetsSent=true;
-  this.lastSnapshotObjects=this.objects;this.lastSnapshotGeometry=this.geometryRevision;this.lastSnapshotDynamic=dynamicObjects;
+  this.lastSnapshotObjects=this.objects;this.lastSnapshotGeometry=this.geometryRevision;this.lastSnapshotDynamicIds=dynamicIds;
  }
  async startBackend(){
   if(workerAvailable()&&(this.cpu||workerRenderingSupported(this.canvas))){
    let url;
    try{
     url=URL.createObjectURL(new Blob([RENDER_WORKER_SOURCE],{type:'text/javascript'}));this.workerSourceUrl=url;this.workerAssetsSent=false;
-    const worker=new Worker(url,{name:'event-horizon-renderer'});this.worker=worker;this.workerMode=true;this.lastSnapshotKey=null;this.lastSnapshotObjects=null;this.lastSnapshotGeometry=null;this.lastSnapshotDynamic=false;
+    const worker=new Worker(url,{name:'event-horizon-renderer'});this.worker=worker;this.workerMode=true;this.lastSnapshotKey=null;this.lastSnapshotObjects=null;this.lastSnapshotGeometry=null;this.lastSnapshotDynamicIds=[];
     worker.addEventListener('message',event=>{if(this.worker===worker)this.handleWorker(event.data);});worker.addEventListener('error',event=>{if(this.worker===worker)this.workerFailed(event.message||'The render worker stopped.');});
     this.mailbox=new LatestStateMailbox(message=>worker.postMessage(message));
     this.commandMode=!!(this.cpu&&(this.forceCpuCommands||!workerRenderingSupported(this.canvas)));
@@ -170,14 +193,14 @@ export class RenderHost extends BlackHoleRenderer {
    this.worker?.terminate();this.worker=null;this.mailbox?.close();this.workerMode=false;this.workerReady=false;
    this.unbind();if(this.transferred)this.replaceCanvas();this.bindControls();this.commandPlayer?.dispose();this.commandPlayer=new CpuCommandPlayer(this.canvas);this.commandMode=true;
    const surface=new CpuCommandCanvas();surface.getBoundingClientRect=()=>this.hostViewport||(this.hostViewport=viewport(this.canvas));
-   this.cpuTasks?.dispose();this.cpuTasks=createCpuTaskScheduler();this.cpuProducer=new CpuRenderer(surface,{bindControls:false,autoStart:false,onError:message=>{if(message)this.workerFailed(message,{allowFallback:false});}});this.cpuSnapshotObjects=null;this.cpuSnapshotGeometry=null;this.cpuSnapshotDynamic=false;this.ready=!!this.cpuProducer.ready;this.gpuUnavailable=!this.ready;this.cpuProductionAfter=0;
+   this.cpuTasks?.dispose();this.cpuTasks=createCpuTaskScheduler();this.cpuProducer=new CpuRenderer(surface,{bindControls:false,autoStart:false,onError:message=>{if(message)this.workerFailed(message,{allowFallback:false});}});this.cpuSnapshotObjects=null;this.cpuSnapshotGeometry=null;this.cpuSnapshotDynamicIds=[];this.ready=!!this.cpuProducer.ready;this.gpuUnavailable=!this.ready;this.cpuProductionAfter=0;
    this.resolveStartup?.({available:this.ready,worker:false,cpu:true,reason:reason||'This browser uses short, cooperative CPU tasks.'});this.resolveStartup=null;this.emitHostStats(true);
   }catch(error){this.workerFailed(error.message,{allowFallback:false});}
  }
  produceCpuFrame(now){
   if(this.preparedSceneLoad||this.cpuProducing||this.commandPlayer?.busy||now<(this.cpuProductionAfter||0)||!this.cpuProducer?.ready)return;
   const producer=this.cpuProducer,surface=producer.canvas,signature=renderSignature(this),revision=this.sceneRevision,frameStarted=now;this.cpuProducing=true;
-  let stages;try{const dynamicObjects=!!this.driveId||this.objects.some(o=>o.driveReturn),includeObjects=this.cpuSnapshotObjects!==this.objects||this.cpuSnapshotGeometry!==this.geometryRevision||dynamicObjects||this.cpuSnapshotDynamic;restoreRenderer(producer,snapshotRenderer(this,{includeObjects}));this.cpuSnapshotObjects=this.objects;this.cpuSnapshotGeometry=this.geometryRevision;this.cpuSnapshotDynamic=dynamicObjects;producer.resize();surface.beginFrame();stages=producer.renderStages(now,false,true);}catch(error){this.cpuProducing=false;this.workerFailed('CPU scene preparation failed: '+error.message,{allowFallback:false});return;}
+  let stages;try{const dynamicIds=this.objects.filter(o=>o.id===this.driveId||o.driveReturn||this.bridgeParking?.[o.id]||this.flightSequences?.[o.id]?.orbitWait).map(o=>o.id),includeObjects=this.cpuSnapshotObjects!==this.objects||this.cpuSnapshotGeometry!==this.geometryRevision,objectIds=[...new Set([...dynamicIds,...(this.cpuSnapshotDynamicIds||[])])];restoreRenderer(producer,snapshotRenderer(this,{includeObjects,includeInteraction:true,objectIds}));this.cpuSnapshotObjects=this.objects;this.cpuSnapshotGeometry=this.geometryRevision;this.cpuSnapshotDynamicIds=dynamicIds;producer.resize();surface.beginFrame();stages=producer.renderStages(now,false,true);}catch(error){this.cpuProducing=false;this.workerFailed('CPU scene preparation failed: '+error.message,{allowFallback:false});return;}
   const pump=()=>{
    this.cpuTask=null;if(this.hostDisposed||producer!==this.cpuProducer){this.cpuProducing=false;return;}
    if(this.presentationPaused||document.hidden||signature!==renderSignature(this)){this.cpuProducing=false;return;}
@@ -196,6 +219,11 @@ export class RenderHost extends BlackHoleRenderer {
  }
  handleWorker(message){
   if(this.hostDisposed)return;this.lastWorkerAt=this.now();
+  if(message.type==='render-phase'){
+   if(message.signature!==this.currentSignature()||message.sceneRevision!==this.sceneRevision||this.preparedSceneLoad||this.sceneLoad?.state==='failed')return;
+   if(!['compiling','drawing','presenting','ready'].includes(message.phase))return;
+   this.workerStats.renderPhase=message.phase;this.workerStats.phaseSignature=message.signature;this.workerStats.phaseRevision=message.sceneRevision;this.emitHostStats(true);return;
+  }
   if(message.type==='ready'){
    this.releaseWorkerSource();clearTimeout(this.startupTimer);this.workerReady=!!message.available;this.gpuUnavailable=!message.available;
    if(!message.available){
@@ -287,7 +315,7 @@ export class RenderHost extends BlackHoleRenderer {
   const cancelled=()=>Object.assign(Error('Picture cancelled.'),{name:'AbortError'});
   if(options.signal?.aborted)throw cancelled();
   if(this.photoRunning)throw new Error('A picture is already rendering.');
-  const requested=({standard:'high',fine:'maximum'})[options.presetId]||options.presetId||'quick';
+  const requested=({standard:'high',fine:'maximum'})[options.presetId]||options.presetId||(this.cpu?'quick':'high');
   const preset=PHOTO_PRESETS.find(p=>p.id===requested);if(!preset)throw new Error('Choose a picture quality.');
   if(preset.id!=='quick'&&this.cpu)throw new Error('Choose Quick to save the CPU preview.');
   this.noteInteraction();this.sceneLoad?.check(true);this.photoRunning=true;cancelAnimationFrame(this.raf);this.raf=0;
@@ -324,7 +352,10 @@ export class RenderHost extends BlackHoleRenderer {
   this.noteInteraction();
   this.sceneLoad?.check(true);
   if(this.delegate){this.delegate.setPresentationPaused(paused);return;}
-  const next=!!paused;if(this.presentationPaused===next)return;this.presentationPaused=next;this.lastTime=0;
+  const next=!!paused;
+  // Stop old worker work without cloning a catalog or waiting for its state ACK.
+  if(next)this.worker?.postMessage({type:'visibility',hidden:!!globalThis.document?.hidden,presentationPaused:true});
+  if(this.presentationPaused===next)return;this.presentationPaused=next;this.lastTime=0;
   if(next){this.cancelCpuWork();cancelAnimationFrame(this.raf);this.raf=0;}else if(!this.hostDisposed&&!document.hidden&&!this.photoRunning&&!this.raf)this.raf=requestAnimationFrame(this.frame);
   this.queueSnapshot();
  }

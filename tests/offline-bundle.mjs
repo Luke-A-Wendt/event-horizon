@@ -81,7 +81,7 @@ for (const scene of SCENE_PRESETS) {
   assert(bytes.equals(await readFile(path.join(root, 'dist', 'assets', `atlas-${scene.id}.webp`))), `Thumbnail differs from source for ${scene.id}`);
   imageBytes += bytes.length;
 }
-assert(javascript.includes('src="${__atlasImages[p.id]}"'), 'Atlas rendering must use the embedded map');
+assert(javascript.includes('data-thumbnail="${__atlasImages[p.id]}"'), 'Atlas rendering must use the embedded map');
 assert(!javascript.includes('src="assets/atlas-'), 'Atlas must not request a relative file');
 
 const favicon = html.match(/<link\b[^>]*\brel="icon"[^>]*\bhref="(data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+)"[^>]*>/);
@@ -153,7 +153,10 @@ const creditOffsets = creditHrefOffsets(html);
 const remoteLiterals = [...html.matchAll(/https?:\/\/[^\s"'`<>)]*/g)];
 for (const match of remoteLiterals) {
   const before = html.slice(Math.max(0, match.index - 30), match.index);
-  assert(/(?:\bxmlns\s*=\s*["']|\blink\(\s*["'])$/.test(before) || (match[0]==='http://www.w3.org/2000/svg'&&/createElementNS\(\s*['"]$/.test(before)) || creditOffsets.has(match.index), 'Remote URL appears outside a reference link, approved author anchor, or XML namespace');
+  // Catalog attribution is inert text carried by the body properties. It is
+  // never fetched; the runtime-network checks above remain unchanged.
+  const catalogReference=match[0]==='https://exoplanetarchive.ipac.caltech.edu/overview/proxima%20centauri'&&/const CENTAURI_REFERENCE=['"]$/.test(before);
+  assert(/(?:\bxmlns\s*=\s*["']|\blink\(\s*["'])$/.test(before) || (match[0]==='http://www.w3.org/2000/svg'&&/createElementNS\(\s*['"]$/.test(before)) || creditOffsets.has(match.index)||catalogReference, 'Remote URL appears outside a reference link, approved catalog attribution/author anchor, or XML namespace');
 }
 
 const credentialPatterns = [
@@ -186,6 +189,7 @@ for(const entry of ['index.html','dist/index.html']){
  const app=await readFile(path.resolve(root,path.dirname(entry),appRef),'utf8');
  new vm.Script(app);assert(app.includes(JSON.stringify(RENDER_WORKER_SOURCE)),'App and worker are from one release');
  assert(!/\bimport\s*(?:\(|\{|\*|['"])/.test(app));
+ const hostedAtlas=JSON.parse(app.match(/const __atlasImages=(\{[^\n]+\});/)[1]);assert.deepEqual(hostedAtlas,atlas,'Hosted cards contain every exact screenshot, without late asset requests');
  if(entry==='index.html')assert(page.includes('__EVENT_HORIZON_ASSET_BASE="dist/"'));
  const data=await readFile(path.resolve(root,path.dirname(entry),dataRef),'utf8'),holder={atlas:'',maps:{},meta:{}},context={__EVENT_HORIZON_PLANET_DATA:holder};
  vm.runInNewContext(data,context);assert.equal(context.__EVENT_HORIZON_PLANET_DATA,holder);assert.equal(holder.atlas,PLANET_TEXTURE_DATA.atlas);

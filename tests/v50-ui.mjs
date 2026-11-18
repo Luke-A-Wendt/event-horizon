@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {uiDomFixture} from './ui-dom-fixture.mjs';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {installPilotControls} from '../dist/pilot-ui.js';
+import {installViewportUI} from '../dist/viewport-ui.js';
+const html=readFileSync(new URL('../dist/index.html',import.meta.url),'utf8');
+for(const width of [390,1280]){
+ const f=fixture({width,height:720}),document=uiDomFixture(html);globalThis.document=document;globalThis.window=document.createElement('window');window.devicePixelRatio=1;window.matchMedia=()=>({matches:false});
+ const $=id=>document.getElementById(id),r=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false});r.loadScene('solar-system');
+ const shuttle=r.objects.find(o=>o.type==='shuttle'),sun=r.objects.find(o=>o.name==='Sun'),earth=r.objects.find(o=>o.name==='Earth'),moon=r.objects.find(o=>o.name==='Moon');assert(shuttle&&sun&&moon);
+ const optics=document.createElement('details');optics.className='geometry-panel';document.querySelector('.view-toolbar').append(optics);
+ let ui,pilot,allowed=false,startCalls=0,trip={active:false},flight=null;
+ r.getManualDriveEligibility=()=>({allowed,reason:'Complete a transfer first.'});r.getTravelState=()=>trip;r.getFlightState=()=>flight;
+ r.setFreeDrive=()=>{startCalls++;return true;};
+ const refresh=()=>{pilot?.update();ui?.refresh(r.getState());};
+ const api={renderer:()=>r,objects:()=>r.getObjects(),state:()=>r.state,activePreset:()=>r.sceneId,refresh,updateParameter:(k,v)=>r.update({[k]:v}),setFeature(){},selectObject:id=>{r.selectedId=id;},selectComponent(){},syncRendererState(){},markCustom(){},setPaused:v=>{r.state.paused=v;},syncViewMode(){},toast(){},openScenes(){},openHelp(){},openDialog:id=>$(id).showModal(),onDialogClose(){},startDrive:id=>pilot.start(id)};
+ ui=installViewportUI(api);pilot=installPilotControls({...api,mount:$('pilotControls')});await Promise.resolve();refresh();
+ ui.openMap(sun.id);const options=()=>$('mapBodyPicker').querySelectorAll('option').map(o=>o.textContent);
+ assert(options().includes('Earth'));assert(!options().some(s=>s.includes('Pluto')));
+ const planetoids=document.querySelector('[data-map-filter="planetoids"]');planetoids.click();assert.equal(planetoids.getAttribute('aria-pressed'),'true');assert(options().some(s=>s.includes('Pluto')));
+ $('orbitMapCenter').value=earth.id;$('orbitMapCenter').dispatch('change');assert(!$('mapBodyPicker').querySelectorAll('option').some(o=>o.value===moon.id));document.querySelector('[data-map-filter="moons"]').click();assert($('mapBodyPicker').querySelectorAll('option').some(o=>o.value===moon.id));$('closeOrbitMap').click();
+ r.selectedId=shuttle.id;r.focusId=shuttle.id;refresh();assert($('quickDrive').disabled);assert.equal(pilot.start(shuttle.id),false);assert.equal(startCalls,0,'Disabled guidance gate cannot call the engine');
+ trip={active:true,autopilot:true,craftId:shuttle.id,craftType:'shuttle',targetName:'Moon',phase:'Turning for braking',phaseIndex:2,commandedThrustG:0,headingDegrees:85,turningSign:1,properSeconds:200,properElapsedSeconds:100,remainingProperSeconds:100,progress:.5};
+ flight={id:shuttle.id,type:'shuttle',speedMetersPerSecond:1000,thrustSetting:1,turnRateRadiansPerSecond:.2};r.state.paused=false;refresh();
+ assert($('pilotControls').hidden,'Guided flight hides manual controls');assert(!$('pilotFlightReadout').hidden);assert($('pilotPower').disabled);assert($('pilotLeft').disabled);assert($('pilotRight').disabled);assert(!$('pilotStop').disabled);assert.match($('pilotStop').title,/Cancel transfer/);assert.equal(Number($('pilotPower').value),0);assert.equal($('pilotHeadingValue').textContent,'85°');assert($('pilotRight').classList.contains('guidance-firing'));assert.match($('pilotStatus').textContent,/Autopilot engaged/);assert($('pilotOnboardRow').hidden);assert.equal($('pilotFlightStage').textContent,'Flip and burn');assert.equal($('pilotFlightAcceleration').textContent,'0.0 g');assert.equal($('pilotFlightPercent').textContent,'50%');assert($('pilotTravel').hidden,'Guidance uses compact telemetry, not a floating progress card');assert(!$('cameraToggle').disabled);
+ trip.commandedThrustG=1;trip.turningSign=0;trip.phaseIndex=3;trip.phase='Decelerating';refresh();assert.equal(Number($('pilotPower').value),1);assert.equal($('pilotFlightAcceleration').textContent,'1.0 g');assert.equal($('pilotFlightStage').textContent,'Decelerating');assert(!$('pilotRight').classList.contains('guidance-firing'));
+ trip={active:false};flight=null;r.driveId=null;allowed=true;refresh();assert(!$('quickDrive').disabled);assert($('pilotControls').hidden);
+ r.autopilot={enabled:true,craftId:shuttle.id,phase:'Parking orbit',destinations:[],next:0};refresh();assert($('pilotControls').hidden);assert(!$('pilotFlightReadout').hidden);assert.equal($('pilotFlightStage').textContent,'Parking orbit');assert($('pilotPower').disabled);assert.equal(Number($('pilotPower').value),0);assert.match($('pilotStatus').textContent,/Parking orbit/);let cancelled=0;r.cancelTravel=()=>{cancelled++;};$('pilotFlightCancel').click();assert.equal(cancelled,1);assert.equal(r.autopilot.enabled,false);assert($('pilotControls').hidden);r.autopilot=null;
+ pilot.dispose();ui.dispose();r.dispose();
+}
+const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');assert(app.includes("travelIntroPending=p.id==='solar-system'?token:null"));assert(app.includes("openDialog('travelIntroDialog'"));const presetLoader=app.slice(app.indexOf('async function applyPreset('),app.indexOf('async function loadSceneSnapshot('));assert(presetLoader.includes('requestSceneLoad?.({blank:true,notify:false,hold:true})'),'Preset changes hold a blank frame without triggering scene preparation');const paint=presetLoader.indexOf('await sceneChoicePaint();');assert(paint>presetLoader.indexOf('requestSceneLoad?.')&&paint<presetLoader.indexOf('state=makePreset('),'Scene preparation waits for the empty-space paint');
+assert(html.includes('Choose your next orbit.'));assert(html.includes('id="travelIntroMap"'));assert(!/<div class="scene-top">[^\n]*id="loading"/.test(html),'Delayed loader is anchored to viewport, not inside FPS pill');
+console.log('PASS: map filters, initial transfer guide, gated Drive, compact guided flight readout, and accessible camera at mobile/desktop fixture sizes.');

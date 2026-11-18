@@ -1,0 +1,16 @@
+{
+  "scene": "sagittarius-a",
+  "sourceHash": "bbdcdb93dd9bd47c1953edfea7c36126dd00eb706165f89410c9f1f9ca4fbab7",
+  "renderHash": "d9d75fc1e7ade9c2f9b21cc545264d40fcf8a0cbcccaf8ac6775f88304974f7a",
+  "imageHash": "863613ef878421bae9e7ca64156acb06bf6cf5af420e615fb2c4ea95e30b83da",
+  "width": 640,
+  "height": 422,
+  "preset": "quick",
+  "renderSeconds": 0.291,
+  "compileSeconds": 0.057,
+  "completePasses": 1,
+  "minimumPixelSamples": 1,
+  "baseSteps": 192,
+  "detail": 2,
+  "backend": "native EGL / actual live High GLSL"
+}

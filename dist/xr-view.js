@@ -21,6 +21,7 @@ export function composeEyeFrame(base,relative,metersToWorld,focused=null){
  const translation=worldVector(base,[relative[12],relative[13],relative[14]]).map(x=>x*metersToWorld);
  const right=unit(worldVector(base,[relative[0],relative[1],relative[2]])),up=unit(worldVector(base,[relative[4],relative[5],relative[6]])),forward=unit(worldVector(base,[-relative[8],-relative[9],-relative[10]]));
  const frame={...base,observer:base.observer.map((x,i)=>x+translation[i]),forward,right,up};
+ if(base.eyeOffset)frame.eyeOffset=base.eyeOffset.map((v,i)=>v+translation[i]);
  if(focused){
   // Never subtract two huge world positions to recover centimeter eye offsets.
   // Transform the small displacement before adding it in the craft-local chart.

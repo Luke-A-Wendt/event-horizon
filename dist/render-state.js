@@ -1,24 +1,51 @@
 // Plain-data snapshots keep the UI controller independent of render-thread work.
-const FIELDS=['transfer','lastTransfer','sceneRevision','driveId','freeReferenceId','freeReferencePosition','state','camera','target','cameraGuide','focusReferenceFrame','objects','time','orbitOverrides','sceneId','sceneFocusId','bridgeObjectId','bridgeTime','bridgeTravelTime','freePosition','freeTarget','freeBasis','nextObjectId','selectedId','focusId','focusMode','warpObjectId','savedOverview','warpTravelWorld','warpTravelPosition','warpTravelTime','travel'];
+const FIELDS=['gapOrbitTime','routeChartY','routeVisualTime','navigationModes','flightSequences','bridgeParking','parkedCamera','autopilot','transfer','travelPreview','lastTransfer','sceneRevision','driveId','freeReferenceId','freeReferencePosition','state','camera','target','cameraGuide','focusReferenceFrame','objects','time','orbitOverrides','sceneId','sceneFocusId','bridgeObjectId','bridgeTime','bridgeTravelTime','freePosition','freeTarget','freeBasis','nextObjectId','selectedId','focusId','focusMode','warpObjectId','savedOverview','warpLocalGridPhase','warpTravelWorld','warpTravelPosition','warpTravelTime','travel'];
 const copy=value=>typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value));
-export function snapshotRenderer(renderer,{includeObjects=true}={}){
+export function snapshotRenderer(renderer,{includeObjects=true,includeInteraction=false,objectIds=[]}={}){
  const value={};for(const field of FIELDS)if(renderer[field]!==undefined&&(field!=='objects'||includeObjects))value[field]=renderer[field];
- value.quality=renderer.quality;return copy(value);
+ // These small control records travel with pose-only packets too. They never
+ // require resending the hundreds of immutable natural-body catalog entries.
+ for(const field of ['navigationModes','flightSequences','bridgeParking'])value[field]=renderer[field]||{};
+ value.parkedCamera=renderer.parkedCamera||null;
+ // Dynamic pose packets retain the worker's immutable catalog and orbital
+ // metadata. At most the controlled craft / returning craft need replacement.
+ if(!includeObjects&&objectIds.length){const ids=new Set(objectIds);value.objectUpdates=renderer.objects.filter(o=>ids.has(o.id));}
+ value.quality=renderer.quality;if(includeInteraction)value.cameraInteracting=renderer.now()<(renderer.cameraInteractionUntil||0);return copy(value);
 }
 export function restoreRenderer(renderer,snapshot){
  const equalScalars=(a,b)=>a===b||!!a&&!!b&&Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(key=>a[key]===b[key]);
+ const newScene=Object.hasOwn(snapshot,'sceneRevision')&&snapshot.sceneRevision!==renderer.sceneRevision||Object.hasOwn(snapshot,'sceneId')&&snapshot.sceneId!==renderer.sceneId;
+ const newTarget=Object.hasOwn(snapshot,'focusId')&&snapshot.focusId!==renderer.focusId;
+ const newDrive=Object.hasOwn(snapshot,'driveId')&&snapshot.driveId!==renderer.driveId;
  // Camera-only transport retains the logical object array and its geometry
  // cache. Full files/retries still rebuild and validate configuration as usual.
  const geometryChanged=Object.hasOwn(snapshot,'objects')||snapshot.state&&!equalScalars(renderer.state,snapshot.state)||snapshot.orbitOverrides&&!equalScalars(renderer.orbitOverrides?.planet,snapshot.orbitOverrides.planet)||snapshot.orbitOverrides&&!equalScalars(renderer.orbitOverrides?.secondary,snapshot.orbitOverrides.secondary);
- const saved=copy(snapshot);for(const field of FIELDS)if(Object.hasOwn(saved,field))renderer[field]=saved[field];
+ if(Object.hasOwn(snapshot,'routeChartY')&&snapshot.routeChartY!==renderer.routeChartY)renderer.lastGeometryTime=null;
+ const saved=copy(snapshot);
+ if(newScene)for(const field of ['navigationModes','flightSequences','bridgeParking'])if(!Object.hasOwn(saved,field))renderer[field]={};
+ if(newScene&&!Object.hasOwn(saved,'warpLocalGridPhase'))renderer.warpLocalGridPhase=0;
+ if(!Object.hasOwn(saved,'gapOrbitTime')&&(newScene||Object.hasOwn(saved,'objects')))renderer.gapOrbitTime=0;
+ if(newScene&&!Object.hasOwn(saved,'parkedCamera'))renderer.parkedCamera=null;
+ if(!Object.hasOwn(saved,'objects')&&Array.isArray(saved.objectUpdates)){
+  const byId=renderer.objectById||new Map(renderer.objects.map(o=>[o.id,o]));
+  for(const update of saved.objectUpdates){const object=byId.get(update.id);if(!object)continue;if(object.phase!==update.phase||object.epoch!==update.epoch)renderer.lastGeometryTime=NaN;for(const key of Object.keys(object))if(!Object.hasOwn(update,key))delete object[key];Object.assign(object,update);}
+ }
+ for(const field of FIELDS)if(Object.hasOwn(saved,field))renderer[field]=saved[field];
  if(geometryChanged)renderer.refreshConfiguration();renderer.fillHoles();renderer.fillObjects();renderer.updateCameraFrame();
  if(snapshot.quality&&renderer.quality!==snapshot.quality)renderer.setQuality(snapshot.quality);
+ // The worker receives snapshots rather than loadScene calls. Retain its
+ // measured fidelity while resetting timing for a new scene/view; camera/time
+ // messages must not reset the ongoing adaptation.
+ // Taking the controls can move the camera much closer without changing its
+ // target. Treat entry/exit as a fresh view, not every in-flight state update.
+ if(newScene||newTarget||newDrive)renderer.beginSceneRendering?.();
+ if(snapshot.cameraInteracting)renderer.noteCameraInteraction?.();
  renderer.didRestoreSnapshot?.();
 }
 export function renderSignature(renderer){
  // Slot capacity is backend-local (the UI host has no real GL limits).
  // Readiness tracks requested scene features, not hardware-specific packing.
- const {objectSlots,derivatives,derivativeExtension,...features}=renderer.shaderFeatures();return JSON.stringify([renderer.sceneRevision||0,renderer.sceneId,renderer.quality,features,renderer.state.spectrum,renderer.state.whiteHole]);
+ const {objectSlots,derivatives,derivativeExtension,ultra,...features}=renderer.shaderFeatures();return JSON.stringify([renderer.sceneRevision||0,renderer.sceneId,renderer.focusId||null,renderer.driveId||null,renderer.quality,features,renderer.state.spectrum,renderer.state.whiteHole]);
 }
 // Only one state message is in flight; fast gestures replace the pending state.
 export class LatestStateMailbox {

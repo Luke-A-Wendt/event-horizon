@@ -9,10 +9,13 @@ import ctypes.util
 import json
 import os
 import sys
+import time
 
 os.environ.setdefault('EGL_PLATFORM', 'surfaceless')
 P, I, U = C.c_void_p, C.c_int, C.c_uint
 cases = json.load(sys.stdin)
+snapshot_width = max([8] + [int(c.get('snapshot', {}).get('width', 8)) for c in cases])
+snapshot_height = max([8] + [int(c.get('snapshot', {}).get('height', 8)) for c in cases])
 
 
 def api(lib, name, result, args):
@@ -33,7 +36,7 @@ try:
     config, count = P(), I()
     attrs = (I * 9)(0x3033, 1, 0x3040, 0x40, 0x3024, 8, 0x3022, 8, 0x3038)
     assert api(egl, 'eglChooseConfig', U, [P, C.POINTER(I), C.POINTER(P), I, C.POINTER(I)])(display, attrs, C.byref(config), 1, C.byref(count)) and count.value
-    surface = api(egl, 'eglCreatePbufferSurface', P, [P, P, C.POINTER(I)])(display, config, (I * 5)(0x3057, 1, 0x3056, 1, 0x3038))
+    surface = api(egl, 'eglCreatePbufferSurface', P, [P, P, C.POINTER(I)])(display, config, (I * 5)(0x3057, snapshot_width, 0x3056, snapshot_height, 0x3038))
     context = api(egl, 'eglCreateContext', P, [P, P, P, C.POINTER(I)])(display, config, None, (I * 3)(0x3098, 3, 0x3038))
     assert surface and context
     assert api(egl, 'eglMakeCurrent', U, [P, P, P, P])(display, surface, surface, context)
@@ -72,9 +75,68 @@ def shader(kind, source):
 
 version = api(gl, 'glGetString', C.c_char_p, [U])(0x1F02).decode()
 print('Native compiler:', version, flush=True)
+
+
+def first_frame(program, values, snapshot=None):
+    """Optional real 8x8 draw: linking alone misses deferred driver compilation.
+
+    Only this offline diagnostic uses a synchronous readback; app rendering
+    continues to use nonblocking completion fences. No extra packages needed.
+    """
+    F = C.c_float
+    location = api(gl, 'glGetUniformLocation', I, [U, C.c_char_p])
+    api(gl, 'glUseProgram', None, [U])(program)
+    for item in values:
+        at = location(program, item['name'].encode())
+        if at < 0:
+            continue
+        method, args = item['method'], item['args']
+        function = 'gl' + method[0].upper() + method[1:]
+        if 'Matrix' in method:
+            n, data = int(method[13]), args[-1]
+            api(gl, function, None, [I, I, U, C.POINTER(F)])(at, len(data)//(n*n), False, (F * len(data))(*data))
+        elif method.endswith('fv'):
+            n, data = int(method[7]), args[0]
+            api(gl, function, None, [I, I, C.POINTER(F)])(at, len(data)//n, (F * len(data))(*data))
+        else:
+            kind = I if method.endswith('i') else F
+            api(gl, function, None, [I] + [kind] * len(args))(at, *args)
+    width, height = (int(snapshot['width']), int(snapshot['height'])) if snapshot else (8, 8)
+    api(gl, 'glUniform2f', None, [I, F, F])(location(program, b'uResolution'), width, height)
+    buffer = U()
+    api(gl, 'glGenBuffers', None, [I, C.POINTER(U)])(1, C.byref(buffer))
+    try:
+        api(gl, 'glBindBuffer', None, [U, U])(0x8892, buffer)
+        vertices = (F * 6)(-1, -1, 3, -1, -1, 3)
+        api(gl, 'glBufferData', None, [U, C.c_ssize_t, P, U])(0x8892, C.sizeof(vertices), vertices, 0x88E4)
+        attribute = api(gl, 'glGetAttribLocation', I, [U, C.c_char_p])(program, b'aPosition')
+        api(gl, 'glEnableVertexAttribArray', None, [U])(attribute)
+        api(gl, 'glVertexAttribPointer', None, [U, I, U, U, I, P])(attribute, 2, 0x1406, False, 0, None)
+        api(gl, 'glViewport', None, [I, I, I, I])(0, 0, width, height)
+        api(gl, 'glDrawArrays', None, [U, I, I])(4, 0, 3)
+        pixels = (C.c_ubyte * (width * height * 4))()
+        api(gl, 'glReadPixels', None, [I, I, I, I, U, U, P])(0, 0, width, height, 0x1908, 0x1401, pixels)
+        error = api(gl, 'glGetError', U, [])()
+        if error:
+            raise RuntimeError('First draw returned GL error ' + hex(error))
+        if snapshot:
+            # Standard-library PNG diagnostic, not a browser screenshot.
+            import struct
+            import zlib
+            def chunk(kind, data):
+                return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data) & 0xffffffff)
+            rows = b''.join(b'\x00' + bytes(pixels[y*width*4:(y+1)*width*4]) for y in range(height-1, -1, -1))
+            with open(snapshot['path'], 'wb') as image:
+                image.write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('!2I5B', width, height, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+            print('SNAPSHOT:', snapshot['path'], flush=True)
+    finally:
+        api(gl, 'glDeleteBuffers', None, [I, C.POINTER(U)])(1, C.byref(buffer))
+
+
 try:
     for case in cases:
         handles, program = [], 0
+        started = time.perf_counter()
         try:
             handles.append(shader(0x8B31, case['vertex']))
             handles.append(shader(0x8B30, case['fragment']))
@@ -88,6 +150,10 @@ try:
                 log = C.create_string_buffer(65536)
                 program_log(program, len(log), None, log)
                 raise RuntimeError(log.value.decode())
+            if 'firstFrameUniforms' in case:
+                linked = time.perf_counter()
+                first_frame(program, case['firstFrameUniforms'], case.get('snapshot'))
+                print('FIRST FRAME:', case['name'], 'link %.3fs, complete %.3fs' % (linked-started, time.perf_counter()-started), flush=True)
         except RuntimeError as error:
             print('FAIL:', case['name'], '\n' + str(error), file=sys.stderr)
             sys.exit(1)

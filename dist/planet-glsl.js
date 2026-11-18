@@ -1,5 +1,87 @@
 // Geographic source maps are included locally; unmapped geology is explicitly
 // illustrative. Fine procedural material detail never invents map landmarks.
+import {PLANET_ATMOSPHERES} from './planet-profiles.js';
+
+// A finite column through a thin exponential atmosphere. This is evaluated
+// on the existing bent ray segments, already clipped by solid intersections;
+// the halo therefore shares the surface's lensing and foreground occlusion.
+// No separate volume march, texture fetch, or quality-dependent loop is used.
+export function planetAtmosphereGLSL({photo=false}={}){return `
+vec4 atmosphereProfile(float materialCode){
+ float id=floor(materialCode/4.0),style=mod(materialCode,4.0);
+ ${Object.entries(PLANET_ATMOSPHERES).map(([id,p])=>`if(abs(id-${Number(id).toFixed(1)})<.1)return vec4(${p.color.map(v=>(v*p.strength).toFixed(5)).join(',')},${p.height.toFixed(5)});`).join('\n ')}
+ if(id>.5)return vec4(0);
+ if(style>.5&&style<1.5)return vec4(.198,.288,.405,.006);
+ if(style>2.5)return vec4(.12,.344,.8,.0068);
+ return vec4(0);
+}
+float atmosphereErf(float x){
+ x=clamp(x,-6.0,6.0);return sign(x)*sqrt(max(0.0,1.0-exp(-1.27323954*x*x)));
+}
+vec3 planetAtmosphereSegment(vec3 first,vec3 last){
+ if(uSpectrum>1)return vec3(0);
+ vec3 delta=last-first;float distance=length(delta);if(distance<1e-20)return vec3(0);
+ vec3 direction=delta/distance,sum=vec3(0);
+ for(int j=0;j<12;j++){
+  if(j>=uObjectCount)break;if(uColors[j].a>.5||j==uHideObjectIndex)continue;
+  vec4 profile=atmosphereProfile(uBodyParams[j].x);if(profile.w<=0.0)continue;
+  float radius=max(uObjects[j].w,1e-20),span=distance/radius;
+  vec3 start=(first-uObjects[j].xyz)/radius;
+  float along=-dot(start,direction),impact=length(cross(start,direction)),height=profile.w;
+  if(impact>1.0+height*6.0||along<-.5||along>span+.5)continue;
+  float rho=max(1.0,impact),width=sqrt(2.0*rho*height);
+  float column=exp(-max(0.0,impact-1.0)/height)*sqrt(PI*rho*height*.5)*
+    (atmosphereErf((span-along)/width)-atmosphereErf(-along/width));
+  if(column<=0.0)continue;
+  vec3 normal=unit(start+direction*clamp(along,0.0,span));
+  float sunlight=smoothstep(-.12,.35,dot(normal,bodyLight(uObjects[j].xyz)));
+  vec3 hue=profile.rgb;if(uSpectrum==1)hue=vec3(.65,.20,.06)*max(hue.r,max(hue.g,hue.b))*.14;
+  sum+=hue*(1.0-exp(-column/max(.01,width)*1.25))*(.025+.975*sunlight)*bodyOpacity(j);
+ }
+ return sum;
+}
+${photo?`
+// Capture-only, dimensionless single-scattering transfer. Clip the ray to
+// the shell before sampling: even an interplanetary step sees the thin limb.
+// Profiles are illustrative, rather than measured weather or gas mixtures.
+void photoAtmosphere(vec3 first,vec3 last,inout vec3 color,inout float trans,inout vec3 bend){
+ if(uSpectrum>1)return;
+ vec3 delta=last-first;float distance=length(delta);if(distance<=1e-20)return;
+ vec3 dir=delta/distance;
+ for(int j=0;j<12;j++){
+  if(j>=uObjectCount)break;if(uColors[j].a>.5||j==uHideObjectIndex)continue;
+  vec4 air=atmosphereProfile(uBodyParams[j].x);if(air.w<=0.0)continue;
+  float radius=max(uObjects[j].w,1e-20),H=air.w;
+  vec3 start=(first-uObjects[j].xyz)/radius,impact=cross(dir,cross(start,dir));
+  float outer=1.0+6.0*H,b2=dot(impact,impact);if(b2>=outer*outer)continue;
+  float halfChord=sqrt(outer*outer-b2),z0=dot(start,dir);
+  float lo=max(-halfChord,z0),hi=min(halfChord,z0+distance/radius);if(hi<=lo)continue;
+  vec3 sun=bodyLight(uObjects[j].xyz);float mu=clamp(dot(dir,sun),-1.0,1.0);
+  float rayleigh=.75*(1.0+mu*mu),g=.70,aerosol=(1.0-g*g)/pow(1.0+g*g-2.0*g*mu,1.5);
+  float densityScale=max(air.r,max(air.g,air.b))*bodyOpacity(j);
+  vec3 tint=air.rgb/max(1e-6,max(air.r,max(air.g,air.b)));
+  float ds=(hi-lo)/8.0;
+  for(int k=0;k<8;k++){
+   vec3 point=impact+dir*(lo+(float(k)+.5)*ds);float r=length(point);
+   if(r<1.0)continue;
+   float density=exp(-(r-1.0)/H),column=density*ds*densityScale;
+   vec3 normal=point/r;
+   // Light grazes the solid body's shadow; longer slant columns redden the limb.
+   float solarCos=dot(normal,sun),sunlit=smoothstep(-.008,.008,solarCos+sqrt(max(0.0,1.0-1.0/(r*r))));
+   float solarColumn=.06*density*densityScale/max(.035,solarCos+.08);
+   vec3 illumination=exp(-solarColumn*(.2+tint));
+   float opticalDepth=column*.075/H*(uSpectrum==1?.18:1.0);
+   float alpha=1.0-exp(-opticalDepth);
+   vec3 radiance=(.78*rayleigh*tint+.11*aerosol*mix(tint,vec3(1),.72))*illumination;
+   if(uSpectrum==1)radiance=vec3(.66,.24,.09)*dot(radiance,vec3(.33));
+   color+=trans*sunlit*alpha*radiance;trans*=1.0-alpha;
+   // Weak gradient-index optics: integral of grad_perp ln(n) along the ray.
+   if(uFlags.z>.5)bend-=column*(2.9e-4/H)*(normal-dir*dot(normal,dir));
+  }
+ }
+}
+`:''}`; }
+
 export function planetMaterialGLSL({photo=false}={}){return `
 #if __VERSION__ >= 300
 #define planetTexture texture
@@ -51,6 +133,13 @@ vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec
   }else if(id>2.5&&id<3.5){atmosphere=.14;}
   else if(id>3.5&&id<4.5){atmosphere=.35;}
   else if(id>9.5&&id<11.5){base=mix(base,base*vec3(1.06,.94,.85),.25);}
+ }else if(id<1.5){
+  // A lightweight blue-world fallback while the local geographic map loads.
+  // Only the bundled map defines the actual continents.
+  float land=smoothstep(.49,.54,fbm(n*3.7+vec3(1.1,0,2.4)));
+  ocean=1.0-land;base=mix(vec3(.025,.12,.31),mix(vec3(.13,.22,.09),vec3(.38,.31,.17),terrain),land);
+  float clouds=smoothstep(.57,.73,fbm(n*9.0+vec3(.15*sin(uTime*.001),0,0)));
+  base=mix(base,vec3(.92,.96,1),clouds*.85);ocean*=1.0-clouds;atmosphere=1.0;
  }else if(id>3.5&&id<5.5){
   // Gas-giant jets and vortices remain a procedural weather illustration.
   float flow=sin(lon*5.0+sin(lat*24.0)*1.4)+.35*sin(lon*13.0+lat*36.0);
@@ -96,7 +185,15 @@ vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec
  base*=tint*(.97+.06*fine);
  float diffuse=.028+light*.98;
  vec3 shaded=base*diffuse;
- if(ocean>.01){vec3 halfVector=unit(lightDirection-rd);shaded+=vec3(.8,.9,1)*pow(max(dot(normal,halfVector),0.0),80.0)*ocean*.45;}
+ ${photo?`// Water's reflected energy depends on the incidence angle, not a painted spot.
+ if(ocean>.01&&light>0.0&&uSpectrum==0){
+  float nl=max(dot(normal,lightDirection),.0001),nv=max(dot(normal,-rd),.0001);
+  vec3 h=unit(lightDirection-rd);float nh=max(dot(normal,h),0.0),vh=clamp(dot(-rd,h),0.0,1.0);
+  float a2=.018,d=nh*nh*(a2-1.0)+1.0;
+  float distribution=a2/(PI*d*d),visibility=.5/max(.001,nl*sqrt(nv*nv*(1.0-a2)+a2)+nv*sqrt(nl*nl*(1.0-a2)+a2));
+  float fresnel=.0204+.9796*pow(1.0-vh,5.0);
+  shaded+=vec3(1.0,.97,.9)*nl*distribution*visibility*fresnel*ocean;
+ }`:`if(ocean>.01){vec3 halfVector=unit(lightDirection-rd);shaded+=vec3(.8,.9,1)*pow(max(dot(normal,halfVector),0.0),80.0)*ocean*.45;}`}
  shaded+=vec3(.17,.37,.66)*limb*atmosphere*(.025+.16*light);
  return surfaceSpectrum(shaded,light,.09+.11*terrain,id<1.5?.18:.03);
 }

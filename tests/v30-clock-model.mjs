@@ -1,3 +1,4 @@
+import './fixtures/shuttle-bridge.mjs';
 import assert from 'node:assert/strict';
 import {clockRate,CLOCK_LIGHT_SPEED as c,CLOCK_SOLAR_GM as gm} from '../dist/object-clocks.js';
 import {fixture} from './render-fixture.mjs';
@@ -10,7 +11,7 @@ assert(at(1.000001).rateFactor>999);
 assert(Number.isFinite(at(1).rateFactor)&&at(1).rateFactor>999);
 assert.equal(clockRate().rateFactor,1);
 const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});
-r.loadScene('bridge-earth-proxima');
+r.loadScene('test-shuttle-bridge');
 const id=r.bridgeObjectId,object=r.objectById.get(id),t=Math.PI/.24;
 r.time=t;r.fillObjects();
 const reading=r.getObjectClock(id),b=r.configCache.bridgeRadius;

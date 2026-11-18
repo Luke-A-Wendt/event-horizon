@@ -18,7 +18,7 @@ assert(sceneComplexity('empty-space').score<sceneComplexity('xray-binary').score
 assert.equal(scene('bridge').category,'Wormholes');
 assert.equal(scene('bridge').patch.nebula,false);assert.equal(scene('bridge').patch.bridgeOtherColor,'#875ba3');
 assert.equal(scene('horizon-watch').patch.disk,true);assert.equal(scene('horizon-watch').patch.nebula,false);assert.equal(scene('horizon-watch').camera.mode,'onboard');
-assert.equal(scene('radiant-descent').camera.mode,'onboard');
+assert.equal(scene('radiant-descent').camera.mode,'track');
 for(const id of ['geometry','grid-kerr','grid-binary','geometry-orbit']){
  const p=makePreset(id);assert(p.grid);assert(!p.stars&&!p.nebula&&!p.disk&&!p.jets,`${id} has no sky or plasma emission`);
 }

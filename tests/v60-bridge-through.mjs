@@ -1,0 +1,12 @@
+import './fixtures/shuttle-bridge.mjs';
+import assert from 'node:assert/strict';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {fixture} from './render-fixture.mjs';
+const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false,deferProgram:true});
+r.loadScene('test-shuttle-bridge');const craft=r.objects.find(o=>o.type==='shuttle');r.stopFlightSequence(craft.id);
+assert(r.startTravel('bridge-far-world',{craftId:craft.id}));const t=r.transfer;assert(t.flyThrough);assert.equal(t.alignHold,0);
+r.advanceTravel(t.wallSeconds*.49);const before=craft.flight.speed;r.advanceTravel(t.wallSeconds*.01);
+assert(Math.abs(craft.flight.speed/t.throughPlan.peakSpeed-1)<1e-7);assert(craft.flight.speed>=before);assert.equal(craft.flight.thrust,0);assert.equal(t.phaseName,'Flip through gate');
+const peak=craft.flight.speed;r.advanceTravel(1.49);assert.equal(craft.flight.thrust,0);r.advanceTravel(.02);assert(craft.flight.speed<peak&&craft.flight.speed>0);assert.equal(craft.flight.thrust,1);
+r.advanceTravel(t.wallSeconds);assert.equal(r.transfer,null);assert.equal(r.bridgeParking[craft.id].targetId,'bridge-far-world');
+assert(r.startTravel('bridge-throat',{craftId:craft.id}));assert(!r.transfer.flyThrough);r.advanceTravel(r.transfer.wallSeconds);assert.equal(craft.flight.speed,0);assert.equal(r.bridgeParking[craft.id].targetId,'bridge-throat');r.dispose();console.log('PASS continuous gate peak/flip/braking and explicit zero-speed throat destination');

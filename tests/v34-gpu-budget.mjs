@@ -37,7 +37,7 @@ function simulation(options={}){
  s.f.control.gpuLatencyMs=4;s.run(60000);assert.equal(s.r.budget.effectiveQuality,'high');assert(s.f.calls.deleteQuery>0);s.r.dispose();
 }
 for(const refresh of [60,144]){
- const s=simulation({webgl2:false});s.run(7000,1000/refresh);assert.equal(s.r.budget.effectiveQuality,'high');assert(s.r.fps>30&&s.r.fps<43,'Legacy pacing permits measured upgrade headroom');assert.equal(s.f.calls.finish,0);s.r.dispose();
+ const s=simulation({webgl2:false});s.run(20000,1000/refresh);assert.equal(s.r.budget.effectiveQuality,'high');assert(s.r.fps>30&&s.r.fps<43,'Legacy pacing permits measured upgrade headroom from the initial floor');assert.equal(s.f.calls.finish,0);s.r.dispose();
 }
 // Reducing samples must not reduce object slot capacity or display-space picks.
 {

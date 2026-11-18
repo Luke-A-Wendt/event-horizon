@@ -4,7 +4,7 @@ import {SCENE_PRESETS,SCENE_PROGRESSIONS,DEFAULTS,makePreset} from '../dist/conf
 import {stellarInfo,SOLAR_RG_METERS} from '../dist/stellar-physics.js';
 
 const ids=SCENE_PRESETS.map(scene=>scene.id),planned=Object.values(SCENE_PROGRESSIONS).flat();
-assert.equal(ids.length,47);
+assert.equal(ids.length,49);
 assert.equal(new Set(ids).size,ids.length);
 assert.deepEqual(ids,planned,'Every scene has one deliberate place in its category progression');
 assert.equal(ids[0],'disk');
@@ -15,7 +15,7 @@ for(const [index,scene] of SCENE_PRESETS.entries()){
  const state=makePreset(scene.id);
  assert.equal(scene.number,String(index+1).padStart(2,'0'));
  assert.equal(state.paused,true,`${scene.id} starts paused`);
- assert.equal(state.annotations,scene.category==='Geometry',`${scene.id} uses its category label default`);
+ assert.equal(state.annotations,scene.category==='Geometry'||['solar-system','solar-system-natural','proxima-centauri','alpha-centauri'].includes(scene.id),`${scene.id} uses its scene label default`);
  assert.equal(state.metrics,false,`${scene.id} has no metric overlay`);
  assert.equal(state.horizonGuide,false,`${scene.id} has no misleading exterior coordinate circle`);
  if(scene.category==='Geometry')assert.equal(state.spectrum,'geometry');
@@ -33,4 +33,4 @@ const math=fs.readFileSync(new URL('../dist/math.js',import.meta.url),'utf8');
 assert.match(math,/Quasi-static spherical surface redshift and bolometric intensity/);
 assert.match(math,/escape-cone limit/);
 assert.match(math,/not a universal collapse signature/);
-console.log('PASS: 45 ordered scenes; labels enabled for Geometry, Geometry-only automatic metrics; no exterior coordinate guide; preserved default; explicit spherical collapse and shadow limits.');
+console.log('PASS: 49 ordered scenes; explicit Geometry and named-system label defaults; no automatic metric overlay or exterior coordinate guide; preserved opening scene and collapse limits.');

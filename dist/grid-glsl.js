@@ -165,6 +165,14 @@ vec4 coordinateGridStroke(vec3 coordinates,vec3 direction,float travelled,float 
 }
 
 vec4 coordinateGridAt(vec3 p,vec3 direction,float travelled,float pixelAngle){
+ ${warp?`float nativeWeight=1.0;
+ if(uWarpGridLocalPatch>.5&&uWarpFlags.x>.5&&uWarpRadius>0.0){
+  // Blend at this actual sheet crossing. A body grid can also lie far below
+  // the ship's orbit, so suppress its strokes through the nearer patch.
+  float localRadius=length(p-uWarpCenter)/uWarpRadius;
+  nativeWeight=1.0-max(warpPatchWeight(localRadius),warpPatchCoverage);
+  if(nativeWeight<=0.0)return vec4(0);
+ }`:'const float nativeWeight=1.0;'}
  // Do not illuminate coordinate marks inside a capture surface.
  for(int k=0;k<2;k++){
   if(uWarpFlags.w<.5)break;
@@ -172,18 +180,20 @@ vec4 coordinateGridAt(vec3 p,vec3 direction,float travelled,float pixelAngle){
   if(uHoles[k].w<=0.0)continue;
   if(uMetricOptions.w<.5&&length(p-uHoles[k].xyz)<=horizonFor(k))return vec4(0);
  }
- if(uWarpFlags.w<.5&&uGridFlowWindow>0.0){
+ if(uWarpFlags.w<.5&&uGridFlowWindow!=0.0){
   // Two finite material charts replenish tracers without a visible reset.
   // A chart is replaced only at zero opacity, with zero opacity derivative.
   // Both charts follow identical infall velocities and the shared scene clock.
-  float phase=mod(max(uTime,0.0),uGridFlowWindow)/uGridFlowWindow;
+  float windowLength=abs(uGridFlowWindow);
+  float period=uGridFlowWindow<0.0?12.0:windowLength;
+  float phase=mod(max(uTime,0.0),period)/period;
   float other=fract(phase+.5),weight=pow(sin(phase*PI),2.0);
-  vec3 a=coordinateGridCoordinates(p,phase*uGridFlowWindow);
-  vec3 b=coordinateGridCoordinates(p,other*uGridFlowWindow);
-  return coordinateGridStroke(a,direction,travelled,pixelAngle)*weight+
-         coordinateGridStroke(b,direction,travelled,pixelAngle)*(1.0-weight);
+  vec3 a=coordinateGridCoordinates(p,phase*windowLength);
+  vec3 b=coordinateGridCoordinates(p,other*windowLength);
+  return nativeWeight*(coordinateGridStroke(a,direction,travelled,pixelAngle)*weight+
+         coordinateGridStroke(b,direction,travelled,pixelAngle)*(1.0-weight));
  }
- return coordinateGridStroke(coordinateGridCoordinates(p,uTime),direction,travelled,pixelAngle);
+ return nativeWeight*coordinateGridStroke(coordinateGridCoordinates(p,uTime),direction,travelled,pixelAngle);
 }
 
 // Called only on the renderer's already-integrated (and object-clipped) ray.

@@ -3,7 +3,7 @@ export const CRAFT_GLSL = `
 // Every model is an analytic union of small primitives inside a unit sphere.
 // Only segments intersecting that sphere run the model tests, so distant
 // spacecraft have a cheap rejection and thin solar panels cannot be stepped over.
-struct CraftSurface { float t; vec3 normal; vec3 albedo; float material; };
+struct CraftSurface { float t; vec3 normal; vec3 albedo; float material; float detail; };
 vec4 ellipsoidHit(vec3 ro,vec3 rd,vec3 center,vec3 radii){
  vec3 q=(ro-center)/radii,d=rd/radii;
  float a=dot(d,d),b=dot(q,d),c=dot(q,q)-1.0,h=b*b-a*c;
@@ -79,6 +79,20 @@ vec4 shuttleCabinHit(vec3 ro,vec3 rd){
  return vec4(normal,nearT);
 }
 
+// Rounded aft fuselage with a flush engine bulkhead. An axis-aligned box here
+// left square black cheeks protruding behind the curved payload bay.
+vec4 shuttleAftHit(vec3 ro,vec3 rd){
+ vec3 center=vec3(0,-.002,-.555),radii=vec3(.143,.132,.222);
+ vec3 q=(ro-center)/radii,d=rd/radii;
+ float aa=dot(d,d),bb=dot(q,d),h=bb*bb-aa*(dot(q,q)-1.0);
+ if(h<0.0)return vec4(0,0,0,-1);
+ float nearT=(-bb-sqrt(h))/aa,farT=(-bb+sqrt(h))/aa;
+ vec3 normal=unit((ro+rd*nearT-center)/(radii*radii));bool valid=true;
+ clipPlane(ro,rd,vec3(0,0,-1),.705,nearT,farT,normal,valid);
+ if(!valid||farT<max(nearT,0.0)||nearT<0.0)return vec4(0,0,0,-1);
+ return vec4(normal,nearT);
+}
+
 // Closed tapered engine bell; axis is the local z direction.
 vec4 frustumHit(vec3 ro,vec3 rd,vec3 center,float halfLength,float rearRadius,float frontRadius){
  vec3 q=ro-center;float k=(frontRadius-rearRadius)/(2.0*halfLength),r=(frontRadius+rearRadius)*.5;
@@ -109,7 +123,10 @@ vec4 hollowCylinderHit(vec3 ro,vec3 rd,float halfLength,float outerRadius,float 
  return vec4(normal,best==100000.0?-1.0:best);
 }
 CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
- CraftSurface s;s.t=maximum+max(.001,abs(maximum)*.00001);s.normal=vec3(0);s.albedo=vec3(.8);s.material=0.0;
+ // Only the tracked craft model keeps its fine silhouette and markings when
+ // the full-frame pixel/ray budget falls. No extra render pass is introduced.
+ float detail=max(uDetail,abs(type-uCraftFocusType)<.25?2.0:0.0);
+ CraftSurface s;s.t=maximum+max(.001,abs(maximum)*.00001);s.normal=vec3(0);s.albedo=vec3(.8);s.material=0.0;s.detail=detail;
  vec3 white=vec3(.82,.84,.82),silver=vec3(.48,.54,.58),dark=vec3(.018,.023,.028),blue=vec3(.025,.065,.16),gold=vec3(.92,.63,.19);
  if(type<3.5){
   // ISS: x extent 1.64, representing the 109 m main truss span.
@@ -123,7 +140,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    for(int side=0;side<2;side++){
     float z=side==0?-.28:.28;
     // Eight wings, each formed from two solar blankets and a central mast.
-    if(uDetail<1.0)selectSurface(boxHit(ro,rd,vec3(x,.007,z),vec3(.135,.006,.205)),blue,1.0,s);
+    if(detail<1.0)selectSurface(boxHit(ro,rd,vec3(x,.007,z),vec3(.135,.006,.205)),blue,1.0,s);
     else{
      selectSurface(boxHit(ro,rd,vec3(x-.070,.007,z),vec3(.065,.006,.205)),blue,1.0,s);
      selectSurface(boxHit(ro,rd,vec3(x+.070,.007,z),vec3(.065,.006,.205)),blue,1.0,s);
@@ -132,7 +149,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
   }
   selectSurface(boxHit(ro,rd,vec3(-.26,-.045,0),vec3(.1,.006,.095)),white,22.0,s);
   selectSurface(boxHit(ro,rd,vec3(.26,-.045,0),vec3(.1,.006,.095)),white,22.0,s);
-  if(uDetail>=1.0){
+  if(detail>=1.0){
    // Open truss chords and diagonals remain analytic: no mesh/texture downloads.
    for(int chord=0;chord<4;chord++){
     vec2 yz=vec2(chord<2?-.025:.025,mod(float(chord),2.0)<.5?-.028:.028);
@@ -158,7 +175,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    selectSurface(ellipsoidHit(ro,rd,vec3(.16,.15,.14),vec3(.013)),dark,0.0,s);
    selectSurface(ellipsoidHit(ro,rd,vec3(.27,.09,.26),vec3(.014)),silver,0.0,s);
   }
-  if(uDetail>=2.0){
+  if(detail>=2.0){
    for(int side=0;side<2;side++){
     float x=side==0?-1.0:1.0;
     // Three distinct heat-rejection panels per side and folded utility boxes.
@@ -177,7 +194,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
   selectSurface(capsuleHit(ro,rd,vec3(0,.008,-.54),vec3(0,.008,.29),.128),white,2.0,s);
   selectSurface(ellipsoidHit(ro,rd,vec3(0,-.025,.460),vec3(.137,.115,.400)),white,2.0,s);
   selectSurface(shuttleCabinHit(ro,rd),white,12.0,s);
-  selectSurface(boxHit(ro,rd,vec3(0,0,-.64),vec3(.14,.125,.08)),white,2.0,s);
+  selectSurface(shuttleAftHit(ro,rd),white,2.0,s);
   for(int side=0;side<2;side++){
    float x=side==0?-1.0:1.0;
    // Compound-delta planform: steep inner sweep, then the shallower outer edge.
@@ -197,9 +214,6 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
   fin=wingHit(ro.yxz,rd.yxz,vec2(.055,-.69),vec2(.515,-.49),vec2(.10,-.22),.014);
   selectSurface(vec4(fin.yxz,fin.w),white,13.0,s);
   selectSurface(ellipsoidHit(ro,rd,vec3(0,.122,-.47),vec3(.034,.041,.23)),white,2.0,s);
-  // Broad body flap below the engine cluster, with a light upper face.
-  selectSurface(boxHit(ro,rd,vec3(0,-.109,-.68),vec3(.153,.013,.075)),dark,2.0,s);
-  selectSurface(boxHit(ro,rd,vec3(0,-.094,-.68),vec3(.15,.002,.071)),white,2.0,s);
   // Three dummy main-engine bells, as on OV-101's tailcone-off ALT flights.
   // OV-101 was an atmospheric prototype: all space placement is hypothetical.
   for(int engine=0;engine<3;engine++){
@@ -208,7 +222,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    selectSurface(frustumHit(ro,rd,center,.08,.058,.033),silver,14.0,s);
    selectSurface(ellipsoidHit(ro,rd,center-vec3(0,0,.077),vec3(.049,.049,.003)),dark,0.0,s);
   }
-  if(uDetail>=1.0){
+  if(detail>=1.0){
    // Raised payload door hinge rails, nose chine and split elevon surfaces.
    for(int side=0;side<2;side++){
     float x=side==0?-1.0:1.0;
@@ -224,7 +238,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
     for(int port=0;port<3;port++){
      selectSurface(ellipsoidHit(ro,rd,vec3(.204*x,.069,-.50-float(port)*.043),vec3(.003,.010,.012)),dark,0.0,s);
     }
-    selectSurface(boxHit(ro,rd,vec3(.15*x,.012,-.727),vec3(.028,.045,.005)),vec3(.22,.24,.23),0.0,s);
+    // Flush pod fairing ends; avoid exposed rectangular aft equipment blocks.
    }
    selectSurface(capsuleHit(ro,rd,vec3(0,.49,-.610),vec3(0,.17,-.66),.002),dark,0.0,s);
   }
@@ -256,7 +270,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    selectSurface(ellipsoidHit(ro,rd,vec3(.17*x,-.806,.080),vec3(.101,.074,.162)),white,10.0,s);
    selectSurface(boxHit(ro,rd,vec3(.17*x,-.867,.080),vec3(.098,.013,.153)),vec3(.25,.27,.26),0.0,s);
   }
-  if(uDetail>=1.0){
+  if(detail>=1.0){
    // Helmet camera/light housings, service fittings and dark neck seal.
    selectSurface(ellipsoidHit(ro,rd,vec3(0,.472,0),vec3(.151,.013,.151)),vec3(.16,.18,.17),0.0,s);
    for(int side=0;side<2;side++){
@@ -284,7 +298,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    selectSurface(boxHit(ro,rd,vec3(.116,-.397,.087),vec3(.052,.060,.016)),white,10.0,s);
    selectSurface(boxHit(ro,rd,vec3(-.116,-.397,.087),vec3(.052,.060,.016)),white,10.0,s);
   }
-  if(uDetail>=2.0){
+  if(detail>=2.0){
    // Flat sewn webbing, knee folds, oxygen bottle housings, and suit fittings.
    for(int side=0;side<2;side++){
     float x=side==0?-1.0:1.0;
@@ -341,9 +355,9 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    float x=side==0?-1.0:1.0;
    // Flat structural pylons: outboard in front view, nearly vertical in side.
    vec3 pr=ro-vec3(0,0,-.275);
-   part=wingHit(pr.xzy,rd.xzy,vec2(.060*x,-.105),vec2(.092*x,-.175),vec2(.300*x,.092),.039);
+   part=wingHit(pr.xzy,rd.xzy,vec2(.020*x,-.135),vec2(.032*x,-.190),vec2(.300*x,.092),.039);
    selectSurface(vec4(part.xzy,part.w),hull,19.0,s);
-   part=wingHit(pr.xzy,rd.xzy,vec2(.060*x,-.105),vec2(.300*x,.092),vec2(.278*x,.151),.039);
+   part=wingHit(pr.xzy,rd.xzy,vec2(.020*x,-.135),vec2(.300*x,.092),vec2(.278*x,.151),.039);
    selectSurface(vec4(part.xzy,part.w),hull,19.0,s);
    // Long cylindrical nacelles lie just above the saucer, as in the TOS model.
    selectSurface(frustumHit(ro,rd,vec3(.292*x,.132,-.425),.435,.052,.058),hull,16.0,s);
@@ -363,7 +377,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    float z=band==0?-.875:band==1?.875:band==2?-.055:.055;
    selectSurface(hollowCylinderHit(ro-vec3(0,0,z),rd,band<2?.025:.016,.305,.232),vec3(.44,.47,.47),32.0,s);
   }
-  if(uDetail>=1.0){
+  if(detail>=1.0){
    // Long hull ribs leave the central bay unobstructed from either end.
    for(int rib=0;rib<8;rib++){
     float angle=float(rib)*PI*.25;vec2 direction=vec2(cos(angle),sin(angle));
@@ -468,8 +482,8 @@ float shipName(vec2 p){
 }
 vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec3 reflectedSky){
  vec3 n=unit(surface.normal),view=unit(-localDirection),albedo=surface.albedo;
- float material=surface.material;
- if(material>9.5&&material<10.5&&uDetail>=1.0){
+ float material=surface.material,detail=surface.detail;
+ if(material>9.5&&material<10.5&&detail>=1.0){
   // Cloth folds perturb shading only; the physical suit dimensions are fixed.
   float folds=sin(hit.y*95.0+2.0*sin(hit.x*34.0)+hit.z*17.0);
   float creases=sin(hit.y*172.0+4.0*sin(hit.x*27.0)+hit.z*44.0);
@@ -507,8 +521,12 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
     float letters=shuttleNasaMark(vec2(-(hit.z-.04)*sign(n.x)/.18,(hit.y-.040)/.085));
     albedo=mix(albedo,vec3(.72,.035,.045),letters);
    }
-   if(n.y>.5&&hit.x>.19&&hit.x<.49&&hit.z<-.29&&hit.z>-.57){
-    float letters=shuttleNasaMark(vec2((hit.x-.34)/.17,(hit.z+.43)/.17));albedo=mix(albedo,vec3(.72,.035,.045),letters);
+   if(n.y>.5&&hit.x>.21&&hit.x<.44&&hit.z<-.46&&hit.z>-.54){
+    // Entire word lies inside the swept outer wing, with a clear margin from
+    // its leading edge and elevon seam rather than clipping the outer letters.
+    // On the upper wing, decal right is -X and decal up is +Z. Their cross
+    // product points out of the surface (+Y), so the lettering is not mirrored.
+    float letters=shuttleNasaMark(vec2(-(hit.x-.326)/.118,(hit.z+.495)/.105));albedo=mix(albedo,vec3(.72,.035,.045),letters);
    }
    if(abs(n.x)>.70&&hit.z<-.16&&hit.z>-.29&&hit.y>-.005&&hit.y<.055){
     vec2 flag=vec2((-.16-hit.z)/.13,(hit.y+.005)/.06);
@@ -522,7 +540,7 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
     vec2 access=vec2((abs(hit.x)-.066)/.017,(hit.z-.670)/.024);
     if(length(access)<1.0&&n.y>.45){float ring=1.0-smoothstep(.06,.10,abs(length(access)-.82));albedo*=1.0-ring*.40;}
    }
-   if(uDetail>=2.0){
+   if(detail>=2.0){
     float panels=1.0-smoothstep(.0007,.0014,min(abs(mod(hit.z+.45,.126)-.063),abs(abs(hit.x)-.079)));
     albedo*=1.0-panels*.16*step(.09,hit.y)*step(-.46,hit.z)*step(hit.z,.30);
    }
@@ -551,7 +569,7 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
   vec3 reflection=reflectedSky*2.7+vec3(.025,.035,.055)+vec3(.62,.72,.88)*horizon;
   float broad=pow(max(0.0,dot(n,unit(light+view))),12.0);
   reflection+=vec3(.30,.40,.58)*broad;
-  if(uDetail>=2.0)reflection*=.985+.015*sin(hit.y*650.0+hit.x*31.0);
+  if(detail>=2.0)reflection*=.985+.015*sin(hit.y*650.0+hit.x*31.0);
   return conductor*(reflection*(.72+.28*fresnel)+vec3(.20,.13,.025)*NdotL)+vec3(1,.9,.63)*spec*2.0;
  }
  if(material>5.5&&material<6.5)albedo=nasaPatch(vec2((hit.x+.083)/.058,(hit.y-.284)/.058),albedo);
@@ -583,7 +601,7 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
 
  }
  if(material>9.5&&material<10.5){
-  if(uDetail>=2.0){float weave=.018*sin(hit.x*720.0)*sin(hit.y*720.0);albedo*=1.0+weave;}
+  if(detail>=2.0){float weave=.018*sin(hit.x*720.0)*sin(hit.y*720.0);albedo*=1.0+weave;}
   float band=step(.316,abs(hit.y+.02))*step(abs(hit.y+.02),.346);
   if(abs(hit.x)>.09&&hit.y<0.0)albedo=mix(albedo,vec3(.56,.065,.055),band*.85);
   float seam=pow(.5+.5*sin(hit.y*145.0),14.0)*.035;albedo*=1.0-seam;
@@ -632,7 +650,7 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
   // Multilayer-insulation seams and docking collars on pressure modules.
   float seam=1.0-smoothstep(.001,.003,abs(mod(hit.z+.03,.070)-.035));
   albedo*=1.0-.22*seam;
-  if(uDetail>=2.0)albedo*=.96+.04*sin(hit.x*230.0+sin(hit.z*120.0));
+  if(detail>=2.0)albedo*=.96+.04*sin(hit.x*230.0+sin(hit.z*120.0));
  }
  if(material>21.5&&material<22.5){
   float fin=1.0-smoothstep(.001,.002,abs(mod(hit.z,.028)-.014));
@@ -709,7 +727,7 @@ export function createCraftGLSL({mask=31}={}) {
  const materials=new Set([0,...assignments.map(match=>Number(match[1]))]);
  const knownMaterials=calls.length===assignments.length;
  const guards=[
-  ['material>9.5&&material<10.5&&uDetail>=1.0',[10]],['material>.5&&material<1.5',[1]],
+  ['material>9.5&&material<10.5&&detail>=1.0',[10]],['material>.5&&material<1.5',[1]],
   ['(material>1.5&&material<2.5)||(material>11.5&&material<12.5)',[2,12]],
   ...[3,4,5,6,7,10,12,13,15,16,17,18,19,20,21,22,23,24].map(value=>[`material>${value-.5}&&material<${value+.5}`,[value]]),
   ['material>30.5&&material<32.5',[31,32]]

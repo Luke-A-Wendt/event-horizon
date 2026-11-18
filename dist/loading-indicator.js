@@ -1,49 +1,33 @@
-import { createLoadingVisual } from './loading-visual.js';
-// Readiness comes only from a completed scene frame. The small UI timer is
-// independent of the render worker: this percentage measures the wait limit,
-// not fabricated shader/asset completion. Old scene timers cannot hide a new one.
-export function createLoadingIndicator(element, reasonElement, clock = globalThis) {
- let wanted=false, visible=false, revision=0, timer=null, ticker=null, shownAt=0, visualRevision=0;
- let elapsedBase=0, elapsedAt=0, suspended=false, backendSuspended=false, loadRevision=null;
- const now=()=>clock.performance?.now?.()??Date.now();
- const visual=createLoadingVisual(element,clock);
- const percentage=element.querySelector?.('#loadingPercent');
- const clear=()=>{if(timer!==null)clock.clearTimeout(timer);timer=null;};
- const stopTicker=()=>{if(ticker!==null)clock.clearTimeout(ticker);ticker=null;};
- const elapsed=()=>elapsedBase+(suspended?0:Math.max(0,now()-elapsedAt));
- const paint=(running=wanted)=>{
-  visual?.update({running,elapsedMs:elapsed(),suspended,revision:visualRevision});
-  if(!percentage)return;
-  const seconds=Math.min(60,elapsed()/1000),value=Math.min(100,Math.floor(seconds*100/60)),text=`${value}%`;
-  if(percentage.textContent!==text)percentage.textContent=text;
-  percentage.setAttribute?.('aria-label',`${value}% of the 60 second loading time limit elapsed`);
+// Renderer stages are real events; elapsed time is never presented as percent
+// completion. Only a stalled transition expands the small acknowledgement.
+// Its CSS animation belongs to the compositor, independent of render frames.
+export const LOADING_STALL_DELAY_MS=650;
+export function createLoadingIndicator(element,{now=()=>globalThis.performance?.now?.()??Date.now(),schedule=setTimeout,cancel=clearTimeout}={}) {
+ let disposed=false,busy=false,timer=null,scene='Edge of infinity',phase='preparing',revision=null,anchor=0,elapsed=0,suspended=false;
+ const stages={starting:'Starting local graphics',preparing:'Preparing scene objects',compiling:'Compiling graphics on this device',drawing:'Waiting for the first complete frame',presenting:'Presenting the completed frame',ready:'Waiting for the updated view','waiting-choice':'Choose graphics mode'};
+ if(element)element.innerHTML='<span class="loading-visual" aria-hidden="true"><span class="loading-orbit"></span></span><span class="loading-copy"><strong class="loading-scene"></strong><span class="loading-phase"></span><span class="loading-elapsed"></span></span>';
+ const nodes={scene:element?.querySelector?.('.loading-scene'),phase:element?.querySelector?.('.loading-phase'),elapsed:element?.querySelector?.('.loading-elapsed')};
+ const clear=()=>{if(timer!==null)cancel(timer);timer=null;};
+ const paint=()=>{
+  clear();if(disposed||!element)return;
+  element.hidden=!busy||suspended;if(!busy||suspended)return;
+  const age=Math.max(0,elapsed+now()-anchor),stalled=age>=LOADING_STALL_DELAY_MS,text=stages[phase]||stages.preparing,seconds=Math.floor(age/1000);
+  element.classList?.toggle('is-stalled',stalled);element.classList?.toggle('is-pending',!stalled);element.setAttribute?.('data-phase',phase);
+  if(nodes.scene){nodes.scene.textContent=scene;nodes.phase.textContent=text;nodes.elapsed.textContent=stalled?`${seconds} s elapsed`:'';}else element.textContent=scene+' · '+text+(stalled?` · ${seconds} s elapsed`:'');
+  const label=scene+' · '+text+(stalled?` · ${seconds} seconds elapsed`:'');element.setAttribute?.('aria-label',label);element.title=label;
+  timer=schedule(paint,250);
  };
- const tick=()=>{ticker=null;if(!wanted)return;paint();ticker=clock.setTimeout(tick,250);};
- function update(busy, scene='Edge of infinity', immediate=false, timeline=null) {
-  if(reasonElement.textContent!==scene)reasonElement.textContent=scene;
-  const changedLoad=timeline&&timeline.revision!==undefined&&timeline.revision!==loadRevision;
-  if(busy&&(!wanted||immediate||changedLoad)){++visualRevision;elapsedBase=0;elapsedAt=now();backendSuspended=false;suspended=!!clock.document?.hidden;loadRevision=timeline?.revision??null;}
-  if(busy&&timeline){
-   // Same-revision stats can arrive between monitor ticks. Never let their
-   // slightly older elapsed sample make the displayed percentage move backward.
-   elapsedBase=changedLoad?Math.max(0,timeline.elapsedMs||0):Math.max(elapsed(),timeline.elapsedMs||0);
-   elapsedAt=now();backendSuspended=!!timeline.suspended;suspended=backendSuspended||!!clock.document?.hidden;loadRevision=timeline.revision??loadRevision;
-  }
-  if(busy){paint(true);if(ticker===null)ticker=clock.setTimeout(tick,250);}else{stopTicker();visual?.update({running:false,elapsedMs:elapsed(),suspended,revision:visualRevision});}
-  if(busy===wanted){
-   if(busy&&immediate&&!visible){++revision;clear();visible=true;shownAt=now();element.classList.remove('is-leaving');element.hidden=false;}
-   return;
-  }
-  wanted=busy;const current=++revision;clear();
-  if(busy){
-   element.classList.remove('is-leaving');
-   const show=()=>{if(current!==revision||!wanted)return;visible=true;shownAt=now();element.hidden=false;};
-   if(immediate)show();else timer=clock.setTimeout(show,160);
-  }else if(visible){
-   timer=clock.setTimeout(()=>{if(current!==revision||wanted)return;element.classList.add('is-leaving');timer=clock.setTimeout(()=>{if(current!==revision||wanted)return;element.hidden=true;visible=false;element.classList.remove('is-leaving');},160);},Math.max(0,280-(now()-shownAt)));
-  }else element.hidden=true;
- }
- const visibility=()=>{if(!wanted)return;elapsedBase=elapsed();elapsedAt=now();suspended=backendSuspended||!!clock.document?.hidden;paint();};
- clock.document?.addEventListener?.('visibilitychange',visibility);
- return {update,dispose(){clock.document?.removeEventListener?.('visibilitychange',visibility);++revision;clear();stopTicker();visual?.dispose();wanted=visible=false;element.hidden=true;}};
+ return {
+  update(nextBusy,nextScene='Edge of infinity',immediate=false,timeline=null){
+   if(disposed||!element)return;
+   const time=now(),newRevision=timeline?.revision!=null&&revision!=null&&timeline.revision!==revision;
+   if(nextBusy&&(!busy||immediate||newRevision)){anchor=time;elapsed=0;}
+   else if(busy&&!suspended){elapsed+=Math.max(0,time-anchor);anchor=time;}
+   busy=!!nextBusy;scene=nextScene;phase=timeline?.phase||'preparing';suspended=!!timeline?.suspended;
+   if(timeline?.revision!=null)revision=timeline.revision;
+   if(Number.isFinite(timeline?.elapsedMs))elapsed=Math.max(0,timeline.elapsedMs);
+   anchor=time;paint();
+  },
+  dispose(){disposed=true;busy=false;clear();if(element)element.hidden=true;}
+ };
 }
