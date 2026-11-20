@@ -1,10 +1,8 @@
-# Event Horizon
+# [Event Horizon](https://luke-a-wendt.github.io/event-horizon/)
 
 An interactive spacetime observatory that runs entirely on your own device. Fly around black holes, change their mass and spin, assemble scenes, place orbiting objects, inspect a white-hole model, traverse an illustrative wormhole, and explore the mathematics.
 
 Author: [Dr. Luke A. Wendt](https://github.com/Luke-A-Wendt) · Co-author: [Astra Ultra](https://openai.com/index/gpt-6-astra/)
-
-[Event Horizon](https://luke-a-wendt.github.io/event-horizon/)
 
 <img width="3840" height="2158" alt="image" src="https://github.com/user-attachments/assets/2a2e9208-f0bb-4257-8e0f-0df1fb2f8c6b" />
 <img width="1920" height="1079" alt="image" src="https://github.com/user-attachments/assets/2ce9ad45-2b71-455c-bf9f-292cea929ecf" />
