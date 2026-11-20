@@ -19,7 +19,7 @@ const ui=installSceneFiles({saveButton:$('sceneSave'),loadButton:$('sceneLoad'),
 await ui.save();assert(downloaded instanceof Blob);assert.match(anchor.download,/\.yaml$/);assert.match(await downloaded.text(),new RegExp(SCENE_FILE_VERSION.replaceAll('.','\\.')));assert.equal($('sceneSave').disabled,false);
 const source=serializeScene(renderer);
 async function openFile(name,text,size=text.length){$('sceneFileInput').files=[{name,size,text:async()=>text}];await ui.load();}
-await openFile('my-system.yaml',source);assert.equal(loaded.length,1);assert.equal(loaded[0].snapshot.objects.length,517);assert.equal(loaded[0].name,'my-system.yaml');assert.equal($('sceneFileInput').value,'');
+await openFile('my-system.yaml',source);assert.equal(loaded.length,1);assert.deepEqual(loaded[0].snapshot.objects.map(o=>o.id),renderer.objects.map(o=>o.id));assert.equal(loaded[0].name,'my-system.yaml');assert.equal($('sceneFileInput').value,'');
 await openFile('old.yaml',source.replace(SCENE_FILE_VERSION,'0.0.0'));assert.equal(loaded.length,1,'Version mismatch cannot mutate the live scene');assert.match(messages.at(-1),/Cannot load/);assert.equal($('sceneFileStatus').dataset.error,'true');
 await openFile('broken.yml','scene: [broken');assert.equal(loaded.length,1);assert.match(messages.at(-1),/Cannot load/);
 await openFile('bad.txt',source);assert.equal(loaded.length,1);

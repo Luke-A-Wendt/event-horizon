@@ -1,5 +1,5 @@
 // Plain-data snapshots keep the UI controller independent of render-thread work.
-const FIELDS=['gapOrbitTime','routeChartY','routeVisualTime','navigationModes','flightSequences','bridgeParking','parkedCamera','autopilot','transfer','travelPreview','lastTransfer','sceneRevision','driveId','freeReferenceId','freeReferencePosition','state','camera','target','cameraGuide','focusReferenceFrame','objects','time','orbitOverrides','sceneId','sceneFocusId','bridgeObjectId','bridgeTime','bridgeTravelTime','freePosition','freeTarget','freeBasis','nextObjectId','selectedId','focusId','focusMode','warpObjectId','savedOverview','warpLocalGridPhase','warpTravelWorld','warpTravelPosition','warpTravelTime','travel'];
+const FIELDS=['janusRoutes','dockingCoastId','dockingMission','meridianIrises','gapOrbitTime','routeChartY','routeVisualTime','navigationModes','flightSequences','bridgeParking','parkedCamera','autopilot','transfer','travelPreview','lastTransfer','sceneRevision','driveId','freeReferenceId','freeReferencePosition','state','camera','target','cameraGuide','focusReferenceFrame','objects','time','orbitOverrides','sceneId','sceneFocusId','bridgeObjectId','bridgeTime','bridgeTravelTime','freePosition','freeTarget','freeBasis','nextObjectId','selectedId','focusId','focusMode','warpObjectId','savedOverview','warpLocalGridPhase','warpTravelWorld','warpTravelPosition','warpTravelTime','travel'];
 const copy=value=>typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value));
 export function snapshotRenderer(renderer,{includeObjects=true,includeInteraction=false,objectIds=[]}={}){
  const value={};for(const field of FIELDS)if(renderer[field]!==undefined&&(field!=='objects'||includeObjects))value[field]=renderer[field];
@@ -7,8 +7,13 @@ export function snapshotRenderer(renderer,{includeObjects=true,includeInteractio
  // require resending the hundreds of immutable natural-body catalog entries.
  for(const field of ['navigationModes','flightSequences','bridgeParking'])value[field]=renderer[field]||{};
  value.parkedCamera=renderer.parkedCamera||null;
+ value.janusRoutes=renderer.janusRoutes||{};
+ value.dockingMission=renderer.dockingMission||null;
+ value.dockingCoastId=renderer.dockingCoastId||null;
  // Dynamic pose packets retain the worker's immutable catalog and orbital
  // metadata. At most the controlled craft / returning craft need replacement.
+ // Workers draw the host's time; they don't independently integrate clocks.
+ if(!includeObjects&&renderer.hasHabitat)value.habitatTimes=renderer.clockActors.filter(o=>o.type==='habitat').map(o=>[o.id,o.clock.properSeconds,o.wheelPlayback||null,o.transferSpindle||null]);
  if(!includeObjects&&objectIds.length){const ids=new Set(objectIds);value.objectUpdates=renderer.objects.filter(o=>ids.has(o.id));}
  value.quality=renderer.quality;if(includeInteraction)value.cameraInteracting=renderer.now()<(renderer.cameraInteractionUntil||0);return copy(value);
 }
@@ -22,7 +27,14 @@ export function restoreRenderer(renderer,snapshot){
  const geometryChanged=Object.hasOwn(snapshot,'objects')||snapshot.state&&!equalScalars(renderer.state,snapshot.state)||snapshot.orbitOverrides&&!equalScalars(renderer.orbitOverrides?.planet,snapshot.orbitOverrides.planet)||snapshot.orbitOverrides&&!equalScalars(renderer.orbitOverrides?.secondary,snapshot.orbitOverrides.secondary);
  if(Object.hasOwn(snapshot,'routeChartY')&&snapshot.routeChartY!==renderer.routeChartY)renderer.lastGeometryTime=null;
  const saved=copy(snapshot);
+ if(newScene||Object.hasOwn(saved,'objects')){renderer.janusCabinChartPod=null;renderer.janusCabinChart=null;}
+ if((newScene||Object.hasOwn(saved,'objects'))&&!Object.hasOwn(saved,'janusRoutes'))renderer.janusRoutes={};
+ // The telescope and rim jets can move while the background ephemeris is held.
+ if(renderer.dockingMission||saved.dockingMission)renderer.lastGeometryTime=null;
+ if((newScene||Object.hasOwn(saved,'objects'))&&!Object.hasOwn(saved,'dockingMission'))renderer.dockingMission=null;
  if(newScene)for(const field of ['navigationModes','flightSequences','bridgeParking'])if(!Object.hasOwn(saved,field))renderer[field]={};
+ if((newScene||Object.hasOwn(saved,'objects'))&&!Object.hasOwn(saved,'meridianIrises'))renderer.meridianIrises={};
+ if((newScene||Object.hasOwn(saved,'objects'))&&!Object.hasOwn(saved,'dockingCoastId'))renderer.dockingCoastId=null;
  if(newScene&&!Object.hasOwn(saved,'warpLocalGridPhase'))renderer.warpLocalGridPhase=0;
  if(!Object.hasOwn(saved,'gapOrbitTime')&&(newScene||Object.hasOwn(saved,'objects')))renderer.gapOrbitTime=0;
  if(newScene&&!Object.hasOwn(saved,'parkedCamera'))renderer.parkedCamera=null;
@@ -31,7 +43,15 @@ export function restoreRenderer(renderer,snapshot){
   for(const update of saved.objectUpdates){const object=byId.get(update.id);if(!object)continue;if(object.phase!==update.phase||object.epoch!==update.epoch)renderer.lastGeometryTime=NaN;for(const key of Object.keys(object))if(!Object.hasOwn(update,key))delete object[key];Object.assign(object,update);}
  }
  for(const field of FIELDS)if(Object.hasOwn(saved,field))renderer[field]=saved[field];
- if(geometryChanged)renderer.refreshConfiguration();renderer.fillHoles();renderer.fillObjects();renderer.updateCameraFrame();
+ if(saved.habitatTimes)for(const [id,time,playback,spindle] of saved.habitatTimes){
+  const ship=renderer.objectById?.get(id);
+  if(!ship?.clock)continue;
+  if(ship.clock.properSeconds!==time||!equalScalars(playback||null,ship.wheelPlayback||null)||!equalScalars(spindle||null,ship.transferSpindle||null))renderer.habitatClockRevision=(renderer.habitatClockRevision||0)+1;
+  ship.clock.properSeconds=time;
+  if(playback)ship.wheelPlayback=playback;else delete ship.wheelPlayback;
+  if(spindle)ship.transferSpindle=spindle;else delete ship.transferSpindle;
+ }
+ if(geometryChanged)renderer.refreshConfiguration();renderer.fillHoles();renderer.fillObjects();renderer.updateMeridianIrises?.();renderer.updateCameraFrame();
  if(snapshot.quality&&renderer.quality!==snapshot.quality)renderer.setQuality(snapshot.quality);
  // The worker receives snapshots rather than loadScene calls. Retain its
  // measured fidelity while resetting timing for a new scene/view; camera/time
@@ -65,6 +85,10 @@ export const CPU_FRAME_TIMEOUT_MS=15000;
 export class SceneLoadLifecycle {
  constructor({cpu=false,now=()=>performance.now()}={}){this.now=now;this.loadTimeout=cpu?CPU_SCENE_TIMEOUT_MS:GPU_SCENE_LOAD_TIMEOUT_MS;this.frameTimeout=cpu?CPU_FRAME_TIMEOUT_MS:GPU_FRAME_TIMEOUT_MS;this.revision=0;this.begin();}
  begin(){this.revision++;this.state='loading';this.timeout=this.loadTimeout;this.error='';this.elapsed=0;this.suspended=false;this.lastCheck=this.now();return this.revision;}
+ // In-scene changes such as powering the Explorer can require a cold shader
+ // without changing the scene revision. Keep all time since the last good
+ // frame, even if the requested features change repeatedly during a stall.
+ awaitChangedView(){if(this.state==='ready'){this.state='loading';this.timeout=this.loadTimeout;}}
  check(suspended=false){const now=this.now(),gap=Math.max(0,now-this.lastCheck);this.lastCheck=now;const wasSuspended=this.suspended;this.suspended=suspended;if(this.state==='failed')return false;if(!suspended&&!wasSuspended)this.elapsed+=gap;if(this.elapsed<this.timeout)return false;this.fail(this.state==='loading'?'This scene did not finish loading. Retry, or choose another scene.':'The renderer stopped producing complete frames. Retry, or choose another scene.');return true;}
  complete(revision){if(revision!==this.revision||this.state==='failed')return false;this.state='ready';this.timeout=this.frameTimeout;this.error='';this.elapsed=0;this.lastCheck=this.now();return true;}
  fail(message){this.state='failed';this.error=String(message||'This scene could not load. Retry, or choose another scene.');}

@@ -40,7 +40,7 @@ try{
  assert(JSON.stringify(delta).length<JSON.stringify(original).length*.1,'Navigation transport retains the small-packet performance path');
  const bad=(mutate,pattern=SceneFileError)=>{const before=snapshotRenderer(source);mutate();assert.throws(()=>serializeScene(source),pattern);restoreRenderer(source,before);};
  bad(()=>source.navigationModes[ship.id]='broken',/not a supported value/);
- bad(()=>source.navigationModes['stale-craft']='auto',/Shuttle or Enterprise/);
+ bad(()=>source.navigationModes['stale-craft']='auto',/must identify a Shuttle or NASA Warp Explorer/);
  bad(()=>source.flightSequences[ship.id].nodes=[{targetId:'stale-target'}],/orbitable body/);
  bad(()=>source.flightSequences[ship.id].nodes=[{targetId:ship.id}],/own vehicle/);
  bad(()=>source.flightSequences[ship.id].nodes=[{targetId:'space'}],/orbitable body/);

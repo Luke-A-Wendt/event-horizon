@@ -1,6 +1,8 @@
+import {contactPlaybackProgress} from './contact-playback.js';
+import {sampleKerrRadius} from './kerr-transfer.js';
 // Bounded moving-start transfer estimates in a local flat reference frame.
 // Shuttle: 1 g proper acceleration, reverse thrust halfway, then 1 g braking.
-// Enterprise: fictional clock protection and a smooth selected-warp ramp.
+// NASA Warp Explorer: fictional clock protection and a smooth selected-warp ramp.
 import {speedForWarp,warpForSpeed,FLIGHT_WARP_MAX} from './flight-dynamics.js';
 // Gravity and moving-target corrections belong to the scene controller.
 export const TRANSFER_LIGHT_SPEED=299792458;
@@ -21,6 +23,14 @@ export function estimateTransfer(distanceMeters,type='shuttle',requestedWarp=1,o
  const requested=Math.max(0,Math.min(MAX_DISTANCE,Number.isFinite(distanceMeters)?distanceMeters:0));
  const initialSpeed=Math.max(0,Number(options.initialSpeed)||0),finalSpeed=Math.max(0,Number(options.finalSpeed)||0);
  if(type==='enterprise'){
+  if(options.cruiseWarpLimit>0&&requested>0){
+   // A speed-limited Auto cruise uses the same integrated endpoints as a
+   // timed cruise, but solves for trip duration instead of peak speed.
+   const warp=Math.min(options.cruiseWarpLimit,Math.max(.1,requestedWarp??options.cruiseWarpLimit));
+   const cruiseSpeed=speedForWarp(warp),rampFraction=.20,mean=(1-rampFraction)*cruiseSpeed+.5*rampFraction*(initialSpeed+finalSpeed);
+   const T=requested/mean;
+   return {type,distanceMeters:requested,properSeconds:T,coordinateSeconds:T,dilationSeconds:0,peakSpeed:Math.max(cruiseSpeed,initialSpeed,finalSpeed),peakRapidity:0,accelerationMetersPerSecondSquared:0,warpFactor:warp,initialSpeed,finalSpeed,cruiseSpeed,rampFraction};
+  }
   if(!options.rejoin&&options.transferProperSeconds>0&&Number.isFinite(options.transferProperSeconds)&&requested>0){
    // The warp bubble's protected clock runs at chart time. Two equal smooth
    // ramps each average their endpoint speeds; solve their distance integral
@@ -28,7 +38,7 @@ export function estimateTransfer(distanceMeters,type='shuttle',requestedWarp=1,o
    const T=options.transferProperSeconds,mean=requested/T;
    const rampFraction=Math.min(.3,mean/(initialSpeed+finalSpeed||mean));
    const cruiseSpeed=(mean-.5*rampFraction*(initialSpeed+finalSpeed))/(1-rampFraction);
-   if(cruiseSpeed>speedForWarp(FLIGHT_WARP_MAX))return {error:'This trip time is too short for the Enterprise’s maximum warp.'};
+   if(cruiseSpeed>speedForWarp(FLIGHT_WARP_MAX))return {error:'This trip time is too short for the ship’s maximum warp.'};
    return {type,distanceMeters:requested,properSeconds:T,coordinateSeconds:T,dilationSeconds:0,peakSpeed:Math.max(initialSpeed,cruiseSpeed,finalSpeed),peakRapidity:0,accelerationMetersPerSecondSquared:0,warpFactor:warpForSpeed(cruiseSpeed),initialSpeed,finalSpeed,cruiseSpeed,rampFraction};
   }
   if(options.rejoin){
@@ -126,6 +136,7 @@ export function circularRadiusPlan(ra,rb,mu,height=0){
  const end=rows.at(-1);p.distanceMeters=end[1];p.dilationSeconds=end[2];p.properSeconds=p.coordinateSeconds-end[2];return p;
 }
 export function sampleCircularRadius(p,fraction){
+ if(p.kerr)return sampleKerrRadius(p,fraction);
  const u=clamp01(fraction),m=spiralKinematics(p,u),i=Math.min(SPIRAL_BINS,Math.floor(u*SPIRAL_BINS)),u0=i/SPIRAL_BINS,base=p.spiralTable[i];
  const d=u===u0?base:spiralIntegral(p,u0,u).map((v,j)=>v+base[j]);
  const [angle,distance,lag]=d,t=p.coordinateSeconds*u,tau=t-lag;
@@ -159,11 +170,11 @@ export function sampleTransfer(plan,fraction){
    const cruise=plan.cruiseSpeed??plan.rejoinCruise,T=plan.coordinateSeconds,span=plan.rampFraction??.3;
    const ramp=(t,v)=>{const s=t**4*(35+t*(-84+t*(70-20*t))),integral=t**5*(7+t*(-14+t*(10-2.5*t)));
     return [v+(cruise-v)*s,span*T*(v*t+(cruise-v)*integral)];};
-   let speed,x,sign=0;
+   let speed,x,remaining,sign=0;
    if(u<span){[speed,x]=ramp(u/span,plan.initialSpeed);sign=Math.sign(cruise-plan.initialSpeed);}
-   else if(u>1-span){let remaining;[speed,remaining]=ramp((1-u)/span,plan.finalSpeed);x=distance-remaining;sign=Math.sign(plan.finalSpeed-cruise);}
+   else if(u>1-span){[speed,remaining]=ramp((1-u)/span,plan.finalSpeed);x=distance-remaining;sign=Math.sign(plan.finalSpeed-cruise);}
    else{speed=cruise;x=T*(span*.5*(plan.initialSpeed+cruise)+(u-span)*cruise);}
-   return {fraction:u,distanceFraction:clamp01(x/distance),distanceMeters:x,speedMetersPerSecond:speed,properSeconds:u*T,coordinateSeconds:u*T,dilationSeconds:0,rapidity:0,lorentzFactor:1,accelerationSign:sign};
+   return {fraction:u,distanceFraction:clamp01(x/distance),remainingFraction:remaining===undefined?1-x/distance:remaining/distance,distanceMeters:x,speedMetersPerSecond:speed,properSeconds:u*T,coordinateSeconds:u*T,dilationSeconds:0,rapidity:0,lorentzFactor:1,accelerationSign:sign};
   }
   const velocity=plan.velocityControls||[0,0,plan.peakSpeed*8/3,0,0],integral=[0];for(const v of velocity)integral.push(integral.at(-1)+v/velocity.length);
   const distanceFraction=u===0?0:u===1?1:scalarBezier(integral,u)/(integral.at(-1)||1),seconds=u*plan.coordinateSeconds;
@@ -217,13 +228,17 @@ export const arcPlaybackFraction=transferEase;
 function straightPlayback(route,progress){
  const u=clamp01(progress),p=route.plan,warp=p?.type==='enterprise';
  if(warp&&(p.cruiseSpeed!==undefined||p.rejoinCruise!==undefined)){
-  const sample=sampleTransfer(p,u),sign=sample.accelerationSign;
-  return {sample,phaseIndex:sign>0?1:sign<0?3:2,phaseProgress:u,phase:sign>0?'Warp acceleration':sign<0?'Slowing down':'Warp cruise',distanceFraction:sample.distanceFraction,commandedThrustG:0,turnAngle:0};
+  // The neighboring playlist arc eases its presentation rate to zero at
+  // contact. Match that slope on the timed warp leg without stopping the
+  // physical ship or changing its arrival speed, proper time or ETA.
+  const t=route.endpointClock?transferEase(u):u;
+  const sample=sampleTransfer(p,t),sign=sample.accelerationSign;
+  return {sample,phaseIndex:sign>0?1:sign<0?3:2,phaseProgress:u,phase:sign>0?'Warp acceleration':sign<0?'Slowing down':'Warp cruise',distanceFraction:sample.distanceFraction,remainingFraction:sample.remainingFraction,commandedThrustG:0,turnAngle:0};
  }
- if(warp)return {phaseIndex:u<.5?1:3,phaseProgress:u,phase:u<.5?'Warp acceleration':'Slowing down',distanceFraction:transferEase(u),commandedThrustG:0,turnAngle:0};
+ if(warp)return {phaseIndex:u<.5?1:3,phaseProgress:u,phase:u<.5?'Warp acceleration':'Slowing down',distanceFraction:transferEase(u),remainingFraction:transferEase(1-u),commandedThrustG:0,turnAngle:0};
  if(!p.coast&&(p.upRapidity<1e-13||p.downRapidity<1e-13)){
   const braking=p.upRapidity<p.downRapidity;
-  return {phaseIndex:braking?3:1,phaseProgress:u,phase:braking?'Decelerating':'Accelerating',distanceFraction:transferEase(u),commandedThrustG:u>=1?0:1,turnAngle:braking?Math.PI:0};
+  return {phaseIndex:braking?3:1,phaseProgress:u,phase:braking?'Decelerating':'Accelerating',distanceFraction:transferEase(u),remainingFraction:transferEase(1-u),commandedThrustG:u>=1?0:1,turnAngle:braking?Math.PI:0};
  }
  const peak=p.peak||sampleTransfer(p,p.upRapidity/Math.max(1e-30,p.upRapidity+p.downRapidity));
  const x0=clamp01(peak.distanceMeters/p.distanceMeters),dx=clamp01((p.coast||0)/p.distanceMeters);
@@ -236,13 +251,17 @@ function straightPlayback(route,progress){
  // kilometres in the last rendered frame. Stretch near-contact screen time;
  // the remap becomes the identity (through second derivative) at the coast.
  const depth=.9*Math.min(1,p.distanceMeters/1e10),contact=t=>t*(1-depth*(1-t)**4*(1+4*t));
- let x;
+ let x,remaining;
  if(u<a){const t=contact(u/a);x=x0*transferEase(t)-a*m*h(1-t);}
  else if(u<b)x=x0+(u-a)*m;
- else {const t=1-contact((1-u)/(1-b));x=x0+dx+(1-x0-dx)*transferEase(t)+(1-b)*m*h(t);}
- return {phaseIndex,phaseProgress:phaseIndex===1?u/a:phaseIndex===2?(u-a)/(b-a):(u-b)/(1-b),phase:TRANSFER_PHASES[phaseIndex],distanceFraction:clamp01(x),commandedThrustG:u>=1||phaseIndex===2?0:1,turnAngle:Math.PI*transferEase((u-a)/(b-a))};
+ else {const t=contact((1-u)/(1-b));remaining=clamp01((1-x0-dx)*transferEase(t)-(1-b)*m*(1-t)*t**3*(4-3*t));x=1-remaining;}
+ return {phaseIndex,phaseProgress:phaseIndex===1?u/a:phaseIndex===2?(u-a)/(b-a):(u-b)/(1-b),phase:TRANSFER_PHASES[phaseIndex],distanceFraction:clamp01(x),remainingFraction:remaining??1-clamp01(x),commandedThrustG:u>=1||phaseIndex===2?0:1,turnAngle:Math.PI*transferEase((u-a)/(b-a))};
 }
 export function transferPlayback(route,progress){
+ if(route.endpointClock)progress=contactPlaybackProgress(route.endpointClock,progress,u=>baseTransferPlayback(route,u));
+ return baseTransferPlayback(route,progress);
+}
+function baseTransferPlayback(route,progress){
  if(route.straight||route.plan?.burnPlan)return straightPlayback(route,progress);
  const u=clamp01(progress),phaseIndex=u<shots[1]?0:u<shots[2]?1:u<shots[3]?2:u<shots[4]?3:4,phaseProgress=(u-shots[phaseIndex])/(shots[phaseIndex+1]-shots[phaseIndex]);
  const knots=route.playbackClock??=playbackClock(route);let lo=0,hi=knots.length-1;while(hi-lo>1){const mid=(hi+lo)>>1;if(knots[mid][0]<=u)lo=mid;else hi=mid;}
@@ -252,16 +271,21 @@ export function transferPlayback(route,progress){
 }
 // Invert the cheap analytic clock profile, so reshaping presentation time does
 // not change the total estimated onboard/reference duration or SR difference.
-export function sampleTransferAtDistance(plan,fraction){
- const d=clamp01(fraction);if(plan?.radiusTransfer)return circularSampleAt(plan,d,'distanceMeters',plan.distanceMeters);if(d===0||d===1||!plan?.distanceMeters)return sampleTransfer(plan,d);
+export function sampleTransferAtDistance(plan,fraction,remainingFraction=1-fraction){
+ const d=clamp01(fraction);if(plan?.radiusTransfer)return circularSampleAt(plan,d,'distanceMeters',plan.distanceMeters);if(d===0||remainingFraction<=0||!plan?.distanceMeters)return sampleTransfer(plan,d);
  if(plan.burnPlan){
   const x=d*plan.distanceMeters,start=plan.peak.distanceMeters,after=x>=start+plan.coast;
-  const proper=x>=start&&!after?plan.peak.properSeconds+(x-start)/plan.coast*plan.coastTau:sampleTransferAtDistance(plan.burnPlan,(x-(after?plan.coast:0))/plan.burnPlan.distanceMeters).properSeconds+(after?plan.coastTau:0);
+  if(after){
+   const tail=remainingFraction*plan.distanceMeters/plan.burnPlan.distanceMeters,burn=sampleTransferAtDistance(plan.burnPlan,1-tail,tail);
+   const proper=burn.properSeconds+plan.coastTau;
+   return {...burn,fraction:proper/plan.properSeconds,distanceFraction:d,distanceMeters:x,properSeconds:proper,coordinateSeconds:burn.coordinateSeconds+plan.coastT,dilationSeconds:burn.dilationSeconds+plan.coastLag};
+  }
+  const proper=x>=start?plan.peak.properSeconds+(x-start)/plan.coast*plan.coastTau:sampleTransferAtDistance(plan.burnPlan,x/plan.burnPlan.distanceMeters).properSeconds;
   return {...sampleTransfer(plan,proper/plan.properSeconds),distanceFraction:d,distanceMeters:x};
  }
  if(plan.type==='enterprise'){let lo=0,hi=1;for(let i=0;i<24;i++){const mid=(lo+hi)/2;if(sampleTransfer(plan,mid).distanceFraction<d)lo=mid;else hi=mid;}return {...sampleTransfer(plan,(lo+hi)/2),distanceFraction:d,distanceMeters:d*plan.distanceMeters};}
  const eta0=plan.initialRapidity||0,etaf=plan.finalRapidity||0,up=plan.upRapidity??plan.peakRapidity,down=plan.downRapidity??plan.peakRapidity,peakDistance=c*c/a*(gammaExcess(plan.peakRapidity)-gammaExcess(eta0)),x=d*plan.distanceMeters,outward=x<=peakDistance;
- const g=(outward?gammaExcess(eta0)+x*a/(c*c):gammaExcess(etaf)+(plan.distanceMeters-x)*a/(c*c)),eta=2*Math.asinh(Math.sqrt(Math.max(0,g)*.5)),elapsed=outward?eta-eta0:up+plan.peakRapidity-eta;
+ const g=(outward?gammaExcess(eta0)+x*a/(c*c):gammaExcess(etaf)+remainingFraction*plan.distanceMeters*a/(c*c)),eta=2*Math.asinh(Math.sqrt(Math.max(0,g)*.5)),elapsed=outward?eta-eta0:up+plan.peakRapidity-eta;
  return {...sampleTransfer(plan,elapsed/Math.max(1e-30,up+down)),distanceFraction:d,distanceMeters:x};
 }
 // de Casteljau evaluates cubic legacy curves and degree-seven orbit blends.

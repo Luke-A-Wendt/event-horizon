@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {parseScene,serializeScene} from '../dist/scene-file.js';
-import {restoreRenderer} from '../dist/render-state.js';
+import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
+import {studyReplayOpacity,displayStudyReplay} from '../dist/study-replay.js';
+import {captureAnnotationFrame} from '../dist/annotations.js';
 import {installPilotControls,formatFlightSpeed} from '../dist/pilot-ui.js';
 import {formatClockDuration} from '../dist/object-clocks.js';
 import {REFERENCE_RG_METERS as RG} from '../dist/objects.js';
@@ -29,7 +31,7 @@ try{
   }
   const nodes=r.getFlightSequence(id).nodes;
   assert.equal(nodes.length,scene==='nasa-shuttle'?4:2);
-  assert(nodes.every(n=>n.targetId===body&&n.extraLaps===1));
+  assert(nodes.every((n,i)=>n.targetId===body&&n.extraLaps===(scene==='nasa-shuttle'?i+1:1)));
   if(scene==='nasa-shuttle'){
    assert(nodes.every((n,i)=>!i||n.radiusMeters<nodes[i-1].radiusMeters),'All four visits descend in radius');
   }
@@ -44,16 +46,16 @@ try{
    const basis=r.configCache.primaryBasis,x=dot(delta,basis[0]),z=dot(delta,basis[2]);
    return {x,z,R:Math.hypot(x,z)};
   }
-  for(let leg=0;leg<nodes.length;leg++){
+  for(let leg=0;leg<(scene==='nasa-shuttle'?nodes.length-1:nodes.length);leg++){
    const start=nodes[leg].radiusMeters,end=nodes[(leg+1)%nodes.length].radiusMeters;
    let prev=location(),sweep=0,burnSeconds=0,sawBurn=false,lastAngle=0,prevLocalClock=0;
-   for(let tick=0;tick<650;tick++){
+   for(let tick=0;tick<4500;tick++){
     const before=r.transfer;
     r.advanceChartStages(step);
     const t=r.transfer,q=r.getFlightSequence(id),w=q.orbitWait,now=location();
     assert(!q.error,scene+' leg '+leg+': '+q.error);
     const ccw=Math.atan2(prev.z*now.x-prev.x*now.z,prev.x*now.x+prev.z*now.z);
-    // Up to thousands of physical turns are compressed into ten seconds.
+    // Up to thousands of physical turns can fold into a representative spiral.
     // A pair of apparent positions alone cannot determine turn direction.
     if(!before){assert(ccw>=-1e-8,'Parking lap reversed');sweep+=ccw;}
     if(t){
@@ -63,12 +65,12 @@ try{
     }
     if(before){burnSeconds+=step;}
     if(t&&!before){
-     near(sweep,tau,.001,'One complete departure lap');
+     near(sweep,tau*nodes[leg].extraLaps,.001,'All departure laps complete');
      near(now.R,start,start*1e-8,'Burn begins on occupied orbit');
     }
     if(t){
      assert((now.R-prev.R)*Math.sign(end-start)>=-start*1e-9,'Actual radius moves toward target');
-     if(t.elapsed>3&&t.elapsed<7){
+     if(t.progress>.35&&t.progress<.65){
       sawBurn||=ship.flight.thrust>0;assert(ship.flight.thrust>=0&&ship.flight.thrust<=1+1e-10,'The engine command is at most 1g, even on an unsupported trajectory');
       const s=t.sample,clock=r.getObjectClock(id),v=ship.flight.velocity;
       const radial=dot(v,t.orbitRadial),speed=Math.hypot(...v);
@@ -79,7 +81,7 @@ try{
       near(clock.speedMetersPerSecond,speed,Math.max(1,speed)*1e-10,'Telemetry speed matches actual vector');
       assert(Number.isFinite(clock.accelerationG)&&clock.accelerationG>=0);
       assert(Number.isFinite(clock.rateFactor)&&clock.rateFactor>=1);
-      ui.update();assert.equal(el('pilotLegSpeed').textContent,'v = '+formatFlightSpeed(speed));
+      ui.update();assert.equal(el('pilotLegSpeed').textContent,'v = '+formatFlightSpeed(Math.hypot(s.chartVr??s.radialVelocity,s.chartVphi??s.tangentialVelocity)));
       assert(now.R>Math.min(start,end)&&now.R<Math.max(start,end));
      }
     }
@@ -91,40 +93,69 @@ try{
      near(Number(bar.value),elapsed/proper,1e-6,'Progress belongs to this maneuver');
     }
     if(before&&!t){
-     assert(sawBurn,'The live motor fired during the radius change');near(burnSeconds,10,step+.000001,'Ten seconds of transfer playback');
+     assert(sawBurn,'The live motor fired during the radius change');near(burnSeconds,before.wallSeconds,step+.000001,'Each burn consumes its scheduled presentation interval');
      assert.equal(ship.parentId,body);near(now.R,end,end*1e-8,'Selected radius reached');
      assert(q.orbitWait,'Arrival starts the next orbit');
      if(scene==='nasa-shuttle'){
       ui.update();const clock=r.getObjectClock(id),h=clock.horizonGapMeters;
       if(leg===2){
-       const hull=r.objectRadius(ship)*RG;assert(h>=hull&&h<=3*hull,'The last orbit clears the horizon by a small finite hull clearance: '+h);
-       assert(clock.rateFactor>100&&Number.isFinite(clock.rateFactor),'Finite exterior clock');
-       assert(clock.crewLoadG>9&&clock.requiredSupportG>1,'The near-horizon track demands unsafe proper support');
-       assert(!el('pilotEngineAlert')&&!el('pilotCrewAlert').hidden,'The live instruments warn at the exceptionally deep stop');
-       assert(clock.highGExposureSeconds>=clock.extremeGExposureSeconds&&clock.extremeGExposureSeconds>0,'Simulated onboard time is counted through dangerous exposure');
-       const snapshot=parseScene(serializeScene(r));restoreRenderer(copy,snapshot);
-       near(copy.getObjectClock(id).extremeGExposureSeconds,clock.extremeGExposureSeconds,1e-7,'Saved exposure survives reload');
-      }else if(leg===3){
-       assert(clock.crewLoadG<1.5&&clock.extremeGExposureSeconds===0,'Returning outside resets continuous exposure');
-       assert(el('pilotCrewAlert').hidden,'A past deep visit does not leave a stale live danger warning');
+       near(end,1.01*r.configCache.isco[0]*r.massScale*RG,.01,'Final stop beyond the prograde ISCO');
+       assert(h>0&&clock.rateFactor>1&&Number.isFinite(clock.rateFactor));
+       assert.equal(clock.requiredSupportG,0,'The stable circular geodesic needs no thrust');
+       assert.equal(clock.crewLoadG,0);assert(el('pilotCrewAlert').hidden,'No lethal acceleration warning during free fall');
       }
      }
      break;
     }
-    if(tick===649)assert.fail('No arrival in '+scene+' leg '+leg);
+    if(tick===4499)assert.fail('No arrival in '+scene+' leg '+leg);
     prev=now;
    }
   }
+  if(scene==='nasa-shuttle'){
+   const last=nodes.at(-1),q=r.flightSequences[id],w=q.orbitWait;
+   assert(w?.replayAfterLap&&!w.leg&&w.sweepRadians===4*tau&&w.wallSeconds>=4*8,'Final orbit has four full laps and no outbound transfer');
+   const startPhase=w.startPhase;
+   const mask=el('sceneReplay');let sawDim=false,lastShade=0;
+   assert.equal(studyReplayOpacity(r),0,'No replay mask during the innermost laps');
+
+   r.state.paused=true;const frozen=w.elapsed;r.advanceChartStages(step);assert.equal(w.elapsed,frozen);r.state.paused=false;
+   for(let guard=0;q.orbitWait===w;guard++){
+    assert(guard<Math.ceil(w.wallSeconds/step)+2,'Final lap must finish');
+    r.advanceChartStages(Math.min(step,w.wallSeconds-w.elapsed));assert(!r.transfer,'No ascent burn is scheduled');
+    if(q.orbitWait===w){
+     near(location().R,last.radiusMeters,last.radiusMeters*1e-8,'Final lap stays at the last radius');
+     const shade=studyReplayOpacity(r);assert(shade>=lastShade,'Fade-out never reverses');
+     if(!sawDim&&shade>.25&&shade<.75){
+      sawDim=true;r.state.paused=true;r.advanceChartStages(step);assert.equal(studyReplayOpacity(r),shade,'Pausing freezes the fade');
+      restoreRenderer(copy,snapshotRenderer(r));const frame=captureAnnotationFrame(copy);
+      displayStudyReplay(mask,frame.replayShade);assert(!mask.hidden);near(Number(mask.style.opacity),shade,1e-9,'Worker frame and live overlay agree');r.state.paused=false;
+     }
+     lastShade=shade;
+    }
+   }
+   near(Math.abs(w.lastPhase-startPhase),4*tau,1e-8,'Final lap completed before replay');
+   near(location().R,nodes[0].radiusMeters,nodes[0].radiusMeters*1e-8,'One frame restores the first radius');
+   assert.equal(ship.phase,q.replayPhase);assert.equal(q.legsCompleted,0);
+   assert.equal(ship.clock.properSeconds,0);assert(q.orbitWait&&!q.orbitWait.replayAfterLap);
+   assert(sawDim&&lastShade===1&&studyReplayOpacity(r)===1,'The rewind occurs under full black');
+   r.advanceChartStages(.65);const opening=studyReplayOpacity(r);assert(opening>0&&opening<1,'Opening radius fades into view');
+   r.advanceChartStages(.65);displayStudyReplay(mask,studyReplayOpacity(r));assert(mask.hidden,'No overlay remains on the new run');
+   const reloaded=parseScene(serializeScene(r)).flightSequences[id];assert.equal(reloaded.replayPhase,q.replayPhase);assert(reloaded.restartOnLoop);
+   const once=r.setFlightSequence(id,q.nodes,{loop:false});assert(!once.loop&&once.restartOnLoop);
+   const edited=r.setFlightSequence(id,q.nodes.slice(0,2),{loop:true});assert(edited.loop&&!edited.restartOnLoop,'A custom route is flown as entered');
+  }
  }
  r.loadScene('orbital-expedition');r.sceneLoad=null;r.fillHoles();r.fillObjects();ui.update();
- const station=r.objects.find(o=>o.type==='iss'),clock=r.getObjectClock(station.id);
+ const station=r.objects.find(o=>o.type==='habitat'),clock=r.getObjectClock(station.id);
  assert.equal(r.focusId,station.id);assert(!r.autopilot?.enabled,'The observing station is not drivable');
  assert(el('pilotControls').hidden,'The station does not expose a playlist');
- assert(!d.querySelector('.motion-stack').hidden,'The ISS keeps its flight instruments');
+ assert(!d.querySelector('.motion-stack').hidden,'The habitat keeps its flight instruments');
  assert(clock.speedMetersPerSecond>0&&clock.accelerationG>0&&clock.rateFactor>1);
- assert.equal(el('pilotLegSpeed').textContent,'v = '+formatFlightSpeed(clock.speedMetersPerSecond));
+ assert.equal(el('pilotLegSpeed').textContent,'v = '+formatFlightSpeed(clock.distantSpeedMetersPerSecond));
  assert(!el('pilotDilationRateRow').hidden&&!el('pilotDilationRow').hidden);
- assert(!el('pilotEngineAlert')&&!el('pilotCrewAlert').hidden,'ISS displays the warnings applicable to its own supported track');
- assert(!el('shuttleEscapeNote').hidden&&!el('pilotSpeedLog').parentElement.hidden,'The station also reports the return benchmark and relativistic speed');
- console.log('PASS: complete Edge and Earth radius loops; actual radial and tangential velocity, thrust cap, exterior-horizon warnings, ISS instruments, saved playlist, onboard ETA and progress.');
+ assert.equal(clock.crewLoadG,0,'The habitat hub follows a free orbit');
+ assert(el('shuttleEscapeNote').hidden,'A passive station has no shuttle return maneuver');
+ assert(!el('pilotSpeedLog').parentElement.hidden,'Crew light-speed gap remains visible');
+ assert.match(el('pilotRatioLabel').textContent,/log₁₀/);
+ console.log('PASS: complete Edge and Earth radius loops; actual radial and tangential velocity, thrust cap, stable Kerr parking, ISS instruments, saved playlist, onboard ETA and progress.');
 }finally{r.dispose();copy.dispose();}

@@ -13,7 +13,7 @@ assert(html.includes('intrinsically flat'));
 assert(html.includes('not a numerical-relativity prediction'));
 assert(html.includes('Automatic illustrative bubble radius in ship bounding radii'));
 assert(html.includes('2.4 ship radii at W = 0 to 6.7 at W = 10'));
-assert(html.includes('Stop motion smoothly brakes both forward motion and turning'));
+assert(html.includes('Stop motion brakes the NASA Warp Explorer’s warp motion and turning'));
 assert(html.includes('Implemented illustrative raised and lowered sheet'));
 assert(html.includes('no artificial axial bias displaces the ship'));
 assert(!/Bubble radius remains the chosen value|reference sheet stays planar|Straighten &amp; stop/.test(html));
@@ -24,7 +24,7 @@ assert(blackHoleContainer.innerHTML.includes('Painlevé–Gullstrand'));
 assert(blackHoleContainer.innerHTML.includes('virtual luminous reference sheet'));
 assert(blackHoleContainer.innerHTML.includes('already-bent ray path'));
 assert(blackHoleContainer.innerHTML.includes('not an exact Kerr'));
-assert(html.includes('enables or disables every reference grid together'));
+assert(html.includes('<strong>Warp grid only</strong> shows just the local sheet'));
 for(const match of (html+blackHoleContainer.innerHTML).matchAll(/<math\b[^>]*>([\s\S]*?)<\/math>/g)){
  const stack=[{name:'math',count:0}];
  for(const token of match[1].matchAll(/<(\/)?([a-z]+)(?:\s[^>]*)?(\/?)>/g)){

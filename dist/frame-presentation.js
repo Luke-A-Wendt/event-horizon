@@ -1,3 +1,19 @@
+// Yield a painted handoff before graphics work. Browsers may suspend rAF in a
+// visible embedded viewport or between callbacks when a tab goes to sleep.
+export function waitForScenePaint(clock=globalThis){
+ return new Promise(resolve=>{
+  if(clock.document?.hidden){clock.setTimeout(resolve,0);return;}
+  let frame,afterPaint;
+  const finish=()=>{
+   clock.clearTimeout(deadline);clock.clearTimeout(afterPaint);
+   if(frame!=null)clock.cancelAnimationFrame(frame);
+   resolve();
+  };
+  const deadline=clock.setTimeout(finish,400);
+  frame=clock.requestAnimationFrame(()=>{frame=clock.requestAnimationFrame(()=>{frame=null;afterPaint=clock.setTimeout(finish,0);});});
+ });
+}
+
 // Only diagnostic frames use this explicit presentation path. Transferred
 // ImageBitmaps move GPU-backed storage; there is no readPixels / CPU pixel copy.
 // The scene bitmap and its SVG diagnostics are installed in one main-thread task.

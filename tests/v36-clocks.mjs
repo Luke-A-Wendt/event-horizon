@@ -13,8 +13,8 @@ const start=thrust.lagSeconds;advanceObjectClock(thrust,1,clockRate({rapidityVec
 const coarse=createObjectClock(),fine=createObjectClock();advanceObjectClock(coarse,100,clockRate(),[a,0,0]);for(let i=0;i<1000;i++)advanceObjectClock(fine,.1,clockRate({rapidityVector:fine.rapidityVector}),[a,0,0]);relative(coarse.lagSeconds,fine.lagSeconds);
 const gravity=clockRate({positionMeters:[1e20,0,0],sources:[{id:'star',massSolar:1,positionMeters:[0,0,0]}]}),weak=createObjectClock();assert(gravity.gravityExcess>0);advanceObjectClock(weak,1,gravity);assert(weak.lagSeconds>0,'Weak-field excess survives rate rounding to1');
 const rate=clockRate({rapidityVector:[1,0,0]}),coast=createObjectClock();coast.rapidityVector=[1,0,0];advanceObjectClock(coast,10,rate);relative(coast.lagSeconds,10*(Math.cosh(1)-1));
-for(const [seconds,text] of [[0,'0 s'],[1e-9,'1.0 ns'],[1.2e-6,'1.2 µs'],[.1234,'120 ms'],[3.7,'3.7 s'],[59.9,'1.0 min'],[2340,'39 min'],[3600,'1.0 h'],[86400,'1.0 d'],[31557600,'1.0 yr'],[31557600e6,'1.0 million yr']])assert.equal(formatClockDuration(seconds),text);
-for(const [q,text] of [[1,'1.0×'],[18,'18×'],[1800,'1,800×'],[1.8e6,'1.8 million×'],[1e9,'1.0 billion×']])assert.equal(formatClockRate(q),text);
+for(const [seconds,text] of [[0,'0 s'],[1e-9,'1.0 ns'],[1.2e-6,'1.2 µs'],[.1234,'120 ms'],[3.7,'3.7 s'],[59.9,'1.0 min'],[2340,'39 min'],[3600,'1.0 h'],[86400,'1.0 d'],[31557600,'1.0 yr'],[31557600e6,'1.0 Myr']])assert.equal(formatClockDuration(seconds),text);
+for(const [q,text] of [[1,'1.0×'],[18,'18×'],[1800,'1,800×'],[1.8e6,'1.8M×'],[1e9,'1B×']])assert.equal(formatClockRate(q),text);
 class LogicHost extends RenderHost{startBackend(){}queueSnapshot(){}resize(){}}
 for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
  const f=fixture(),canvas=Class===CpuRenderer?new CpuCommandCanvas():f.canvas;if(Class===CpuRenderer)canvas.getBoundingClientRect=f.canvas.getBoundingClientRect;

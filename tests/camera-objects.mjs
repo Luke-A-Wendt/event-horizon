@@ -30,7 +30,7 @@ const localBefore=r.target.focusDistance;r.zoom(.5);near(r.target.focusDistance,
 r.focusObject(ship.id,'onboard');r.render();assert.equal(r.cameraFrame.inspectIndex,-1);assert.equal(r.cameraFrame.hideIndex,r.objectFrames.find(o=>o.id===ship.id).index);assert.equal(r.state.viewMode,'look');
 const eye=[...r.cameraFrame.observer];r.look('outward');r.render();for(let i=0;i<3;i++)near(r.cameraFrame.observer[i],eye[i]);
 r.rotate(.2,.1);const yaw=r.target.lookYaw;r.rotate(.2,.1);near(r.target.lookYaw,yaw+.2);
-near(r.getState().cameraDistanceMeters,Math.hypot(0,.22,.35)*physicalRadius*REFERENCE_RG_METERS,1e-8);
+near(r.getState().cameraDistanceMeters,Math.hypot(0,.105,.65)*physicalRadius*REFERENCE_RG_METERS,1e-8);
 r.releaseFocus();assert.equal(r.focusId,null);assert.deepEqual(r.camera,overview.camera);assert.deepEqual(r.target,overview.target);assert.equal(r.state.viewMode,overview.viewMode);assert.equal(r.cameraFrame.inspectIndex,-1);near(Math.hypot(...r.cameraFrame.observer),overview.camera.distance);r.focusObject(ship.id,'track');
 r.removeObject(ship.id);assert.equal(r.focusId,null);assert.equal(r.getObjects().length,1);assert.equal(r.getState().selectedId,shuttle.id);
 r.clearObjects();assert.equal(r.getObjects().length,0);assert.equal(r.focusId,null);

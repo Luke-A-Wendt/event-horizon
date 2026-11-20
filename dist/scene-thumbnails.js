@@ -1,5 +1,8 @@
 // Decode only nearby scene cards, with two requests in flight. In particular,
 // do not depend on native lazy loading noticing a formerly hidden dialog.
+// The release builder substitutes its embedded image map here. Keep only
+// short scene IDs in the gallery markup, including during startup.
+const thumbnailUrl=id=>`assets/atlas-${id}.webp`;
 export function installSceneThumbnails(grid,dialog,clock=globalThis){
  const entries=[...grid.querySelectorAll('img[data-thumbnail]')].map(img=>({img,art:img.parentNode,status:img.parentNode.querySelector('[data-thumbnail-status]'),state:'idle',attempts:0,visit:0,serial:0,cleanup:null}));
  const byArt=new Map(entries.map(entry=>[entry.art,entry]));
@@ -39,7 +42,7 @@ export function installSceneThumbnails(grid,dialog,clock=globalThis){
    };
    entry.cleanup=cleanup;img.addEventListener('load',loaded);img.addEventListener('error',failed);
    timer=clock.setTimeout(failed,8000);img.loading='eager';img.decoding='async';
-   img.removeAttribute('src');img.src=img.dataset.thumbnail;
+   img.removeAttribute('src');img.src=thumbnailUrl(img.dataset.thumbnail);
    if(img.complete&&img.naturalWidth>0)loaded();
   }
  }

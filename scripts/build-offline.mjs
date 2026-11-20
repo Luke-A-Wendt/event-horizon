@@ -9,6 +9,7 @@ const source = path.join(root, 'dist');
 const digest=value=>createHash('sha256').update(value).digest('hex').slice(0,16);
 const modules = new Map();
 const order = [];
+const emittedExports = new Map();
 const imports = /^import\s+\{([^}]+)\}\s+from\s+['"]\.\/([^'"]+)['"];?\s*$/gm;
 const declarations = /^export\s+(?:const|let|function|class)\s+([A-Za-z_$][\w$]*)/gm;
 const exportLists = /^export\s*\{([^}]+)\};?\s*$/gm;
@@ -25,7 +26,14 @@ async function visit(name) {
   if (!/^[a-z][a-z0-9-]*\.js$/.test(name)) throw new Error('Unsupported module path');
   const code = await readFile(path.join(source, name), 'utf8');
   modules.set(name, code);
-  for (const match of code.matchAll(imports)) await visit(match[2]);
+  emittedExports.set(name,new Set(exportedNames(code)));
+  for (const [,bindings,dependency] of code.matchAll(imports)){
+    await visit(dependency);
+    // Destructuring a missing export from a bundled module yields undefined.
+    // Match the native module loader: fail the build before it ships.
+    for (const binding of bindings.split(',').map(s=>s.trim()).filter(Boolean))
+      if(!emittedExports.get(dependency).has(binding))throw new Error(`${name} imports ${binding} from ${dependency}, but that name would not be exported by the bundle. Use an individual declaration or an explicit export list.`);
+  }
   order.push(name);
 }
 // Worker code is bundled before the page. Its source is an embedded string in
@@ -73,10 +81,10 @@ for (const name of order) {
   code = code.replace(imports, (_, bindings, module) => `const {${bindings}} = __modules[${JSON.stringify(module)}];`)
     .replace(exportLists, '')
     .replace(/^export\s+(?=(?:const|let|function|class)\s)/gm, '');
-  if (name === 'app.js') {
-    const relative = 'assets/atlas-${p.id}.webp';
-    if (!code.includes(relative)) throw new Error('Atlas template changed; update its asset embedding.');
-    code = code.replaceAll(relative, '${__atlasImages[p.id]}');
+  if (name === 'scene-thumbnails.js') {
+    const relative = '`assets/atlas-${id}.webp`';
+    if (!code.includes(relative)) throw new Error('Atlas URL changed; update its asset embedding.');
+    code = code.replace(relative, '__atlasImages[id]');
   }
   if (/^\s*(?:import|export)\s/m.test(code)) throw new Error(`Unsupported module syntax in ${name}`);
   javascript += `\n// Module: ${name}\n__modules[${JSON.stringify(name)}] = (() => {\n${code}\nreturn {${names.join(',')}};\n})();\n`;
@@ -120,7 +128,21 @@ const retained=new Set([...current,...previous]);for(const name of await readdir
 await writeFile(manifestPath,JSON.stringify({current,previous},null,2)+'\n');
 const recovery=`<script>function eventHorizonEntryFailed(){if(location.protocol==='http:'||location.protocol==='https:'){var u=new URL(location.href);if(u.searchParams.get('eh-refresh')!=='${digest(webJavascript)}'){u.searchParams.set('eh-refresh','${digest(webJavascript)}');location.replace(u.href);return;}}var p=document.createElement('p');p.setAttribute('role','alert');p.textContent='The application files could not load. Refresh to retry.';p.style.cssText='position:fixed;inset:30% 12%;z-index:9999;background:#081321;color:#e4f5ff;padding:24px;text-align:center';document.body.append(p);}</script>`;
 const planetLoader=`<script>globalThis.__EVENT_HORIZON_LOAD_PLANETS=function(){if(globalThis.__EVENT_HORIZON_PLANETS_REQUESTED)return;globalThis.__EVENT_HORIZON_PLANETS_REQUESTED=true;var s=document.createElement('script');s.src=(globalThis.__EVENT_HORIZON_ASSET_BASE||'')+'assets/${dataName}';s.onerror=function(){(globalThis.__EVENT_HORIZON_PLANET_DATA||(globalThis.__EVENT_HORIZON_PLANET_DATA={atlas:'',maps:{},meta:{}})).error='Included surface detail unavailable; using procedural surfaces.';};document.head.append(s);};</script>`;
-const entry=`<!-- Hosted entry start -->${recovery}${planetLoader}<script defer src="assets/${appName}" onerror="eventHorizonEntryFailed()"></script><!-- Hosted entry end -->`;
+// Deep links can spend their first few seconds waiting for the application
+// download. Paint the correct heading from the same catalog as the renderer.
+const headings=Object.fromEntries(config.SCENE_PRESETS.map(scene=>[scene.id,[scene.number,scene.title,scene.subtitle]]));
+const headingBoot=`<script id="scene-link-heading">(() => {
+ const id=new URLSearchParams(location.search).get('scene');
+ if(!id)return;
+ const headings=${JSON.stringify(headings).replaceAll('<','\\u003c')};
+ if(!Object.hasOwn(headings,id))return;
+ const [number,title,subtitle]=headings[id];
+ document.getElementById('sceneNumber').textContent=number+' / '+title.toUpperCase();
+ document.getElementById('sceneTitle').textContent=title;
+ document.getElementById('sceneSubtitle').textContent=subtitle;
+ document.getElementById('currentScene').textContent=title;
+})();</script>`;
+const entry=`<!-- Hosted entry start -->${headingBoot}${recovery}${planetLoader}<script defer src="assets/${appName}" onerror="eventHorizonEntryFailed()"></script><!-- Hosted entry end -->`;
 const hosted=webShell.replace('<link rel="stylesheet" href="style.css">',`<link rel="stylesheet" href="assets/${styleName}">`).replace('<script type="module" src="app.js"></script>',entry);
 await writeFile(path.join(source,'index.html'),hosted);
 // GitHub Pages at repository root uses the same immutable local assets as

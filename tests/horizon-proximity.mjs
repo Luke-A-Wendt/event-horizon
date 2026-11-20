@@ -3,7 +3,7 @@ import {BlackHoleRenderer} from '../dist/renderer.js';
 import {REFERENCE_RG_METERS as RG} from '../dist/objects.js';
 import {fixture} from './render-fixture.mjs';
 const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});
-for(const [scene,type] of [['nasa-shuttle','shuttle'],['radiant-descent','astronaut'],['orbital-expedition','iss'],['warp-orbit','enterprise']]){
+for(const [scene,type] of [['nasa-shuttle','shuttle'],['radiant-descent','astronaut'],['orbital-expedition','habitat'],['warp-orbit','enterprise']]){
  r.loadScene(scene);const o=r.objects.find(o=>o.type===type);
  if(type==='astronaut'){r.time=10;r.fillObjects();}
  const near=r.getHorizonProximity(o.id);assert(near?.gapMeters>0,scene);if(type==='astronaut')assert(Math.abs(near.gapMeters-15)<.001);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {CpuQualityBudget,CPU_QUALITY_PROFILES,CPU_ADAPTIVE_PROFILES,CPU_STARTUP_PROFILE} from '../dist/cpu-quality.js';
+import {CpuQualityBudget,CPU_LIVE_FLOOR,CPU_QUALITY_PROFILES,CPU_ADAPTIVE_PROFILES,CPU_STARTUP_PROFILE} from '../dist/cpu-quality.js';
 
 const b=new CpuQualityBudget();
 assert.equal(b.profile,CPU_STARTUP_PROFILE);
@@ -47,9 +47,22 @@ for(const power of [1.5,2,3])for(const base of [3,10,25,60,150])for(const start 
  while(now<12000){
   const cost=2+base*(x.profile.width/224)**power;
   now+=Math.max(cost,1000/30);x.note(cost,now);
-  if(now>8000)settled.push({rung:x.rung,fps:1000/cost});
+  if(now>8000)settled.push({rung:x.rung,fps:1000/cost,target:x.cadence.target});
  }
  assert.equal(new Set(settled.map(s=>s.rung)).size,1,`Stable rung for ${power}/${base}/${start}`);
- for(const s of settled)assert(s.fps>=25&&(s.fps<=35||s.rung===CPU_ADAPTIVE_PROFILES.length-1),`Target band or Ultra ceiling for ${power}/${base}/${start}`);
+ for(const s of settled){
+  if(s.target===15)assert(s.rung>=CPU_LIVE_FLOOR&&(s.fps>=13||s.rung===CPU_LIVE_FLOOR),'Readable live resolution at reduced cadence');
+  else assert(s.fps>=25&&(s.fps<=35||s.rung===CPU_ADAPTIVE_PROFILES.length-1),`Target band or Ultra ceiling for ${power}/${base}/${start}`);
+ }
 }
 console.log('PASS: CPU fidelity survives transitions, responsive proportional adaptation reaches Ultra, zero-frame relief, manual tiers, and interaction headroom.');
+
+{
+ const x=new CpuQualityBudget();
+ for(let t=0;t<12000;t+=55){x.noteInteraction(t);x.note(55,t);}
+ assert(x.rung>=CPU_LIVE_FLOOR,'Continuous flight input cannot pin the CPU preview');
+ assert.equal(x.cadence.target,15);
+ for(let t=12000;t<20000;t+=33)x.note(15,t);
+ assert.equal(x.cadence.target,30,'Measured recovery restores preferred CPU cadence');
+ assert(x.rung>CPU_LIVE_FLOOR);
+}

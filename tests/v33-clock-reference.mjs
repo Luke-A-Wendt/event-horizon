@@ -10,7 +10,8 @@ class LogicHost extends RenderHost{startBackend(){}queueSnapshot(){}resize(){}}
 const near=(a,b,t=1e-10)=>assert(Math.abs(a-b)<=Math.max(1,Math.abs(a),Math.abs(b))*t,`${a} ≠ ${b}`);
 for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
  const f=fixture(),canvas=Class===CpuRenderer?new CpuCommandCanvas():f.canvas;if(Class===CpuRenderer)canvas.getBoundingClientRect=f.canvas.getBoundingClientRect;
- const r=new Class(canvas,{autoStart:false,bindControls:false});r.loadScene('disk');
+ const r=new Class(canvas,{autoStart:false,bindControls:false});r.loadScene('disk');r.update({disk:false}); // Remove disc lift for the near-horizon equatorial reference.
+
  const actors=['astronaut','shuttle','iss'].map(type=>{const id=r.addObject(type,12,0,1).id;return r.objects.find(o=>o.id===id);});
  for(const actor of actors){
   const unit=r.massScale*REFERENCE_RG_METERS;
@@ -27,10 +28,14 @@ for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
  }
  const rates=actors.map(o=>r.getObjectClock(o.id).rateFactor);rates.forEach(rate=>near(rate,rates[0]));
  let now=1000;r.lastTime=now;r.sceneLoad?.complete(r.sceneLoad.revision);r.state.paused=false;r.state.speed=1;
- function tick(){const before=actors.map(o=>o.clock.properSeconds);now+=100;r.advanceSimulation(now);actors.forEach((o,i)=>near(o.clock.properSeconds-before[i],.1));}
+ function tick(){
+  const before=actors.map(o=>o.clock.properSeconds),t0=r.time;
+  now+=100;r.advanceSimulation(now);const distant=(r.time-t0)*18*REFERENCE_RG_METERS/299792458;
+  actors.forEach((o,i)=>near(o.clock.properSeconds-before[i],distant/r.getObjectClock(o.id).rateFactor));
+ }
  tick();const ship=actors.find(o=>o.type==='shuttle'),beforeDrive=structuredClone(ship.clock);
  r.setFreeDrive(ship.id,true);assert.deepEqual(ship.clock,beforeDrive);tick();
- r.setFreeDrive(ship.id,false);tick();r.state.speed=2;const before=ship.clock.properSeconds;now+=100;r.advanceSimulation(now);near(ship.clock.properSeconds-before,.1);
+ r.setFreeDrive(ship.id,false);tick();r.state.speed=2;tick();
  r.state.paused=true;const paused=structuredClone(ship.clock);now+=100;r.advanceSimulation(now);assert.deepEqual(ship.clock,paused);
  const nearMass=r.getObjectClock(actors[0].id);r.update({mass:r.state.mass*.5});const farMass=r.getObjectClock(actors[0].id);assert(farMass.rateFactor<nearMass.rateFactor,'Meter-based orbit responds immediately to central mass edits');
  for(const actor of actors){const reading=r.getObjectClock(actor.id);near(reading.properSeconds+reading.lagSeconds,reading.coordinateSeconds);assert(reading.lagSeconds<=reading.coordinateSeconds);}

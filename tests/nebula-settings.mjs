@@ -9,7 +9,7 @@ assert.equal(DEFAULTS.nebulaVolume,false);assert.equal(DEFAULTS.nebulaMulticolor
 for(const id of ['nebula','dust-cathedral','bridge-nebulae']){const s=makePreset(id);assert(s.nebula&&s.nebulaVolume,id);assert.equal(s.nebulaMulticolor,id!=='bridge-nebulae',id+' palette');}
 assert(!SCENE_PRESETS.some(s=>s.id==='nebula-heart'));
 assert.equal(makePreset('warp-cruise').nebulaMulticolor,false);
-assert.equal(SCENE_PRESETS.find(s=>s.id==='planet').objects[0].tidalDeformation,.35);
+assert.equal(SCENE_PRESETS.find(s=>s.id==='planet').objects[0].catalogId,'pelagia-ocean');
 assert(SCENE_PROGRESSIONS.Geometry.includes('bridge-blackhole'));assert(!SCENE_PROGRESSIONS.Wormholes.includes('bridge-blackhole'));
 const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});r.loadScene('nebula');
 for(const preset of ['wisps','clouds','storm']){
@@ -23,4 +23,4 @@ for(const preset of ['wisps','clouds','storm']){
 r.dispose();
 const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');for(const key of fields)assert(app.includes(`'${key}'`),`${key} has a control`);
 assert(app.includes("$('nebulaColorControls').hidden=!state.nebulaMulticolor"));assert(app.includes("$('nebulaVolumeControls').hidden=!state.nebulaVolume"));
-console.log('PASS: nebula controls/defaults, curated layered scenes, valid YAML roundtrips, bounded parameters, color validation, reduced ocean tide, and bridge grouping.');
+console.log('PASS: nebula controls/defaults, curated layered scenes, valid YAML roundtrips, bounded parameters, color validation, equilibrium ocean preset, and bridge grouping.');

@@ -27,12 +27,13 @@ export function installRenderWorker(scope,dependencies={}){
   globalThis.requestAnimationFrame=fn=>setTimeout(()=>fn(performance.now()),16);
   globalThis.cancelAnimationFrame=id=>clearTimeout(id);
  }
- const status=(extra={})=>{
+ const status=(extra={},sample=null)=>{
   if(!renderer)return;
-  const s=renderer.getState();send({type:'status',stats:{fps:s.fps||0,effectiveQuality:s.effectiveQuality,adaptiveLevel:s.adaptiveLevel,qualityReduced:!!s.qualityReduced,adaptivePixelScale:s.adaptivePixelScale,adaptiveStatus:s.adaptiveStatus,adaptiveReason:s.adaptiveReason,probePending:s.probePending,shaderCompiling:s.shaderCompiling,webgl:s.webgl,width:renderer.canvas.width,height:renderer.canvas.height,scale:renderer.renderScale,steps:renderer.steps,cpu:!!renderer.cpu,surfaceWarning:s.surfaceWarning||'',surfaceRefining:!!s.surfaceRefining,contextLost:renderer.contextLost,...extra}});
+  const s=sample||renderer.getRenderStats?.()||renderer.getState();send({type:'status',stats:{fps:s.fps||0,targetFps:s.targetFps,effectiveQuality:s.effectiveQuality,adaptiveLevel:s.adaptiveLevel,qualityReduced:!!s.qualityReduced,adaptivePixelScale:s.adaptivePixelScale,adaptiveStatus:s.adaptiveStatus,adaptiveReason:s.adaptiveReason,probePending:s.probePending,shaderCompiling:s.shaderCompiling,webgl:s.webgl,width:renderer.canvas.width,height:renderer.canvas.height,scale:renderer.renderScale,steps:renderer.steps,cpu:!!renderer.cpu,surfaceWarning:s.surfaceWarning||'',surfaceRefining:!!s.surfaceRefining,contextLost:renderer.contextLost,...extra}});
  };
  const makeClass=Base=>class extends Base{
   bindControls(){}
+  emitStats(now){super.emitStats(now,this.getRenderStats);}
   advanceSimulation(now){const gap=this.lastTime?now-this.lastTime:0;this.lastTime=now;if(this.budget.noteFrame(now,gap))this.resizePending=true;return 0;}
   completed(signatureAtDraw,now,sceneRevision=this.sceneRevision,annotationFrame=null){
    if(annotationFrame?.annotations&&!commandCanvas&&typeof this.canvas.transferToImageBitmap==='function'){
@@ -84,7 +85,7 @@ export function installRenderWorker(scope,dependencies={}){
     // convertToBlob snapshots in this same task, like HTMLCanvas.toBlob.
     if(!canvas.toBlob&&canvas.convertToBlob)canvas.toBlob=(callback,type='image/png')=>canvas.convertToBlob({type}).then(callback,()=>callback(null));
     const Class=makeClass(message.cpu?Cpu:Gpu);
-    renderer=new Class(canvas,{bindControls:false,deferProgram:true,onError:error=>send({type:'render-error',signature,sceneRevision:renderer?.sceneRevision,message:String(error||'')}),onStats:()=>status()});
+    renderer=new Class(canvas,{bindControls:false,deferProgram:true,onError:error=>send({type:'render-error',signature,sceneRevision:renderer?.sceneRevision,message:String(error||'')}),onStats:sample=>status({},sample)});
     canvas.addEventListener?.('webglcontextlost',event=>{event.preventDefault?.();renderer.ready=false;renderer.contextLost=true;renderer.gpuFence=null;photoAbort?.abort();renderer.cancelCapture('The GPU context was lost.');frameReported=false;status();send({type:'render-error',message:'Graphics paused while the GPU recovers.'});});
     canvas.addEventListener?.('webglcontextrestored',()=>{renderer.initGL();renderer.resize();frameReported=false;status();});
     if(message.snapshot)apply(message.snapshot);

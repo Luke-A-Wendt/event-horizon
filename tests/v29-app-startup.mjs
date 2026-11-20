@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
 import {uiDomFixture} from './ui-dom-fixture.mjs';
 import {installAnomalyControls} from '../dist/anomaly-ui.js';
-import {installViewportUI} from '../dist/viewport-ui.js';
+import {installViewportUI,gridDisplayPatch} from '../dist/viewport-ui.js';
 import {createLoadingIndicator} from '../dist/loading-indicator.js';
 import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
 import {DEFAULTS,SCENE_PRESETS,makePreset,horizonRg,iscoRg,REFERENCE_MASS} from '../dist/config.js';
@@ -43,7 +43,7 @@ function createRenderHost(canvas,callbacks,{cpu}){
  };
  nextStartup=null;host=api;return api;
 }
-const sandbox={document,window,matchMedia:window.matchMedia,performance:clock.performance,requestAnimationFrame:callback=>{frames.push(callback);return frames.length;},cancelAnimationFrame(){},setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,setInterval:()=>1,clearInterval(){},console:{...console,error(){}},createRenderHost,snapshotRenderer,restoreRenderer,createLoadingIndicator:(el,reason)=>createLoadingIndicator(el,reason,clock),installViewportUI,installAnomalyControls,renderRelativityGuide,renderMathGuide(){},renderWarpGuide(){},renderWormholeGuide(){},DEFAULTS,SCENE_PRESETS,makePreset,horizonRg,iscoRg,REFERENCE_MASS,OBJECT_TYPES};
+const sandbox={document,window,matchMedia:window.matchMedia,performance:clock.performance,requestAnimationFrame:callback=>{frames.push(callback);return frames.length;},cancelAnimationFrame(){},setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,setInterval:()=>1,clearInterval(){},console:{...console,error(){}},createRenderHost,snapshotRenderer,restoreRenderer,createLoadingIndicator:(el,reason)=>createLoadingIndicator(el,reason,clock),installViewportUI,gridDisplayPatch,installAnomalyControls,renderRelativityGuide,renderMathGuide(){},renderWarpGuide(){},renderWormholeGuide(){},DEFAULTS,SCENE_PRESETS,makePreset,horizonRg,iscoRg,REFERENCE_MASS,OBJECT_TYPES};
 vm.runInNewContext(app.replace(/^import[^\n]+\n/gm,''),sandbox,{filename:'app.js'});
 await Promise.resolve();await Promise.resolve();
 const $=id=>{const node=document.getElementById(id);assert(node,`Missing control ${id}`);return node;};

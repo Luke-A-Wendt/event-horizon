@@ -1,0 +1,540 @@
+# Event Horizon scene — exact-version files; no backward compatibility.
+# Children orbit/belong to their enclosing object. SI properties end in Meters/Seconds; radius is in the parent black hole r_g.
+# Routes use object IDs and heading degrees; guidance resumes only when started after loading.
+# Two-space YAML, finite values, no aliases or tags. Scene files never contain image assets.
+format: "event-horizon-scene"
+version: "1.65.0"
+scene: "kardashev-2"
+display:
+  quality: "adaptive"
+  paused: true
+  speed: 1
+  exposure: 1.1
+  grid: false
+  lensing: false
+  horizonGuide: false
+  annotations: false
+  metrics: false
+  autoRotate: false
+  spectrum: "visible"
+  viewMode: "orbit"
+  objectScaleMode: "physical"
+  warpGrid: false
+  warpGridOnly: false
+  velocityArrows: false
+  sceneGridDensity: 1
+  warpGridDensity: 1.5
+space:
+  id: "space"
+  type: "space"
+  properties:
+    mass: 4.3
+    spin: 0.65
+    plannedPath: false
+    interiorView: false
+    primaryName: ""
+    secondaryName: ""
+    blackHole: false
+    whiteHole: false
+    bridgeSurfaces: false
+    bridge: false
+    bridgeRadius: 8
+    bridgeTravel: true
+    bridgeTravelerType: "enterprise"
+    bridgeMode: "single"
+    bridgeGridOrientation: "perpendicular"
+    bridgeLifecycle: "steady"
+    bridgeWorlds: "caladan"
+    bridgeOtherNebula: true
+    bridgeOtherColor: "#875ba3"
+    bridgeOtherShape: "filaments"
+    bridgeOtherScale: 1.6
+    bridgeOtherIntensity: 1.6
+    bridgeOtherRotation: 35
+    warp: false
+    warpScenario: "isolated"
+    warpFactor: 4
+    warpRadius: 3.52
+    warpThickness: 6
+    warpField: true
+    stars: true
+    starDensity: 0.65
+    starBrightness: 1
+    starVariety: 1
+    bridgeOtherStars: true
+    bridgeOtherStarDensity: 1
+    bridgeOtherStarBrightness: 1
+    bridgeOtherStarVariety: 1
+    disk: false
+    diskStyle: "thermal"
+    diskPalette: "physical"
+    diskColor: "#ffd69a"
+    diskOuter: 13
+    diskThickness: 1
+    diskDensity: 1
+    nebula: false
+    nebulaShape: "cloud"
+    nebulaColor: "#657ed4"
+    nebulaScale: 1
+    nebulaIntensity: 1
+    nebulaRotation: 0
+    nebulaVolume: false
+    nebulaVolumePreset: "wisps"
+    nebulaVolumeDensity: 0.7
+    nebulaVolumeDepth: 1
+    nebulaVolumeScale: 1
+    nebulaVolumeSpeed: 1
+    nebulaMulticolor: false
+    nebulaSecondaryColor: "#f59eb4"
+    nebulaColorMix: 0.45
+    planet: false
+    planetMass: 1
+    planetRadius: 1
+    planetDistance: 10
+    planetColor: "#438dcc"
+    tidalStar: false
+    starRadius: 1
+    starColor: "#ffba64"
+    disruptionStrength: 1
+    starDistance: 10
+    binary: false
+    secondaryWhiteHole: false
+    binaryMotion: "orbit"
+    mergerOutcome: "coalescence"
+    mergerDuration: 45
+    gravitationalWaves: false
+    waveAmplitude: 0.3
+    waveFrequency: 1
+    binaryRatio: 1
+    binarySeparation: 18
+    secondarySpin: 0.65
+    primaryTilt: 0
+    primaryAzimuth: 0
+    secondaryTilt: 35
+    secondaryAzimuth: 60
+    jets: false
+    jetStructure: "steady"
+    jetColor: "#79bfff"
+    jetSpread: 1
+    jetLength: 1
+    jetIntensity: 1
+    secondaryDisk: false
+    secondaryJets: false
+    secondaryDiskStyle: "thermal"
+    secondaryDiskPalette: "physical"
+    secondaryJetStructure: "steady"
+    secondaryDiskColor: "#ffd69a"
+    secondaryDiskOuter: 13
+    secondaryDiskThickness: 1
+    secondaryDiskDensity: 1
+    secondaryJetColor: "#79bfff"
+    secondaryJetSpread: 1
+    secondaryJetLength: 1
+    secondaryJetIntensity: 1
+  children:
+    - id: "body-1"
+      type: "star"
+      properties:
+        radius: 12
+        phase: 0
+        height: 0.1
+        scale: 1
+        epoch: 0
+        placement: "local"
+        referenceId: null
+        x: 0
+        y: 0
+        z: 0
+        warpEnabled: false
+        motion: "orbit"
+        motionEpoch: 0
+        logLuminosity: 0
+        color: "#ffdaa0"
+        catalogId: "sun"
+        angularVelocity: 0.0000029
+        radiusMeters: 696340000
+        massSolar: 1
+        spots: 0.2
+        corona: 0.4
+        starStyle: "main"
+      name: "Sun"
+      order: 0
+      children:
+        - id: "body-2"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 0.34
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 1756777500
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 57900000000
+            color: "#a69b8d"
+            catalogId: "mercury"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Heliostat furnaces."
+            shapeAxes: [1, 1, 1]
+            surfaceId: 7
+            axialTilt: 0.034
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 5067360
+            orbitInclination: 7.005
+            orbitNode: 48.331
+            eccentricity: 0.2056
+            radiusMeters: 2439700
+            massSolar: 1.6595674060961445e-7
+            planetStyle: "rocky"
+          name: "Mercury"
+          order: 1
+          children: []
+        - id: "body-3"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 2.3
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 108200000000
+            color: "#d7b477"
+            catalogId: "venus"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Cloud chemistry exchange."
+            shapeAxes: [1, 1, 1]
+            surfaceId: 6
+            axialTilt: 177.4
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 20997000
+            orbitInclination: 3.395
+            orbitNode: 76.68
+            eccentricity: 0.0068
+            radiusMeters: 6051800
+            massSolar: 0.000002449119172026734
+            planetStyle: "rocky"
+          name: "Venus"
+          order: 2
+          children: []
+        - id: "body-4"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 4.74
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 149600000000
+            color: "#3981bc"
+            catalogId: "earth"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Habitat and biosphere exchange."
+            shapeAxes: [1.0011202, 0.9977636, 1.0011202]
+            surfaceId: 1
+            axialTilt: 23.439
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 86164.2
+            orbitInclination: 0
+            orbitNode: 0
+            eccentricity: 0.0167
+            radiusMeters: 6371000
+            massSolar: 0.000003002308307392116
+            planetStyle: "ocean"
+          name: "Earth"
+          order: 3
+          children: []
+        - id: "body-5"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 4.15
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 228000000000
+            color: "#b45d39"
+            catalogId: "mars"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Shipyards and ore refineries."
+            shapeAxes: [1.0019767, 0.9960761, 1.0019767]
+            surfaceId: 3
+            axialTilt: 25.19
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 88642.44
+            orbitInclination: 1.85
+            orbitNode: 49.558
+            eccentricity: 0.0934
+            radiusMeters: 3389500
+            massSolar: 3.2286129536779537e-7
+            planetStyle: "rocky"
+          name: "Mars"
+          order: 4
+          children: []
+        - id: "body-6"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 3.42
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 778500000000
+            color: "#d7b58d"
+            catalogId: "jupiter"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Gas-harvesting relays."
+            shapeAxes: [1.0226145, 0.956273, 1.0226145]
+            surfaceId: 4
+            axialTilt: 3.13
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 35730
+            orbitInclination: 1.303
+            orbitNode: 100.464
+            eccentricity: 0.0489
+            radiusMeters: 69911000
+            massSolar: 0.0009545027081122673
+            planetStyle: "gas"
+          name: "Jupiter"
+          order: 5
+          children: []
+        - id: "body-7"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 1.36
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 1432000000000
+            color: "#d9c58f"
+            catalogId: "saturn"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Ice and volatile processing."
+            shapeAxes: [1.0349636, 0.933576, 1.0349636]
+            surfaceId: 5
+            axialTilt: 26.73
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 38361.6
+            orbitInclination: 2.489
+            orbitNode: 113.665
+            eccentricity: 0.0565
+            radiusMeters: 58232000
+            massSolar: 0.0002856467535341242
+            planetStyle: "gas"
+          name: "Saturn"
+          order: 6
+          children: []
+        - id: "body-8"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 5.01
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 2867000000000
+            color: "#87d5db"
+            catalogId: "uranus"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Cryogenic freight terminals."
+            shapeAxes: [1.0077675, 0.9846621, 1.0077675]
+            surfaceId: 8
+            axialTilt: 97.77
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 62063.99999999999
+            orbitInclination: 0.773
+            orbitNode: 74.006
+            eccentricity: 0.0457
+            radiusMeters: 25362000
+            massSolar: 0.00004365165177246828
+            planetStyle: "ice"
+          name: "Uranus"
+          order: 7
+          children: []
+        - id: "body-9"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 2.59
+            height: 0.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 4515000000000
+            color: "#476dbf"
+            catalogId: "neptune"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris. Type II port: Outer-system relay ports."
+            shapeAxes: [1.0057672, 0.9885874, 1.0057672]
+            surfaceId: 9
+            axialTilt: 28.32
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 57996
+            orbitInclination: 1.77
+            orbitNode: 131.784
+            eccentricity: 0.0113
+            radiusMeters: 24622000
+            massSolar: 0.00005129571982478992
+            planetStyle: "ice"
+          name: "Neptune"
+          order: 8
+          children: []
+        - id: "body-10"
+          type: "belt"
+          properties:
+            radius: 12
+            phase: 0
+            height: 1.1
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 1125015927500
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            catalogId: "k2-solar-network"
+            dataNote: "A schematic of collector swarms, inhabited ports and receiving arrays. Active routes are redirected through moving beacons; they are not tensile structures."
+            bodyClass: "Stellar power network"
+            opacity: 1
+            radiusMeters: 5086327603800
+            massSolar: 0
+            innerRadiusRatio: 0.05
+            thicknessRatio: 0.07
+            material: "metallic"
+          name: "Solar relay network"
+          order: 9
+          children: []
+navigation:
+  camera:
+    yaw: -0.1
+    pitch: 1
+    distance: 1.5749302174564487e-7
+    lookYaw: 0
+    lookPitch: 0
+    focusDistance: 1.72
+  target:
+    yaw: -0.1
+    pitch: 1
+    distance: 1.5749302174564487e-7
+    lookYaw: 0
+    lookPitch: 0
+    focusDistance: 1.72
+  cameraGuide: null
+  focusReferenceFrame: null
+  sceneFocusId: "body-10"
+  freePosition: null
+  freeTarget: null
+  freeBasis: null
+  selectedId: "body-10"
+  focusId: "body-10"
+  focusMode: "track"
+  savedOverview:
+    camera:
+      yaw: -0.1
+      pitch: 1
+      distance: 1.5749302174564487e-7
+      lookYaw: 0
+      lookPitch: 0
+      focusDistance: 6
+    target:
+      yaw: -0.1
+      pitch: 1
+      distance: 1.5749302174564487e-7
+      lookYaw: 0
+      lookPitch: 0
+      focusDistance: 6
+    viewMode: "orbit"
+    travel: false
+    freePosition: null
+    freeTarget: null
+    freeBasis: null
+  freeReferenceId: null
+  freeReferencePosition: null
+  navigationModes: {}
+  flightSequences: {}
+  bridgeParking: {}
+simulation:
+  janusRoutes: {}
+  dockingCoastId: null
+  dockingMission: null
+  gapOrbitTime: 0
+  routeChartY: null
+  routeVisualTime: 0
+  time: 0
+  nextObjectId: 11
+  bridgeObjectId: null
+  bridgeTime: 0
+  bridgeTravelTime: 0
+  warpObjectId: null
+  warpLocalGridPhase: 0
+  warpTravelWorld: 0
+  warpTravelPosition: [0, 0, 0]
+  warpTravelTime: 0
+  travel: false
+  driveId: null
+  orbitOverrides: {}

@@ -7,7 +7,7 @@ const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
 export function compactTrackLoadG(source,position,vPhi,motion=null){
  const d=position.map((v,i)=>v-source.positionMeters[i]),r=Math.hypot(...d);
  const a=Math.max(-1,Math.min(1,source.spinParameter||0)),q=Math.sqrt((1-a)*(1+a)),rg=source.horizonMeters/(1+q);
- if(!(r>0&&rg>0))return 0;
+ if(!(r>source.horizonMeters&&rg>0))return null;
  const x=r/rg,C=source.spinAxis?Math.max(-1,Math.min(1,dot(d,source.spinAxis)/r)):0,S=Math.sqrt((1-C)*(1+C));
  const gap=Math.max((r-source.horizonMeters)/rg,Number.EPSILON*x),D=gap*(gap+2*q),F=x*x+a*a*C*C;
  const L=x*x+a*a,A=L*F+2*x*a*a*S*S,w=2*a*x/A,alpha=Math.sqrt(F*D/A),h3=Math.sqrt(A/F)*S;
@@ -43,6 +43,19 @@ export function compactTrackLoadG(source,position,vPhi,motion=null){
  // Transform spatial four-acceleration to the instantaneous rest frame.
  const nh=beta?v.map(s=>s/(beta*c)):[0,0,0],parallel=dot(spatial,nh);
  return Math.hypot(...spatial.map((s,i)=>s-parallel*nh[i]),parallel/gamma);
+}
+
+// A marker fixed in a nonrotating Kerr chart has Ω=0, which is not zero
+// local speed in a rotating spacetime. A static worldline does not exist
+// inside the stationary limit. Return no reading for that configuration.
+export function chartFixedLocalSpeed(source,position){
+ const d=position.map((v,i)=>v-source.positionMeters[i]),r=Math.hypot(...d);
+ const a=source.spinParameter||0,q=Math.sqrt((1-a)*(1+a)),rg=source.horizonMeters/(1+q);
+ if(!(r>source.horizonMeters&&rg>0))return null;
+ const m=rg/r,cos=source.spinAxis?Math.max(-1,Math.min(1,dot(d,source.spinAxis)/r)):0;
+ const sin=Math.sqrt((1-cos)*(1+cos)),k=a*m,delta=(r-source.horizonMeters)/r*((r-source.horizonMeters)/r+2*m*q),sigma=1+(k*cos)**2;
+ if(sigma<=2*m)return null;
+ return -2*k*m*sin*c/(sigma*Math.sqrt(delta));
 }
 
 // Account each proper-time interval once, never a wall-time or display tick.
@@ -84,6 +97,10 @@ export function meridionalClockMotion(source,R,Z,dR=0,dZ=0,ddR=0,ddZ=0){
  // for distant clock t, distinct from the accelerated observer's proper load.
  const dt=gamma/alpha,dlogDt=(ur*dur+ut*dut)/(gamma*gamma)-gradX*u-gradT*v;
  const aR=(ddR-dR*dlogDt*c/rg)/(dt*dt*g0),aZ=(ddZ-dZ*dlogDt*c/rg)/(dt*dt*g0);
- return {speedMetersPerSecond:speed,kinematicFactor:gamma,kinematicExcess:k*(k/(1+gamma)),crewLoadG:load,requiredSupportG:load,
+ const chartV=Math.hypot(dR,dZ);
+ // At rest a velocity-aligned pair is undefined, even when a support force exists.
+ return {feltParallel:k?parallel*unit/gamma:null,feltPerp:k?Math.abs(perp)*unit:null,
+  pathParallel:chartV?(aR*dR+aZ*dZ)/chartV:null,pathPerp:chartV?Math.abs(aR*dZ-aZ*dR)/chartV:null,
+  speedMetersPerSecond:speed,kinematicFactor:gamma,kinematicExcess:k*(k/(1+gamma)),crewLoadG:load,requiredSupportG:load,
   accelerationG:Math.hypot(aR,aZ),radialAccelerationG:S*aR+C*aZ,tangentialAccelerationG:C*aR-S*aZ};
 }

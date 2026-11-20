@@ -1,0 +1,505 @@
+# Event Horizon scene — exact-version files; no backward compatibility.
+# Children orbit/belong to their enclosing object. SI properties end in Meters/Seconds; radius is in the parent black hole r_g.
+# Routes use object IDs and heading degrees; guidance resumes only when started after loading.
+# Two-space YAML, finite values, no aliases or tags. Scene files never contain image assets.
+format: "event-horizon-scene"
+version: "1.65.0"
+scene: "earth-mars-station-ferry"
+display:
+  quality: "adaptive"
+  paused: false
+  speed: 1
+  exposure: 1.1
+  grid: false
+  lensing: true
+  horizonGuide: false
+  annotations: false
+  metrics: false
+  autoRotate: false
+  spectrum: "visible"
+  viewMode: "orbit"
+  objectScaleMode: "physical"
+  warpGrid: false
+  warpGridOnly: false
+  velocityArrows: false
+  sceneGridDensity: 1
+  warpGridDensity: 1.5
+space:
+  id: "space"
+  type: "space"
+  properties:
+    mass: 4.3
+    spin: 0.65
+    plannedPath: false
+    interiorView: false
+    primaryName: ""
+    secondaryName: ""
+    blackHole: false
+    whiteHole: false
+    bridgeSurfaces: false
+    bridge: false
+    bridgeRadius: 8
+    bridgeTravel: true
+    bridgeTravelerType: "enterprise"
+    bridgeMode: "single"
+    bridgeGridOrientation: "perpendicular"
+    bridgeLifecycle: "steady"
+    bridgeWorlds: "caladan"
+    bridgeOtherNebula: true
+    bridgeOtherColor: "#875ba3"
+    bridgeOtherShape: "filaments"
+    bridgeOtherScale: 1.6
+    bridgeOtherIntensity: 1.6
+    bridgeOtherRotation: 35
+    warp: false
+    warpScenario: "isolated"
+    warpFactor: 4
+    warpRadius: 3.52
+    warpThickness: 6
+    warpField: true
+    stars: true
+    starDensity: 1.1
+    starBrightness: 1
+    starVariety: 1
+    bridgeOtherStars: true
+    bridgeOtherStarDensity: 1
+    bridgeOtherStarBrightness: 1
+    bridgeOtherStarVariety: 1
+    disk: false
+    diskStyle: "thermal"
+    diskPalette: "physical"
+    diskColor: "#ffd69a"
+    diskOuter: 13
+    diskThickness: 1
+    diskDensity: 1
+    nebula: false
+    nebulaShape: "cloud"
+    nebulaColor: "#657ed4"
+    nebulaScale: 1
+    nebulaIntensity: 1
+    nebulaRotation: 0
+    nebulaVolume: false
+    nebulaVolumePreset: "wisps"
+    nebulaVolumeDensity: 0.7
+    nebulaVolumeDepth: 1
+    nebulaVolumeScale: 1
+    nebulaVolumeSpeed: 1
+    nebulaMulticolor: false
+    nebulaSecondaryColor: "#f59eb4"
+    nebulaColorMix: 0.45
+    planet: false
+    planetMass: 1
+    planetRadius: 1
+    planetDistance: 10
+    planetColor: "#438dcc"
+    tidalStar: false
+    starRadius: 1
+    starColor: "#ffba64"
+    disruptionStrength: 1
+    starDistance: 10
+    binary: false
+    secondaryWhiteHole: false
+    binaryMotion: "orbit"
+    mergerOutcome: "coalescence"
+    mergerDuration: 45
+    gravitationalWaves: false
+    waveAmplitude: 0.3
+    waveFrequency: 1
+    binaryRatio: 1
+    binarySeparation: 18
+    secondarySpin: 0.65
+    primaryTilt: 0
+    primaryAzimuth: 0
+    secondaryTilt: 35
+    secondaryAzimuth: 60
+    jets: false
+    jetStructure: "steady"
+    jetColor: "#79bfff"
+    jetSpread: 1
+    jetLength: 1
+    jetIntensity: 1
+    secondaryDisk: false
+    secondaryJets: false
+    secondaryDiskStyle: "thermal"
+    secondaryDiskPalette: "physical"
+    secondaryJetStructure: "steady"
+    secondaryDiskColor: "#ffd69a"
+    secondaryDiskOuter: 13
+    secondaryDiskThickness: 1
+    secondaryDiskDensity: 1
+    secondaryJetColor: "#79bfff"
+    secondaryJetSpread: 1
+    secondaryJetLength: 1
+    secondaryJetIntensity: 1
+  children:
+    - id: "body-1"
+      type: "star"
+      properties:
+        radius: 10000000
+        phase: 0.85
+        height: 0.1
+        scale: 1
+        epoch: 0
+        placement: "local"
+        referenceId: null
+        x: 0
+        y: 0
+        z: 0
+        warpEnabled: false
+        motion: "orbit"
+        motionEpoch: 0
+        logLuminosity: 0
+        color: "#fff1bc"
+        catalogId: "sun"
+        dataNote: "Reference solar dimensions; procedural granulation and corona."
+        axialTilt: 7.25
+        rotationPeriodSeconds: 2192832
+        radiusMeters: 696340000
+        massSolar: 1
+        spots: 0.25
+        corona: 0.3
+        starStyle: "main"
+      name: "Sun"
+      order: 0
+      children:
+        - id: "body-2"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 2.0100000000000002
+            height: 0
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 1756777500
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 149600000000
+            heightMeters: 0
+            color: "#3981bc"
+            catalogId: "earth"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris."
+            shapeAxes: [1.0011202, 0.9977636, 1.0011202]
+            surfaceId: 1
+            axialTilt: 23.439
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 86164.2
+            orbitInclination: 0
+            orbitNode: 0
+            eccentricity: 0.0167
+            radiusMeters: 6371000
+            massSolar: 0.000003002308307392116
+            planetStyle: "ocean"
+          name: "Earth"
+          order: 1
+          children:
+            - id: "body-4"
+              type: "habitat"
+              properties:
+                radius: 12
+                phase: 1.4
+                height: 1.1
+                scale: 1
+                epoch: 0
+                placement: "orbit"
+                referenceId: null
+                x: 15930217.391304348
+                y: 0
+                z: 0
+                warpEnabled: false
+                motion: "orbit"
+                motionEpoch: 0
+                logLuminosity: 0
+                clock:
+                  properSeconds: 99456.54814483973
+                  coordinateSeconds: 99456.54970315877
+                  lagSeconds: 0.0015583190403420785
+                  highGExposureSeconds: 0
+                  extremeGExposureSeconds: 0
+                  properCompensation: -5.6843418860808015e-12
+                  coordinateCompensation: -2.2737367544323206e-12
+                  lagCompensation: 9.147955830346444e-20
+                  rapidityVector: [0, 0, 0]
+                orbitMeters: 6771000
+                catalogId: "earth-station"
+                dataNote: "Rotating garden habitat on an illustrative circular orbit, 400 km above Earth. Axial ports sit on either end of the central hub."
+                orbitInclination: 28.5
+                orbitNode: 0
+              name: "Earth Station"
+              order: 3
+              children: []
+            - id: "body-6"
+              type: "shuttle"
+              properties:
+                radius: 12
+                phase: 1.4
+                height: 0
+                scale: 1
+                epoch: 0
+                placement: "orbit"
+                referenceId: null
+                x: 2771.5192113245707
+                y: 0
+                z: 0
+                warpEnabled: false
+                motion: "orbit"
+                motionEpoch: 0
+                logLuminosity: 0
+                clock:
+                  properSeconds: 99456.51722695892
+                  coordinateSeconds: 99456.54970315877
+                  lagSeconds: 0.03247619985519978
+                  highGExposureSeconds: 0
+                  extremeGExposureSeconds: 0
+                  properCompensation: 6.139089236967266e-12
+                  coordinateCompensation: 4.547473508864641e-13
+                  lagCompensation: -6.505213034913027e-19
+                  rapidityVector: [0, 0, 0]
+                orbitMeters: 6771000
+                heightMeters: 0
+                dataNote: "Crewed station ferry. A telescoping nose collar mates with either axial hub port."
+                orbitInclination: 28.5
+                orbitNode: 0
+                massSolar: 5e-26
+                drivePosition: [-11.211940499540866, -0.06892168005697717, 23.8982964818534]
+                driveBasis: [[-0.3708509186132785, -0.9151675639062997, -0.1579174662204792], [0.8651583443586349, -0.4022622141270246, 0.29947646029738234], [-0.33759537222881913, -0.02556249321628913, 0.940944166032317]]
+                flight:
+                  position: [-71190077981.03224, -437617357.8553048, 151741938893.32913]
+                  basis: [[-0.3708509186132785, -0.9151675639062997, -0.1579174662204792], [0.8651583443586349, -0.4022622141270246, 0.29947646029738234], [-0.33759537222881913, -0.02556249321628913, 0.940944166032317]]
+                  speed: 466059.5198287975
+                  curvature: 0
+                  torsion: 0
+                  angularVelocity: 0
+                  headingAngle: -0.34447835680723565
+                  headingTarget: -0.34447835680723565
+                  thrust: 0.43447934201640426
+                  velocity: [-129362.97549168859, -11807.509036410316, 447590.52640258276]
+                  orbitHold: false
+                  escapeBlend: 0
+                  mode: "impulse"
+                  escapeAnchor: [-68135758347.11166, 0, 134412970426.03783]
+                  escapeRadiusMeters: 51025094.353599995
+                  coordinateTimeSeconds: 0
+                  timeLagSeconds: 0
+                  coordinateTimeCompensation: 0
+                  timeLagCompensation: 0
+                  brakeSpeed: false
+                  visualJet: 0
+              name: "NASA Meridian"
+              order: 5
+              children: []
+        - id: "body-3"
+          type: "planet"
+          properties:
+            radius: 12
+            phase: 2.79
+            height: 0
+            scale: 1
+            epoch: 0
+            placement: "orbit"
+            referenceId: null
+            x: 31855000
+            y: 0
+            z: 0
+            warpEnabled: false
+            motion: "orbit"
+            motionEpoch: 0
+            logLuminosity: 0
+            orbitMeters: 228000000000
+            heightMeters: 0
+            color: "#b45d39"
+            catalogId: "mars"
+            dataNote: "NASA/JPL reference dimensions and approximate Kepler orbit. Reference map where available; added fine details and unknown regions are illustrative. Not a current ephemeris."
+            shapeAxes: [1.0019767, 0.9960761, 1.0019767]
+            surfaceId: 3
+            axialTilt: 25.19
+            surfaceRotationPhase: 0.7
+            rotationPeriodSeconds: 88642.44
+            orbitInclination: 1.85
+            orbitNode: 49.558
+            eccentricity: 0.0934
+            radiusMeters: 3389500
+            massSolar: 3.2286129536779537e-7
+            planetStyle: "rocky"
+          name: "Mars"
+          order: 2
+          children:
+            - id: "body-5"
+              type: "habitat"
+              properties:
+                radius: 12
+                phase: 0.85
+                height: 1.1
+                scale: 1
+                epoch: 0
+                placement: "orbit"
+                referenceId: null
+                x: 5434.782608695652
+                y: 0
+                z: 0
+                warpEnabled: false
+                motion: "orbit"
+                motionEpoch: 0
+                logLuminosity: 0
+                clock:
+                  properSeconds: 99456.54882230253
+                  coordinateSeconds: 99456.54970315877
+                  lagSeconds: 0.0008808562528188288
+                  highGExposureSeconds: 0
+                  extremeGExposureSeconds: 0
+                  properCompensation: 5.4569682106375694e-12
+                  coordinateCompensation: -3.637978807091713e-12
+                  lagCompensation: 3.049318610115481e-20
+                  rapidityVector: [0, 0, 0]
+                orbitMeters: 3789500
+                catalogId: "mars-station"
+                dataNote: "Rotating garden habitat on an illustrative circular orbit, 400 km above Mars. Axial ports sit on either end of the central hub."
+                orbitInclination: 25
+                orbitNode: 90
+              name: "Mars Station"
+              order: 4
+              children: []
+navigation:
+  camera:
+    yaw: 2.8174440222553216
+    pitch: 0.18369818069933494
+    distance: 1.5749302174564487e-7
+    lookYaw: 0
+    lookPitch: 0
+    focusDistance: 20.414607948442534
+  target:
+    yaw: 2.8174440222553216
+    pitch: 0.18369818069933494
+    distance: 1.5749302174564487e-7
+    lookYaw: 0
+    lookPitch: 0
+    focusDistance: 20.414607948442534
+  cameraGuide: "dock-ferry"
+  focusReferenceFrame: null
+  sceneFocusId: "body-6"
+  freePosition: null
+  freeTarget: null
+  freeBasis: null
+  selectedId: "body-6"
+  focusId: "body-6"
+  focusMode: "track"
+  savedOverview:
+    camera:
+      yaw: -0.77
+      pitch: 0.32
+      distance: 1.5749302174564487e-7
+      lookYaw: 0
+      lookPitch: 0
+      focusDistance: 6
+    target:
+      yaw: -0.77
+      pitch: 0.32
+      distance: 1.5749302174564487e-7
+      lookYaw: 0
+      lookPitch: 0
+      focusDistance: 6
+    viewMode: "orbit"
+    travel: false
+    freePosition: null
+    freeTarget: null
+    freeBasis: null
+  freeReferenceId: null
+  freeReferencePosition: null
+  navigationModes:
+    body-6: "auto"
+  flightSequences:
+    body-6:
+      craftId: "body-6"
+      nodes:
+        - targetId: "body-2"
+          radiusMeters: 6771000
+          kind: "orbit"
+      loop: false
+      index: 0
+      legsCompleted: 0
+  bridgeParking: {}
+simulation:
+  dockingCoastId: null
+  dockingMission:
+    craftId: "body-6"
+    stationId: "body-5"
+    phase: "transit"
+    elapsed: 97563.78290473978
+    side: -1
+    loop: true
+    index: 1
+    route:
+      - stationId: "body-4"
+        side: 1
+      - stationId: "body-5"
+        side: -1
+    startSceneTime: 4.964855611029151
+    duration: 317082.29444040434
+    viewSeconds: 26
+    sample:
+      position: [-71190077981.03224, -437617357.8553048, 151741938893.32913]
+      velocity: [-129362.97549168859, -11807.509036410316, 447590.52640258276]
+      basis: [[-0.3708509186132785, -0.9151675639062997, -0.1579174662204792], [0.8651583443586349, -0.4022622141270246, 0.29947646029738234], [-0.33759537222881913, -0.02556249321628913, 0.940944166032317]]
+      acceleration: [-1.4384219190298906, -0.10891633467783746, 4.009162519226751]
+      phase: "Transfer burn"
+      properAcceleration: [-1.4384219190298906, -0.10891633467783746, 4.009162519226751]
+      extension: 0
+      rcs: [0, 0, 0]
+      mainThrustG: 0.43447934201640426
+      docking: false
+      rangeMeters: 80854758943.48904
+      relativeSpeed: 467822.60720672866
+      radiusMeters: 21.651162790697676
+    plan:
+      legs:
+        - T: 10733.841951201252
+          a:
+            position: [-68080482896.63017, 1102.7398786653184, 134432924989.1794]
+            velocity: [21377.60711697976, 1.4350365942101663e-28, 7319.137641664305]
+            basis: [[-0.16996714290024104, 0, -0.9854497299884601], [0.9854497299884601, 0, -0.16996714290024104], [-0, -1, -0]]
+            radiusMeters: 21.651162790697676
+          b:
+            position: [-67746907929.8784, -2180861.4593588775, 134588283799.39503]
+            velocity: [26574.881372054013, 0, 12961.296413998567]
+            basis: [[0.31743437171113875, -0.023051375576734034, -0.948000028344079], [0.047873015619592105, 0.998819301295495, -0.00825698098976187], [0.9470710607086678, -0.04276257059157399, 0.31816311622273213]]
+        - T: 299659.0850635097
+          a:
+            position: [-67746907929.8784, -2180861.4593588775, 134588283799.39503]
+            velocity: [26574.881372054013, 0, 12961.296413998567]
+            basis: [[0.31743437171113875, -0.023051375576734034, -0.948000028344079], [0.047873015619592105, 0.998819301295495, -0.00825698098976187], [0.9470710607086678, -0.04276257059157399, 0.31816311622273213]]
+          b:
+            position: [-92995862861.7931, -2529251373.301708, 229874399582.923]
+            velocity: [20738.49535856665, -669.0005309498041, 7598.387697298586]
+            basis: [[0.31947338373604234, 0.00897289550192947, -0.9475527659347287], [0.007789381842916885, -0.9999462493722646, -0.006842798904395292], [-0.9475632340982573, -0.005194758189965202, -0.31952610515042296]]
+        - T: 6689.367425693355
+          a:
+            position: [-92995862861.7931, -2529251373.301708, 229874399582.923]
+            velocity: [20738.49535856665, -669.0005309498041, 7598.387697298586]
+            basis: [[0.31947338373604234, 0.00897289550192947, -0.9475527659347287], [0.007789381842916885, -0.9999462493722646, -0.006842798904395292], [-0.9475632340982573, -0.005194758189965202, -0.31952610515042296]]
+          b:
+            position: [-92882880360.71562, -2533867703.1643577, 229916546593.54358]
+            velocity: [22505.90335545181, -669.0005309498041, 4737.754006424295]
+            basis: [[-0.6599831458849822, 0, -0.7512804051402927], [-0.7512804051402927, 0, 0.6599831458849822], [0, 1, 0]]
+            radiusMeters: 21.651162790697676
+      craftRadius: 21.651162790697676
+  gapOrbitTime: 0
+  routeChartY: null
+  routeVisualTime: 0
+  time: 260.8812714063818
+  nextObjectId: 7
+  bridgeObjectId: null
+  bridgeTime: 0
+  bridgeTravelTime: 260.8812714063818
+  warpObjectId: null
+  warpLocalGridPhase: 0
+  warpTravelWorld: 0
+  warpTravelPosition: [0, 0, 0]
+  warpTravelTime: 260.8812714063818
+  travel: false
+  driveId: "body-6"
+  orbitOverrides: {}

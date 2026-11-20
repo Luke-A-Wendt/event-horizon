@@ -8,7 +8,7 @@ assert.match(black.innerHTML,/invariant timelike norm −c²/);assert.match(blac
 assert.match(black.innerHTML,/angular velocity Ω in radians per second/);assert.match(black.innerHTML,/explicitly fictional reset/);
 assert.match(black.innerHTML,/can still receive light from outside/);assert.match(black.innerHTML,/not a visible material ring/);
 assert.match(black.innerHTML,/twice the orbital frequency/);assert.match(black.innerHTML,/or a calibrated detector strain/);
-assert.match(black.innerHTML,/Geometry suppresses surfaces/);
+assert.match(black.innerHTML,/Solid bodies retain neutral opaque surfaces/);
 assert.match(warp.innerHTML,/Planar flight controls/);assert.match(warp.innerHTML,/no torsion input/);
 assert.match(warp.innerHTML,/transverse-deflection law/);assert.match(warp.innerHTML,/time-dependent null-geodesic solution/);
 assert.match(bridge.innerHTML,/does not back-react/);assert.match(bridge.innerHTML,/not an exact spacetime with two intersecting/);

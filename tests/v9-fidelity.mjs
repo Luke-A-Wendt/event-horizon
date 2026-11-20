@@ -20,7 +20,7 @@ assert.deepEqual(PHOTO_PRESETS.map(p=>[p.steps,p.detail,p.samples]),[[0,0,1],[10
 assert(!createFragment({craft:true,craftMask:8}).includes('vec4 shuttleCockpit('),'Unrelated ships do not compile the interior');
 const shuttle=createFragment({craft:true,craftMask:2});
 assert(shuttle.includes('uniform int uCockpitMode;'),'The ordinary renderer exposes the cockpit mode flag');
-assert(!shuttle.includes('if(uCockpitMode==1'),'No cabin branch remains in observing spectra');
+assert(shuttle.includes('if(uCockpitMode==1)')&&shuttle.includes('meridianLounge('),'The observation deck is compiled only for the Meridian');
 assert(!shuttle.includes('vec4 cabin=shuttleCockpit'),'No cockpit overlay is generated');
 {
  const f=fixture(),r=new BlackHoleRenderer(f.canvas);r.loadScene('bridge');

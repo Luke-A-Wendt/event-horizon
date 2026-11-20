@@ -20,9 +20,11 @@ const make=()=>{const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,
 for(const elapsed of [2,5,8]){
  const r=make(),ship=r.objects.find(o=>o.type==='shuttle'),moon=r.objects.find(o=>o.name==='Moon'),mars=r.objects.find(o=>o.name==='Mars');r.selectedId=ship.id;r.focusTarget(ship.id,'track');
  assert.equal(r.getNavigationState(ship.id).mode,'auto');assert(r.startTravel(moon.id,{craftId:ship.id}));
- r.state.paused=false;for(let i=0;i<10;i++)r.advanceChartStages(.5);
- assert(r.transfer);assert.equal(r.transfer.wallSeconds,10);
- for(let t=0;t<elapsed;t+=.5)advanceRoute(r,.5);
+ r.state.paused=false;for(let i=0;i<400&&!r.transfer;i++)r.advanceChartStages(.1);
+ assert(r.transfer);assert(r.transfer.wallSeconds>10);
+ const wanted=elapsed===2?'Accelerating':elapsed===5?'Flip and burn':'Decelerating';
+ for(let i=0;i<800&&r.transfer.phaseName!==wanted;i++)advanceRoute(r,.05);
+ advanceRoute(r,elapsed===5?.8:.35);
  assert.equal(r.transfer.phaseName,elapsed===2?'Accelerating':elapsed===5?'Flip and burn':'Decelerating');
  if(elapsed===8)assert(dot(unit(ship.flight.velocity),ship.flight.basis[2])<-.98,'Braking test has nose opposite velocity');
  const before=structuredClone(ship.flight),clock=structuredClone(ship.clock);r.fillObjects();r.updateCameraFrame();const view=structuredClone(r.cameraFrame);
@@ -47,7 +49,7 @@ for(const elapsed of [2,5,8]){
  for(let i=0;i<3;i++)near(ship.flight.position[i],acq.stop[i],1e-12);
  const priorTime=r.transfer.properElapsedSeconds;r.advanceTravel(acq.viewSeconds-r.transfer.elapsed+.5);assert(r.transfer.properElapsedSeconds>=priorTime);assert(ship.flight.speed>0);
  assert(dot(unit(ship.flight.velocity),r.transfer.tangent)>.999999);
- const active=r.transfer;assert.equal(r.startTravel('missing-destination',{craftId:ship.id}),false);assert.equal(r.transfer,active,'An invalid reroute leaves the running flight untouched');r.advanceTravel(10);assert.equal(ship.parentId,mars.id);
+ const active=r.transfer;assert.equal(r.startTravel('missing-destination',{craftId:ship.id}),false);assert.equal(r.transfer,active,'An invalid reroute leaves the running flight untouched');r.advanceTravel(active.wallSeconds-active.elapsed);assert.equal(ship.parentId,mars.id);
  r.dispose();
 }
 // Taking over the acquisition arc preserves the actually visible analytic orbit.
@@ -63,7 +65,7 @@ for(const elapsed of [2,5,8]){
 }
 // The fictional Enterprise keeps power and speed through authority changes.
 {
- const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});r.loadScene('warp-lab');const ship=r.objects.find(o=>o.type==='enterprise');r.selectedId=ship.id;assert(r.setNavigationMode(ship.id,'manual'));r.setFlightPower(5);const before=structuredClone(ship.flight);r.state.annotations=false;assert(r.setNavigationMode(ship.id,'auto'));assert(!r.state.annotations,'Auto leaves label visibility under user control');near(ship.flight.speed,speedForWarp(5));assert.deepEqual(ship.flight.position,before.position);assert.deepEqual(ship.flight.basis,before.basis);assert(r.setNavigationMode(ship.id,'manual'));near(ship.flight.speed,before.speed);assert(!ship.clock);
+ const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});r.loadScene('warp-lab');const ship=r.objects.find(o=>o.type==='enterprise');r.selectedId=ship.id;assert(r.setNavigationMode(ship.id,'manual'));r.setFlightPower(5);const before=structuredClone(ship.flight);r.state.annotations=false;assert(r.setNavigationMode(ship.id,'auto'));assert(!r.state.annotations,'Auto leaves label visibility under user control');near(ship.flight.speed,speedForWarp(5));assert.deepEqual(ship.flight.position,before.position);assert.deepEqual(ship.flight.basis,before.basis);assert(r.setNavigationMode(ship.id,'manual'));near(ship.flight.speed,before.speed);assert.equal(ship.clock.properSeconds,0,'Changing navigation mode does not advance time');assert.equal(ship.clock.lagSeconds,0);
  r.setNavigationMode(ship.id,'auto');const vel=ship.flight.basis[2].map(x=>x*ship.flight.speed),right=ship.flight.basis[0],point=ship.flight.position.map((v,i)=>v+right[i]*8e10);
  const marker=r.addChildObject('space','waypoint',{x:point[0],y:point[1],z:point[2]});r.selectedId=ship.id;
  const prev=r.previewTravel(marker.id,{craftId:ship.id,warpFactor:2});assert(!prev.error,prev.error);assert(prev.capture);

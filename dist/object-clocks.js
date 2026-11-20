@@ -1,5 +1,6 @@
+import {metricNumber} from './metric-units.js';
 import {accumulateCrewExposure} from './crew-load.js';
-// Clock telemetry only: active wall seconds are the traveler's proper time τ.
+// Clock telemetry is integrated over the subject’s modeled journey, independent of camera time.
 // The clock reference is at infinity. Use the Kerr lapse for an observer
 // rotating with the local inertial frame; independent sources multiply as
 // an approximation. A prescribed spacecraft velocity is relative to that frame.
@@ -9,8 +10,11 @@ export const CLOCK_HORIZON_EPSILON=16*Number.EPSILON;
 export const CLOCK_MAX_SECONDS=1e300;
 const MAX_RAPIDITY=300,MAX_RATE=1e150;
 export const compactExteriorRadius=(horizon,bodyRadius=0)=>horizon*(1+CLOCK_HORIZON_EPSILON)+2*Math.max(0,bodyRadius);
-export const CLOCK_TYPES=Object.freeze(['astronaut','shuttle','iss']);
+export const CLOCK_TYPES=Object.freeze(['astronaut','shuttle','iss','habitat']);
 export const supportsObjectClock=type=>CLOCK_TYPES.includes(type);
+// Extra crewed models carry timepieces without inheriting Shuttle collision or guidance rules.
+export const hasOnboardClock=type=>supportsObjectClock(type)||['enterprise','classicEnterprise','heritageShuttle','heighliner'].includes(type);
+export const PROTECTED_CLOCK_RATE=Object.freeze({protectedClock:true,rateFactor:1,gravityFactor:1,kinematicFactor:1,properRate:1,lossRate:0,gravityExcess:0,kinematicExcess:0,gravityLossRate:0,kinematicLossRate:0,crewLoadG:0});
 const finiteVector=v=>Array.isArray(v)&&v.length===3&&v.every(Number.isFinite);
 const boundedRate=v=>Math.max(1,Math.min(MAX_RATE,Number.isFinite(v)?v:MAX_RATE));
 const rapidity=clock=>finiteVector(clock?.rapidityVector)?clock.rapidityVector:[0,0,0];
@@ -62,6 +66,27 @@ export function tickAtClockRate(clock,seconds,rate){
  accumulate(clock,'properSeconds','properCompensation',seconds);
  accumulate(clock,'coordinateSeconds','coordinateCompensation',seconds*rate.rateFactor);
  accumulate(clock,'lagSeconds','lagCompensation',seconds*excess);
+}
+// Integrate the exact elapsed intervals from two samples of the same geodesic.
+// Lag comes from its own integral rather than subtracting near-equal clock totals.
+export function tickFreefallInterval(clock,before,after){
+ if(!clock||!before||!after)return;
+ const proper=after.properSeconds-before.properSeconds,coordinate=after.coordinateSeconds-before.coordinateSeconds,lag=after.lagSeconds-before.lagSeconds;
+ if(proper<0||coordinate<0||!(coordinate>0||proper>0)||!Number.isFinite(coordinate+proper+lag))return;
+ accumulate(clock,'properSeconds','properCompensation',proper);
+ accumulate(clock,'coordinateSeconds','coordinateCompensation',coordinate);
+ accumulate(clock,'lagSeconds','lagCompensation',Math.max(0,lag));
+ accumulateCrewExposure(clock,proper,0);
+}
+// Manual motion advances in the local inertial frame. Use the same interval
+// and velocity quadrature as the position integrator; add the gravitational
+// lapse separately. Never subtract two lifetime totals to recover a tiny lag.
+export function tickDriveClock(clock,step,rate){
+ const local=step.localSeconds,kinetic=step.kinematicLag,proper=local-kinetic,gravity=local*rate.gravityExcess;
+ accumulate(clock,'properSeconds','properCompensation',proper);
+ accumulate(clock,'coordinateSeconds','coordinateCompensation',local+gravity);
+ accumulate(clock,'lagSeconds','lagCompensation',kinetic+gravity);
+ accumulateCrewExposure(clock,proper,rate.crewLoadG);
 }
 export function createObjectClock(){return {properSeconds:0,coordinateSeconds:0,lagSeconds:0,highGExposureSeconds:0,extremeGExposureSeconds:0,properCompensation:0,coordinateCompensation:0,lagCompensation:0,rapidityVector:[0,0,0]};}
 export function clockRate({id=null,positionMeters=[0,0,0],bodyRadiusMeters=0,rapidityVector=[0,0,0],sources=[]}={}){
@@ -130,13 +155,29 @@ const readableNumber=new Intl.NumberFormat('en-US',{minimumSignificantDigits:2,m
 const rounded=value=>Number(value.toPrecision(2));
 function readableMagnitude(value){
  const n=rounded(value);
- for(const [scale,label] of [[1e12,'trillion'],[1e9,'billion'],[1e6,'million']])if(n>=scale&&n<1e15)return readableNumber.format(n/scale)+' '+label;
- return n>=1e15||n>0&&n<.001?value.toExponential(1).replace('e+','e'):readableNumber.format(n);
+ return n>=1e6||n>0&&n<.001?metricNumber(value,2):readableNumber.format(n);
 }
-export function formatClockRate(factor){return !Number.isFinite(factor)||factor<0?'—':readableMagnitude(factor)+'×';}
+export function formatClockRate(factor){
+ if(!Number.isFinite(factor)||factor<=0)return '—';
+ if(factor>1&&factor<1.0005)return '≈ 1×';
+ if(factor>1.1&&factor<1.105)return '> 1.10×';
+ if(factor>1&&factor<2)return metricNumber(factor,4)+'×';
+ if(factor>=1e15)return metricNumber(factor,3)+':1';
+ for(const [scale,suffix] of [[1e12,'T'],[1e9,'B'],[1e6,'M']])if(factor>=scale)return metricNumber(factor/scale,3)+suffix+'×';
+ return readableMagnitude(factor)+'×';
+}
+// A stopwatch, not a rounded duration: preserve a visible tick even on multi-day trips.
+export function formatProperClock(seconds){
+ if(!Number.isFinite(seconds)||seconds<0)return '—';
+ const whole=Math.floor(seconds),days=Math.floor(whole/86400);
+ if(days>=365250)return formatClockDuration(seconds);
+ const pad=n=>String(n).padStart(2,'0'),h=pad(Math.floor(whole/3600)%24),m=pad(Math.floor(whole/60)%60),s=pad(whole%60);
+ const date=days>360?Math.floor(days/360)+'y '+(days%360)+'d ':days?days+' d ':'';
+ return date+h+':'+m+':'+s+(days?'':'.'+Math.min(9,Math.floor(seconds*10)-whole*10));
+}
 export function formatClockDuration(seconds){
  if(!Number.isFinite(seconds)||seconds<0)return '—';if(seconds===0)return '0 s';
- const units=[[1e-15,'fs'],[1e-12,'ps'],[1e-9,'ns'],[1e-6,'µs'],[.001,'ms'],[1,'s'],[60,'min'],[3600,'h'],[86400,'d'],[31557600,'yr']];
+ const units=[[1e-15,'fs'],[1e-12,'ps'],[1e-9,'ns'],[1e-6,'µs'],[.001,'ms'],[1,'s'],[60,'min'],[3600,'h'],[86400,'d'],[31557600,'yr'],[31557600e3,'kyr'],[31557600e6,'Myr'],[31557600e9,'Gyr']];
  let index=0;while(index<units.length-1&&seconds>=units[index+1][0])index++;
  while(index<units.length-1&&rounded(seconds/units[index][0])>=units[index+1][0]/units[index][0])index++;
  const [scale,label]=units[index];return readableMagnitude(seconds/scale)+' '+label;

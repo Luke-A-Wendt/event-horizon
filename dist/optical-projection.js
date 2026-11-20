@@ -1,8 +1,10 @@
+import {pelagiaRayDistance} from './pelagia-tide.js';
 import {cameraRelative} from './camera-framing.js';
 import {anomalyGradient} from './anomaly.js';
 // Bounded inverse projection through the same optical approximation as shaders.js.
 // A previous solution is only a Newton seed: it never smooths a displayed anchor.
 // Nonconvergent or occulted images fail closed instead of drawing a false locator.
+import {shkadovHit} from './shkadov.js';
 import {dysonShellHit} from './dyson.js';
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],mul=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
@@ -14,7 +16,8 @@ function raySphere(a,axis,length,center,radius){const x=center[0]-a[0],y=center[
 function segmentSphere(a,b,center,radius){const v=sub(b,a),length=Math.hypot(...v);return length>1e-30?raySphere(a,mul(v,1/length),length,center,radius):null;}
 const activeGravity=(c,b)=>c.gravityCount===undefined||b.index>=0&&b.index<c.gravityCount;
 function shapeFrame(body,renderer){
- if(body.type==='dyson')return {dysonCutaway:body.index>=0?(renderer.annotationOptics?.bodyParams?.[body.index*4]??body.bodyParams?.[0]??body.dysonCutaway??.38):(body.dysonCutaway??.38)};
+ if(body.type==='dyson')return {shkadov:body.catalogId==='shkadov-mirror',bandOnly:body.catalogId==='ringworld',dysonCutaway:body.index>=0?(renderer.annotationOptics?.bodyParams?.[body.index*4]??body.bodyParams?.[0]??body.dysonCutaway??.38):(body.dysonCutaway??.38)};
+ if(body.oceanTide)return {oceanTide:body.oceanTide,shapeAxes:body.oceanTide.seaAxesMeters.map(v=>v/body.oceanTide.boundMeters),shapeBasis:body.tidalBasis.map(a=>[...a])};
  if(body.waterCap&&body.coreRadius)return {coreRadius:body.coreRadius,waterCap:{...body.waterCap,direction:[...body.waterCap.direction]}};
  if(!['planet','moon','planetoid','asteroid'].includes(body.type)||!body.shapeAxes)return {};
  const maximum=Math.max(...body.shapeAxes),shapeAxes=body.shapeAxes.map(v=>Math.max(.01,v/maximum));
@@ -25,8 +28,13 @@ function shapeFrame(body,renderer){
 }
 function rayBody(a,axis,length,body){
  const sphere=raySphere(a,axis,length,body.center,body.radius);if(sphere===null)return null;
+ if(body.oceanTide){
+  const offset=sub(a,body.center),start=body.shapeBasis.map(v=>dot(offset,v)/body.radius),rd=body.shapeBasis.map(v=>dot(axis,v));
+  const hit=pelagiaRayDistance(body.oceanTide,start,rd,length/body.radius);
+  return hit===null?null:hit*body.radius/length;
+ }
  if(body.type==='dyson'){
-  const hit=dysonShellHit(mul(sub(a,body.center),1/body.radius),axis,body.dysonCutaway??.38,length/body.radius);
+  const origin=mul(sub(a,body.center),1/body.radius),hit=body.shkadov?shkadovHit(origin,axis,length/body.radius):dysonShellHit(origin,axis,body.dysonCutaway??.38,length/body.radius,body.bandOnly);
   return hit?hit.t*body.radius/length:null;
  }
  if(body.waterCap&&body.coreRadius){
@@ -79,7 +87,7 @@ export function projectDirectVisible(c,worldPoint,id=null){
 }
 
 export function createOpticalContext(renderer){
- const s=renderer.state,k=renderer.configCache||{},o=renderer.annotationOptics,bridgeStage=renderer.getBridgeStage?.()||{open:1,far:false},bridgeScale=bridgeStage.far?1/Math.max(.0001,bridgeStage.open):Math.max(.0001,bridgeStage.open);
+ const s=renderer.displayState?.()||renderer.state,k=renderer.configCache||{},o=renderer.annotationOptics,bridgeStage=renderer.getBridgeStage?.()||{open:1,far:false},bridgeScale=bridgeStage.far?1/Math.max(.0001,bridgeStage.open):Math.max(.0001,bridgeStage.open);
  const frame=renderer.cameraFrame,rect=renderer.canvas?.getBoundingClientRect?.()||{width:900,height:650},aspect=rect.width/Math.max(1,rect.height),fov=Math.max(.83*Math.max(1,1.35/aspect),renderer.focusMode==='onboard'&&renderer.getFocusFrame?.()?.type==='shuttle'?1.25:0);
  const origin=o?.origin||frame.eyeOrigin||[0,0,0],observer=o?.observer||cameraRelative(origin,frame).map(v=>-v),bodies=(renderer.renderObjects?.length?renderer.renderObjects:renderer.objectFrames||[]).filter(b=>!['waypoint','ring','belt','disk','jets','anomaly'].includes(b.type)).map(b=>({id:b.id,index:b.index,type:b.type,center:o&&b.index>=0?o.objects.slice(b.index*4,b.index*4+3):sub(b.position,origin),radius:o&&b.index>=0?o.objects[b.index*4+3]:b.radius,mass:(o&&b.index>=0?o.bodyMasses?.[b.index]??b.massSolar??0:b.massSolar||0)/4300000,opacity:s.spectrum==='geometry'||b.collapsed||['blackhole','whitehole'].includes(b.type)?1:clamp(o&&b.index>=0?o.bodyOpacity?.[b.index]??b.opacity??1:b.opacity??1,0,1),cutaway:b.starStyle==='tzo'&&!b.collapsed&&s.spectrum!=='geometry'&&(b.opacity??1)<.999,collapsed:!!b.collapsed,spin:b.spinParameter||0,axis:b.spinAxis||b.frame?.[1]||[0,1,0],...shapeFrame(b,renderer)}));
  const holes=[],holeData=o?.holes||Array.from(renderer.holeData||[]);if(s.blackHole)for(let j=0;j<(s.binary?2:1);j++){const mass=holeData[j*4+3];if(!(mass>0))continue;holes.push({id:j?'secondary':'primary',center:holeData.slice(j*4,j*4+3).map((v,i)=>o?v:v-origin[i]),mass,radius:k.horizon?.[j]||0,spin:j?s.secondarySpin:s.spin,axis:j?k.secondaryAxis:k.primaryAxis});}

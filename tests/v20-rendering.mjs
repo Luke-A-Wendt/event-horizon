@@ -9,7 +9,8 @@ const f=fixture(),r=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls
 r.loadScene('disk');r.update({annotations:false});r.update({spectrum:'geometry'});assert.equal(r.state.annotations,true);
 r.update({annotations:false});r.update({exposure:1.3});assert.equal(r.state.annotations,false);
 r.update({spectrum:'visible'});r.update({spectrum:'geometry',annotations:false});assert.equal(r.state.annotations,false);
-r.loadScene('planet');r.render();let body=r.getFocusFrame(r.objects[0].id);
+// Explicit legacy ocean-cap objects in old saved scenes retain their shape.
+r.loadScene('disk');r.addChildObject('primary','planet',{radius:11,height:.4,radiusMeters:6371000,tidalDeformation:.85,planetStyle:'ocean'});r.focusTarget(r.objects[0].id,'track',true,true);r.render();let body=r.getFocusFrame(r.objects[0].id);
 const core=body.coreRadius,index=body.index;
 near(body.radius/core,1.425);assert.deepEqual(body.shapeAxes,[1,1,1]);
 near(r.bodyShapeData[index*4]*body.radius,core);near(r.bodyShapeData[index*4+1]*body.radius,core*.85);near(r.bodyShapeData[index*4+2]*body.radius,core*.575);

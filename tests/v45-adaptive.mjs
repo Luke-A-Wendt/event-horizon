@@ -45,3 +45,39 @@ for(const name of ['low','medium','high','ultra']){
  b.setQuality('adaptive',5000);assert.deepEqual(b.profile,profile,'Enabling Adaptive inherits manual fidelity');
 }
 console.log('PASS: adaptive 25–35FPS band, retained transitions, proportional response, real Ultra, stall relief, and stable workload convergence.');
+
+// Exercise actual submissions as well as the budget. Exactly 30 Hz used to
+// leave the cold profile at a few dozen pixels wide indefinitely.
+{
+ const {fixture}=await import('./render-fixture.mjs');
+ const {BlackHoleRenderer}=await import('../dist/renderer.js');
+ const f=fixture({width:1000,height:600,dpr:1,gpuLatencyMs:4});
+ const r=new BlackHoleRenderer(f.canvas);let now=1000;
+ for(let i=0;i<240;i++){
+  now+=1000/30;
+  if(i<90&&i%7===0)r.noteCameraInteraction();
+  f.step(r,now);
+ }
+ assert(r.canvas.width>=280,'A capped 30 Hz screen leaves startup and reaches named Low');
+ assert(r.budget.level>0,'A display-limited renderer checks higher resolutions');
+ r.dispose();
+}
+{
+ const {fixture}=await import('./render-fixture.mjs');
+ const {BlackHoleRenderer}=await import('../dist/renderer.js');
+ const f=fixture({width:1000,height:600,dpr:1,gpuLatencyMs:50});
+ const r=new BlackHoleRenderer(f.canvas);let now=1000,slowDraws=0,ticks=0,sawProbe=false;
+ while(now<12000){
+  const previous=f.draws;now+=1000/60;f.step(r,now);
+  if(now>8000&&now<11900){slowDraws+=f.draws-previous;ticks++;}
+  if(now>4000&&r.budget.cadence.target===15&&!r.budget.cadence.paced(now))sawProbe=true;
+ }
+ assert.equal(r.getState().targetFps,15);assert(r.canvas.width>=160);
+ assert(60*slowDraws/ticks>=14&&60*slowDraws/ticks<=16,'Fallback actually paces submissions at 15 FPS');
+ assert(sawProbe,'A sustained slow scene gets a same-resolution capacity probe');
+ f.control.gpuLatencyMs=4;
+ while(now<22000){now+=1000/60;f.step(r,now);}
+ assert.equal(r.getState().targetFps,30);assert(r.budget.level>=2);
+ assert.equal(f.calls.finish,0);r.dispose();
+}
+console.log('PASS: limited-refresh startup, readable live GPU resolution, paced 15 FPS and automatic 30 FPS recovery.');

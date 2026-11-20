@@ -33,7 +33,7 @@ for(const [id,L,targets] of [
   const restored=clone.getFocusFrame(q.nodes[1].targetId),restoredCraft=clone.getFocusFrame(craft.id);
   near(Math.hypot(...restored.position.map((v,i)=>v-restoredCraft.position[i]))*REFERENCE_RG_METERS,baseline,1e-8,id+' save/reload separation');
   const visited=[],spectra=[];let sawDrive=false,sawFlip=false,sawLag=false,midSave=false;
-  for(let i=0;i<4000&&visited.length<q.nodes.length+1;i++){
+  for(let i=0;i<10000&&visited.length<q.nodes.length+1;i++){
    const t=r.transfer;r.advanceChartStages(.05);assert(!q.error,id+': '+q.error);
    if(!t&&r.transfer){const p=r.transfer;
     if(p.distanceMeters>L/2){
@@ -70,7 +70,7 @@ for(const [id,L,targets] of [
       assert(f.minimumReturnG<=1,'no false escape warning at the feasible inner radius');
      }else{
       assert(t.radiusChange,'A same-body recovery follows the radius maneuver');
-      near(t.wallSeconds,10,1e-8,'outward maneuver playback seconds');
+      assert(t.endpointClock.wallSeconds>10&&t.wallSeconds>=t.endpointClock.wallSeconds,'Outward radius change allows extra viewing time near both circles');
       near(t.plan.initialSpeed,Math.sqrt(mu/inner),1e-8,'inner departure speed');near(t.plan.finalSpeed,Math.sqrt(mu/R),1e-8,'outer arrival speed');
       const actual=r.getFocusFrame(craft.id).position.map(x=>x*REFERENCE_RG_METERS);
       assert(Math.hypot(...actual.map((v,i)=>v-t.tangentLeg.end[i]))<.1,'no position discontinuity on arrival at outer recovery orbit');
@@ -103,4 +103,4 @@ for(const [id,L,targets] of [
  }finally{r.dispose();clone.dispose();}
 }
 assert(!SCENE_PRESETS.some(p=>p.id==='bridge-earth-proxima'),'No wormhole shortcut in the gallery');
-assert.deepEqual(SCENE_PRESETS.filter(p=>p.title.startsWith('Earth to Proxima')).map(p=>p.id),['shuttle-proxima-direct']);
+assert.deepEqual(SCENE_PRESETS.filter(p=>p.title.startsWith('Earth to Proxima')).map(p=>p.id),['shuttle-proxima-direct','warp-proxima-direct']);

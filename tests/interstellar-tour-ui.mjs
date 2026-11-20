@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
-import {installPilotControls} from '../dist/pilot-ui.js';
+import {installPilotControls,logSpeedRatio} from '../dist/pilot-ui.js';
 import {formatClockDuration} from '../dist/object-clocks.js';
 import {fixture} from './render-fixture.mjs';
 import {uiDomFixture} from './ui-dom-fixture.mjs';
@@ -29,9 +29,29 @@ r.loadScene('bridge');ui.update();assert(el('tourEstimate').hidden,'Wormhole ret
 console.log('PASS: direct tour estimates before Play, year threshold, live onboard ETA, and preserved bridge HUD.');
 r.loadScene('warp-lab');ui.update();
 assert(!el('pilotControls').querySelector('#pilotLegSpeed'));
-assert(el('pilotSpeedLog').parentElement.classList.contains('warp-ratio'));assert.equal(el('pilotRatioLabel').textContent,'v/c = ');assert.equal(el('pilotSpeedLog').textContent,'102');
-for(const w of [0,1]){r.setFlightPower(w);ui.update();assert(!el('pilotSpeedLog').parentElement.hidden);assert.equal(el('pilotSpeedLog').textContent,String(w));}
-r.loadScene('shuttle-proxima-direct');ui.update();assert.match(el('pilotRatioLabel').textContent,/log₁₀/);
-assert(el('pilotSpeedLog').parentElement.hidden);assert(!el('pilotSpeedLog').parentElement.classList.contains('warp-ratio'));
-r.state.paused=false;for(let i=0;i<350;i++){r.advanceChartStages(.05);if(r.transfer?.progress>.35)break;}ui.update();
-assert(!el('pilotSpeedLog').parentElement.hidden);assert.match(el('pilotSpeedLog').textContent,/^−/);
+assert(el('pilotSpeedLog').parentElement.classList.contains('warp-ratio'));
+assert.equal(el('pilotRatioLabel').textContent,'v/c ~ ');assert.equal(el('pilotSpeedLog').innerHTML,'10<sup>2.0</sup>');
+for(const w of [0,1]){
+ r.setFlightPower(w);ui.update();assert(!el('pilotSpeedLog').parentElement.hidden);
+ assert.equal(el('pilotSpeedLog').innerHTML,w?'10<sup>0.0</sup>':'0');
+}
+for(const scene of ['earth-vulcan','warp-proxima-direct','warp-sgra-direct']){
+ r.loadScene(scene);ui.update();assert.equal(el('pilotPower').getAttribute('max'),'4');
+ const choice=scene==='earth-vulcan'?'Moon':'Sun',target=r.objects.find(o=>o.name===choice);assert(ui.previewTravel(target.id));
+ assert.equal(el('pilotTripWarp').getAttribute('max'),'4');assert.equal(el('pilotTripWarp').value,'4');
+ assert.equal(el('pilotTripTarget').textContent,choice);ui.closeTravel();
+}
+r.loadScene('shuttle-proxima-direct');ui.update();
+const log=el('pilotSpeedLog'),logRow=log.parentElement;
+assert(!logRow.hidden&&!logRow.classList.contains('warp-ratio')&&!logRow.classList.contains('metric-alert'));
+assert.equal(el('pilotRatioLabel').textContent,'v/c ~ ');
+assert.equal(log.innerHTML,'10<sup>−4.1</sup>','The displayed departure speed is sublight');
+r.state.paused=false;for(let i=0;i<2000;i++){r.advanceChartStages(.025);if(r.transfer?.progress>.49)break;}ui.update();
+assert(logRow.classList.contains('metric-alert'));assert.equal(el('pilotRatioLabel').textContent,'');
+assert.equal(log.innerHTML,'10<sup>−0.1</sup> &lt; v/c &lt; 1','Round toward a sublight interval near c');
+assert.equal(logSpeedRatio(0),-Infinity);
+assert.equal(logSpeedRatio(.1),-1);
+assert.equal(logSpeedRatio(.01),-2);
+assert(logSpeedRatio(1,1e10)<0);
+assert.equal(logSpeedRatio(1),0);
+assert(Number.isNaN(logSpeedRatio(1.1)));

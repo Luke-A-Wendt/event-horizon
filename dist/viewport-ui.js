@@ -1,4 +1,6 @@
+import {K2_GRID} from './kardashev-solar.js';
 import {OBJECT_TYPES} from './objects.js';
+import {DEFAULTS,GRID_DENSITY_RANGE,sceneCruiseWarp} from './config.js';
 import {appendPlaylistStop} from './playlist-ui.js';
 import {MAP_FILTERS,DEFAULT_MAP_FILTERS,objectCategory} from './object-taxonomy.js';
 import { PHOTO_PRESETS, createPhotoRender } from './photo-renderer.js';
@@ -7,12 +9,22 @@ import { SURFACE_PROFILES } from './planet-profiles.js';
 import { SCENE_FILE_VERSION } from './scene-file.js';
 import { formatClockDuration } from './object-clocks.js';
 
+// Legacy scene files mirror the all-grids switch into grid and warpGrid.
+export function gridDisplayPatch(state,key,value){
+ if(key==='spectrum'&&value==='geometry')return {spectrum:value,grid:true,warpGrid:true,warpGridOnly:false};
+ if(key!=='grid'&&key!=='warpGrid'&&key!=='warpGridOnly')return null;
+ const geometry=state.spectrum==='geometry';
+ const only=key==='warpGridOnly'&&!!value&&!geometry;
+ const all=geometry||(key==='warpGridOnly'?!value:!!value);
+ return {grid:all,warpGrid:all,warpGridOnly:only};
+}
 // The viewport owns navigation. Existing property controls are moved, never
 // cloned, so every slider has one state and one accessible label.
 export function installViewportUI(api){
  const $=id=>document.getElementById(id),scene=$('scene'),controls=document.querySelector('.controls');
  const icon=name=>`<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
  const escape=text=>String(text).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const densityFields=[['sceneGridDensity','Scene grid'],['warpGridDensity','Warp grid']];
  let scenesDiscovered=false; // This visit only: never persisted in browser storage.
  let playDiscovered=false;
  let panel=null,selection='space',lastSignature='',lastTargetSignature='',lastFocusedId=null,lastVRError='',lastChromeSignature='',lastOverlaySignature='',photoAbort=null,photoUrl=null,vrSupport=null;
@@ -40,24 +52,32 @@ export function installViewportUI(api){
  <section id="cameraPanel" class="viewport-popover camera-popover" aria-labelledby="cameraPanelTitle" hidden>
   <div class="viewport-panel-heading"><div><small>CHOOSE YOUR PERSPECTIVE</small><h3 id="cameraPanelTitle">Camera</h3></div><button class="icon-button" data-close-view-panel aria-label="Close camera">${icon('close')}</button></div>
   <div id="cameraControlSlot" hidden></div><p class="viewport-mode-note" id="viewportModeNote">Orbit a subject. Scroll or pinch to set your distance.</p>
-  <div class="camera-target-controls"><label for="viewportTarget">FOLLOW A BODY</label><select id="viewportTarget"></select><div class="viewport-camera-actions"><button id="viewportTrack" class="outline-button">Orbit</button><button id="viewportRide" class="outline-button">Ride · 360°</button></div><button id="viewportChase" class="outline-button viewport-wide" hidden>Chase · 360° <small>Behind & above the vehicle</small></button><button id="viewportDrive" class="outline-button drive-action viewport-wide" hidden>Drive <small>Take the helm</small></button><button id="relativeFree" class="outline-button viewport-wide">Free roam around this body</button><button id="orbitMapOpen" class="outline-button viewport-wide">${icon('solar')}Orbit map <small>Log scales & gravity study</small></button></div>
+  <div class="camera-target-controls"><label for="viewportTarget">FOLLOW A BODY</label><select id="viewportTarget"></select><div class="viewport-camera-actions"><button id="viewportTrack" class="outline-button">Orbit</button><button id="viewportRide" class="outline-button">Ride · 360°</button></div><button id="viewportChase" class="outline-button viewport-wide" hidden>Chase · 360° <small>Behind & above the vehicle</small></button><button id="viewportDrive" class="outline-button drive-action viewport-wide" hidden>Drive <small>Take the helm</small></button><button id="viewportLineup" class="outline-button viewport-wide" hidden>View all vehicles</button><button id="relativeFree" class="outline-button viewport-wide">Free roam around this body</button><button id="orbitMapOpen" class="outline-button viewport-wide">${icon('solar')}Orbit map <small>Log scales & gravity study</small></button></div>
   <button id="viewportReset" class="outline-button viewport-wide">${icon('reset')}Reset scene view</button>
   <div class="vr-entry"><button id="enterVR" class="outline-button">${icon('vr')}Enter VR</button><p id="vrStatus">Checking headset support…</p></div>
  </section>
  <section id="displayPanel" class="viewport-popover display-popover" aria-labelledby="displayPanelTitle" hidden>
   <div class="viewport-panel-heading"><div><small>LIGHT, GEOMETRY & QUALITY</small><h3 id="displayPanelTitle">Display</h3></div><button class="icon-button" data-close-view-panel aria-label="Close display">${icon('close')}</button></div>
-  <label class="planned-path-toggle"><input id="plannedPathToggle" type="checkbox"> Planned path <small>(with labels)</small></label><div id="displayControlSlot"></div><details class="render-diagnostics"><summary>Rendering diagnostics</summary><p id="renderDiagnostics" role="status">Waiting for the renderer…</p><small id="applicationVersion">Version ${SCENE_FILE_VERSION}</small></details>
+  <div class="display-guides"><label class="planned-path-toggle" title="Direction of motion. In the orbit and free-fall studies, velocity is relative to the falling grid."><input id="velocityArrowsToggle" type="checkbox"> Velocity arrows</label><label class="planned-path-toggle"><input id="plannedPathToggle" type="checkbox"> Planned path <small>(with labels)</small></label></div>
+  <div id="gridSettings" class="display-grid-settings">
+   <label class="planned-path-toggle"><input id="warpGridOnlyToggle" type="checkbox"> Warp grid only <small>(around the bubble)</small></label>
+   <fieldset class="display-grid-detail"><legend>Grid resolution</legend><div class="display-grid-sliders">${densityFields.map(([id,label])=>`<div><div class="range-header"><label for="${id}">${label}</label><output id="${id}Value" for="${id}"></output></div><input id="${id}" type="range" min="${GRID_DENSITY_RANGE[0]}" max="${GRID_DENSITY_RANGE[1]}" step=".25" value="${DEFAULTS[id]}" aria-describedby="gridResolutionNote"></div>`).join('')}</div><p id="gridResolutionNote">Higher values draw more lines.</p></fieldset>
+  </div><div id="displayControlSlot"></div><details class="render-diagnostics"><summary>Rendering diagnostics</summary><p id="renderDiagnostics" role="status">Waiting for the renderer…</p><small id="applicationVersion">Version ${SCENE_FILE_VERSION}</small></details>
  </section>
  <div id="cpuQualityNotice" class="cpu-quality-notice" hidden><strong>Low-fidelity CPU view</strong><span>Visual quality is much better with a GPU.</span><small id="cpuBackendStatus"></small></div>
  </div>`;
  scene.append(shell);scene.classList.add('has-viewport-ui');
  const inspectorHeader=document.createElement('div');inspectorHeader.className='viewport-inspector-heading';inspectorHeader.innerHTML=`<button id="inspectorBack" title="Back to scene elements" aria-label="Back to scene elements">‹</button><div><small>SELECTED ELEMENT</small><h3 id="inspectorTitle">Black hole</h3></div><button class="icon-button" id="closeInspector" aria-label="Close properties">${icon('close')}</button>`;
- const inspectorActions=document.createElement('div');inspectorActions.className='inspector-camera-actions';inspectorActions.innerHTML=`<button id="inspectorDrive" class="outline-button drive-action" hidden>Drive</button><details class="inspector-view-menu" id="inspectorViewMenu"><summary>${icon('video')}Viewpoint${icon('down')}</summary><div class="inspector-view-options"><button id="inspectorTrack" class="outline-button">Track</button><button id="inspectorRide" class="outline-button">Ride · 360°</button><button id="inspectorChase" class="outline-button" hidden>Chase · 360°</button><button id="inspectorFree" class="outline-button">Free roam here</button><button id="inspectorMap" class="outline-button">Orbit map</button></div></details>`;
+ const inspectorActions=document.createElement('div');inspectorActions.className='inspector-camera-actions';inspectorActions.innerHTML=`<button id="inspectorDrive" class="outline-button drive-action" hidden>Drive</button><button id="inspectorLineup" class="outline-button" hidden>View all vehicles</button><details class="inspector-view-menu" id="inspectorViewMenu"><summary>${icon('video')}Viewpoint${icon('down')}</summary><div class="inspector-view-options"><button id="inspectorTrack" class="outline-button">Track</button><button id="inspectorRide" class="outline-button">Ride · 360°</button><button id="inspectorChase" class="outline-button" hidden>Chase · 360°</button><button id="inspectorFree" class="outline-button">Free roam here</button><button id="inspectorMap" class="outline-button">Orbit map</button></div></details>`;
  const branchActions=document.createElement('div');branchActions.className='inspector-branch-actions';branchActions.innerHTML='<button id="inspectorAddChild" class="outline-button">＋ Add child</button><button id="inspectorDeleteBranch" class="text-button">Delete object</button>';controls.prepend(branchActions);controls.prepend(inspectorActions);controls.prepend(inspectorHeader);controls.classList.add('viewport-inspector');controls.hidden=true;controls.setAttribute('aria-label','Selected element properties');scene.append(controls);
  // Camera, render and spectral controls stay available in native fullscreen.
  $('cameraControlSlot').append(document.querySelector('.camera-toolbar'));
 
+ $('warpGridOnlyToggle').addEventListener('change',()=>api.updateParameter('warpGridOnly',$('warpGridOnlyToggle').checked));
  $('plannedPathToggle').addEventListener('change',()=>api.updateParameter('plannedPath',$('plannedPathToggle').checked));
+ $('velocityArrowsToggle').addEventListener('change',()=>api.updateParameter('velocityArrows',$('velocityArrowsToggle').checked));
+ for(const [id] of densityFields)$(id).addEventListener('input',()=>api.updateParameter(id,Number($(id).value)));
+ $('grid')?.closest('label')?.after($('gridSettings'));
  const viewToolbar=document.querySelector('.view-toolbar');$('displayControlSlot').append(viewToolbar);$('displayControlSlot').append($('performanceControls'));
  const optics=document.querySelector('.geometry-panel');optics.open=true;
  const transport=document.querySelector('.transport');$('displayControlSlot').append(transport);transport.append($('resetAll'));
@@ -125,27 +145,29 @@ export function installViewportUI(api){
  const transferCraft=()=>{const r=renderer(),ships=pilotCrafts(),auto=ships.filter(o=>navigation(o.id).mode==='auto');if(r?.objects?.some(o=>o.id===r.focusId&&['astronaut','iss'].includes(o.type)))return null;return [r?.driveId,r?.selectedId,r?.focusId].map(id=>ships.find(o=>o.id===id)).find(Boolean)||auto.find(o=>r.flightSequences?.[o.id]?.active)||auto[0]||null;};
  const optionalHeading=value=>String(value).trim()===''||!Number.isFinite(Number(value))?null:Math.max(-180,Math.min(180,Number(value)));
  const navigation=id=>renderer()?.getNavigationState?.(id)||{mode:renderer()?.driveId===id?'manual':'auto'};
- const planTargets=craftId=>(renderer()?.getTravelTargets?.({craftId,warpFactor:1})||[]);
- function openFlightPlan(craftId=transferCraft()?.id,targetId=null,warpFactor=1,heading=null){
+ const bridgeFor=id=>id?renderer()?.getJanusBridge?.(id):null;
+ const planTargets=craftId=>renderer()?.getTravelTargets?.({craftId,warpFactor:1})||[];
+ function openFlightPlan(craftId=transferCraft()?.id,targetId=null,warpFactor,heading=null){
   const r=renderer(),craft=r?.objects?.find(o=>o.id===craftId&&['enterprise','shuttle'].includes(o.type));if(!craft||navigation(craftId).mode==='manual')return false;
   if(targetId){const result=appendPlaylistStop(r,craftId,targetId,warpFactor,heading);if(result.error){api.toast(result.error);return false;}}
-  api.closeTravelPreview?.();setPanel(null);if(mapDialog.open)mapDialog.close();if(r.selectedId!==craftId)api.selectObject(craftId);api.refresh();$('pilotPlaylist')?.click();return true;
+  api.closeTravelPreview?.();setPanel(null);if(mapDialog.open)mapDialog.close();if(api.showPlaylist)return api.showPlaylist(craftId);if(r.selectedId!==craftId)api.selectObject(craftId);api.refresh();$('pilotPlaylist')?.click();return true;
  }
- function updateMapDestinations(){const ships=pilotCrafts().filter(o=>navigation(o.id).mode==='auto'),picker=$('mapCraftPicker'),key=ships.map(o=>o.id+':'+o.name).join('|');$('mapCraftChoice').hidden=ships.length<2;if(picker.dataset.signature!==key){picker.innerHTML=ships.map(o=>`<option value="${escape(o.id)}">${escape(o.name||o.type)}</option>`).join('');picker.dataset.signature=key;}picker.value=mapCraftId||'';const craft=renderer()?.objects?.find(o=>o.id===mapCraftId),show=!!craft&&navigation(craft.id).mode==='auto';$('mapDestinations').hidden=!show;if(!show)return;const list=planTargets(craft.id),signature=list.map(t=>t.id+':'+(t.name||t.label)).join('|');if($('mapDestination').dataset.signature!==signature){$('mapDestination').dataset.signature=signature;$('mapDestination').innerHTML='<option value="">Select destination…</option>'+list.map(t=>`<option value="${escape(t.id)}">${escape(t.name||t.label||t.id)}${t.waypoint?' · waypoint':''}</option>`).join('');}$('mapDestination').value=mapTravelDestination||mapSelection||'';}
+ function updateMapDestinations(){const ships=pilotCrafts().filter(o=>navigation(o.id).mode==='auto'),picker=$('mapCraftPicker'),key=ships.map(o=>o.id+':'+o.name).join('|');$('mapCraftChoice').hidden=ships.length<2;if(picker.dataset.signature!==key){picker.innerHTML=ships.map(o=>`<option value="${escape(o.id)}">${escape(o.name||OBJECT_TYPES.find(t=>t.id===o.type)?.label||o.type)}</option>`).join('');picker.dataset.signature=key;}picker.value=mapCraftId||'';const craft=renderer()?.objects?.find(o=>o.id===mapCraftId),show=!!craft&&navigation(craft.id).mode==='auto';$('mapDestinations').hidden=!show;if(!show)return;$('mapFlightPlan').textContent='Playlist';const list=planTargets(craft.id),signature=list.map(t=>t.id+':'+(t.name||t.label)).join('|');if($('mapDestination').dataset.signature!==signature){$('mapDestination').dataset.signature=signature;$('mapDestination').innerHTML='<option value="">Select destination…</option>'+list.map(t=>`<option value="${escape(t.id)}">${escape(t.name||t.label||t.id)}${t.dockable?' · dock':t.waypoint?' · waypoint':''}</option>`).join('');}$('mapDestination').value=mapTravelDestination||mapSelection||'';}
  function updateMapTravel(id=mapTravelDestination||mapSelection||mapModelCurrent?.centerId){
   const r=renderer(),craft=r?.objects?.find(o=>o.id===mapCraftId),pilot=craft?.id,active=!!r?.getTravelState?.()?.active;
   updateMapDestinations();mapTool(lastCompact===compactMap()?tool:compactMap()?'map':'object');if(!mapDialog.open||!pilot||navigation(pilot).mode!=='auto'){$('mapTravel').hidden=true;mapTravelPreview=null;mapTravelKey='';return;}
   if(mapHeadingTarget!==id){mapHeadingTarget=id;mapHeading=null;$('mapTravelHeading').value='';}
   const target=planTargets(pilot).find(t=>t.id===id),waypoint=target?.waypoint,options={craftId:pilot,warpFactor:mapWarp,...(waypoint&&mapHeading!==null?{heading:mapHeading}:{})},key=[pilot,id,active,!!target,mapWarp,mapHeading,r.geometryRevision].join('|');
-  if(key!==mapTravelKey){mapTravelKey=key;mapTravelPreview=target?r.previewTravel?.(id,options):null;if(mapTravelPreview&&!mapTravelPreview.error)mapTravelPreview={...mapTravelPreview,craftId:pilot,craftType:craft.type};r.setTravelPreview?.(mapTravelPreview);}
+  const bridge=bridgeFor(pilot);
+  if(key!==mapTravelKey){mapTravelKey=key;mapTravelPreview=target&&!bridge&&!target.dockable?r.previewTravel?.(id,options):null;if(mapTravelPreview&&!mapTravelPreview.error)mapTravelPreview={...mapTravelPreview,craftId:pilot,craftType:craft.type};r.setTravelPreview?.(mapTravelPreview);}
   const data=mapTravelPreview,estimated=Number.isFinite(data?.properSeconds)&&!data.error;
   $('mapTravel').hidden=!target||mapTravelDismissed===id;
-  $('mapTravelMode').textContent=craft.type==='shuttle'?'AUTO FLIGHT · 1g':'AUTO FLIGHT · ENTERPRISE';
+  $('mapTravelMode').textContent=bridge?'CENTERED BRIDGE':target?.dockable?'HUB DOCKING':craft.type==='shuttle'?'AUTO FLIGHT · 1g':'AUTO FLIGHT · WARP';
   const promptTarget=target?.name||target?.label||'Choose a destination';if($('mapTravelTarget').textContent!==promptTarget)$('mapTravelTarget').textContent=promptTarget;
-  $('mapTravelHeadingRow').hidden=!waypoint;$('mapTravelTimes').hidden=!estimated;$('mapTravelProperRow').hidden=false;$('mapTravelDilationRow').hidden=craft.type!=='shuttle';$('mapTravelDilation').textContent=estimated?formatClockDuration(data.estimatedDilationSeconds??data.dilationSeconds??0):'';$('mapTravelWarpRow').hidden=!target||craft.type!=='enterprise';$('mapTravelWarpValue').textContent=Number(mapWarp.toPrecision(2)).toLocaleString();
+  $('mapTravelHeadingRow').hidden=!!bridge||!waypoint;$('mapTravelTimes').hidden=!estimated;$('mapTravelProperRow').hidden=false;$('mapTravelDilationRow').hidden=craft.type!=='shuttle';$('mapTravelDilation').textContent=estimated?formatClockDuration(data.estimatedDilationSeconds??data.dilationSeconds??0):'';$('mapTravelWarpRow').hidden=!!bridge||!target||craft.type!=='enterprise';$('mapTravelWarpValue').textContent=Number(mapWarp.toPrecision(2)).toLocaleString();
   $('mapTravelTime').textContent=estimated?formatClockDuration(data.coordinateSeconds):'';$('mapTravelProper').textContent=estimated?formatClockDuration(data.properSeconds):'';
-  $('mapTravelNote').textContent=!target?'Choose a body or waypoint on the map.':estimated?'From current position · adds to end of playlist.':'Calculated from the preceding stop when queued.';
-  $('mapTravelQueue').hidden=!target;$('mapTravelCancel').hidden=!target;
+  $('mapTravelNote').textContent=bridge?'Add this visit to the route. Janus uses local warp in orbit and a bridge between destinations.' :target?.dockable?'Match the station’s orbit and dock at the lower hub. Change the port in Playlist.':!target?'Choose a body or waypoint on the map.':estimated?'From current position · adds to end of playlist.':'Calculated from the preceding stop when queued.';
+  $('mapTravelQueue').disabled=false;$('mapTravelQueue').textContent=target?.dockable?'Add docking stop':'Add to playlist';$('mapTravelQueue').hidden=!target;$('mapTravelCancel').hidden=!target;
  }
  const mapDistance=value=>value>=14959787070?`${(value/149597870700).toLocaleString(undefined,{maximumSignificantDigits:5})} AU`:value>=1000?`${(value/1000).toLocaleString(undefined,{maximumSignificantDigits:5})} km`:`${value.toLocaleString(undefined,{maximumSignificantDigits:5})} m`;
  function refreshMapCenters(){const nodes=tree(),shown=nodes.filter(n=>n.id===mapCenter||!mapSearch||n.label.toLowerCase().includes(mapSearch)),signature=shown.map(n=>n.id+':'+n.label).join('|');if(signature!==mapCenterSignature){mapCenterSignature=signature;$('orbitMapCenter').innerHTML=shown.map(n=>`<option value="${escape(n.id)}">${escape(n.label)}</option>`).join('')||'<option value="space">Space</option>';}$('orbitMapCenter').value=mapCenter;}
@@ -160,9 +182,9 @@ export function installViewportUI(api){
   $('mapAddChild').hidden=!realNode||!node.canAdd;$('mapRemoveBranch').hidden=!realNode||node.id==='space';
   $('mapRemoveBranch').textContent=node?.children?.length?'Remove branch…':'Remove object…';
   $('mapInspectSelection').hidden=!compactMap();$('mapInspectSelection').textContent='Inspect '+b.name;
-  $('mapQuickQueue').hidden=!eligible;$('mapQuickQueue').title=eligible?'Append '+b.name+' to '+(r.objects.find(o=>o.id===mapCraftId)?.name||'the vehicle')+'’s playlist':'';
+  const bridge=bridgeFor(mapCraftId);$('mapQuickQueue').disabled=!!bridge&&(bridge.active||bridge.currentId===b.id);$('mapQuickQueue').textContent=bridge?'Set bridge destination':eligible&&node?.type==='habitat'?'Add docking stop':'Add to playlist';$('mapQuickQueue').hidden=!eligible;$('mapQuickQueue').title=bridge?'Open bridge controls for this endpoint':eligible?'Append '+b.name+' to '+(r.objects.find(o=>o.id===mapCraftId)?.name||'the vehicle')+'’s playlist':'';
   if(branchEdit&&branchEdit.id!==b.id)closeBranchEditor();
-  $('mapSelected').innerHTML=`<span>SELECTED ${b.type==='space'?'ROOT':'OBJECT'}</span><h3>${escape(b.name)}</h3><dl>${b.type==='waypoint'?'<div><dt>Arrival</dt><dd>At rest</dd></div>':b.type!=='space'?`<div><dt>${b.horizonMeters?'Event horizon radius':'Body radius'}</dt><dd>${mapDistance(b.horizonMeters||b.radiusMeters)}</dd></div>${b.massSolar>0?`<div><dt>Mass</dt><dd>${b.massSolar>=.01?Number(b.massSolar.toPrecision(4)).toLocaleString()+' M☉':(b.massSolar*1.98847e30).toExponential(2)+' kg'}</dd></div>`:''}`:''}<div><dt>From map center</dt><dd>${b.distanceMeters>0?mapDistance(b.distanceMeters):'At center'}</dd></div>${mapModelCurrent.host.massSolar>0?`<div><dt>GM / (r c²)</dt><dd>${potential.toExponential(2)}</dd></div><div><dt>Tidal scale · 1/m²</dt><dd>${tidal.toExponential(2)}</dd></div>`:''}</dl>${b.dataNote?`<details class="map-source-note"><summary>Source &amp; model notes</summary><p>${escape(b.dataNote)}</p></details>`:''}`;
+  $('mapSelected').innerHTML=`<span>SELECTED ${b.type==='space'?'ROOT':'OBJECT'}</span><h3>${escape(b.name)}</h3><dl>${b.type==='waypoint'?'<div><dt>Arrival</dt><dd>At rest</dd></div>':b.type!=='space'?`<div><dt>${b.catalogId===K2_GRID?'Network extent':b.horizonMeters?'Event horizon radius':'Body radius'}</dt><dd>${mapDistance(b.horizonMeters||b.radiusMeters)}</dd></div>${b.massSolar>0?`<div><dt>Mass</dt><dd>${b.massSolar>=.01?Number(b.massSolar.toPrecision(4)).toLocaleString()+' M☉':(b.massSolar*1.98847e30).toExponential(2)+' kg'}</dd></div>`:''}`:''}<div><dt>From map center</dt><dd>${b.distanceMeters>0?mapDistance(b.distanceMeters):'At center'}</dd></div>${mapModelCurrent.host.massSolar>0&&b.catalogId!==K2_GRID?`<div><dt>GM / (r c²)</dt><dd>${potential.toExponential(2)}</dd></div><div><dt>Tidal scale · 1/m²</dt><dd>${tidal.toExponential(2)}</dd></div>`:''}</dl>${b.dataNote?`<details class="map-source-note"><summary>Source &amp; model notes</summary><p>${escape(b.dataNote)}</p></details>`:''}`;
   $('mapTrack').disabled=!canTrack;$('mapRide').disabled=!canRide;$('mapChase').hidden=!isPilotable(b.id);$('mapChase').disabled=!canRide;$('mapDrive').hidden=!isPilotable(b.id);setDriveAvailability($('mapDrive'),b.id,canRide);$('mapCenterSelected').disabled=b.id===mapCenter;$('mapCenterSelected').textContent=node?.children?.length?`Explore ${node.children.length} ${node.children.length===1?'child':'children'} →`:'Center map here';
   const entries=[mapModelCurrent.host,...mapModelCurrent.entries],bodySignature=entries.map(b=>b.id+':'+b.name).join('|');if($('mapBodyPicker').dataset.signature!==bodySignature){$('mapBodyPicker').dataset.signature=bodySignature;$('mapBodyPicker').innerHTML=entries.map(b=>`<option value="${escape(b.id)}">${escape(b.name)}${b.id===mapCenter?' · center':''}</option>`).join('');}$('mapBodyPicker').value=b.id;
   const nodes=new Map(mapModelCurrent.nodes.map(n=>[n.id,n])),chain=[];let ancestor=nodes.get(mapCenter);while(ancestor&&chain.length<40){chain.unshift(ancestor);ancestor=nodes.get(ancestor.parentId);}
@@ -178,7 +200,7 @@ export function installViewportUI(api){
  function resetMapAmplification(model){const subject=model.children.find(b=>b.id===mapSelection)||[...model.children].sort((a,b)=>b.radiusMeters-a.radiusMeters)[0],value=mapPotential(model.host.massSolar,subject?.distanceMeters||model.host.radiusMeters*5);$('mapAmplification').value=value>0?Math.max(0,Math.min(12,Math.round(Math.log10(.3/value)))):0;}
  function centerMap(id){closeBranchEditor();$('mapActionStatus').textContent='';mapTravelDestination=null;mapLastTap=null;mapTravelDismissed=null;mapTravelKey='';mapCenter=id||'space';mapSelection=null;mapOrbitRange=null;mapSearch='';$('mapObjectSearch').value='';resetMapAmplification(mapModel(renderer(),mapCenter,{filters:mapFilters}));updateMap();}
  function chooseMapBody(id){closeBranchEditor();$('mapActionStatus').textContent='';mapTravelDestination=null;mapTravelDismissed=null;mapTravelKey='';mapSelection=id;mapOrbitRange=null;updateMap();}
- function openMap(center){closeBranchEditor();$('mapActionStatus').textContent='';mapTool(compactMap()?'map':'object');mapHeading=null;mapHeadingTarget=null;mapTravelDestination=null;api.closeTravelPreview?.();const chosen=transferCraft();mapCraftId=chosen?.id||null;mapWarp=1;$('mapTravelWarp').value='1';$('mapToggle').classList.remove('control-discovery');mapTravelDismissed=null;mapTravelKey='';mapLastTap=null;setPanel(null);const r=renderer(),nodes=tree(),requested=center||'space',requestedNode=nodes.find(n=>n.id===requested),current=requestedNode&&!requestedNode.children?.length&&requestedNode.parentId&&requestedNode.parentId!=='space'?requestedNode.parentId:requested,model=mapModel(r,current,{filters:mapFilters});mapCenter=model.centerId;mapSelection=requested!==model.centerId?requested:null;mapOrbitRange=null;mapSearch='';$('mapObjectSearch').value='';refreshMapCenters();resetMapAmplification(model);api.openDialog('orbitMapDialog',$('mapToggle'));updateMap();}
+ function openMap(center){closeBranchEditor();$('mapActionStatus').textContent='';mapTool(compactMap()?'map':'object');mapHeading=null;mapHeadingTarget=null;mapTravelDestination=null;api.closeTravelPreview?.();const chosen=transferCraft();mapCraftId=chosen?.id||null;mapWarp=sceneCruiseWarp(renderer()?.sceneId)??1;$('mapTravelWarp').setAttribute('max',String(sceneCruiseWarp(renderer()?.sceneId)??9.9999));$('mapTravelWarp').value=String(mapWarp);$('mapToggle').classList.remove('control-discovery');mapTravelDismissed=null;mapTravelKey='';mapLastTap=null;setPanel(null);const r=renderer(),nodes=tree(),requested=center||'space',requestedNode=nodes.find(n=>n.id===requested),current=requestedNode&&!requestedNode.children?.length&&requestedNode.parentId&&requestedNode.parentId!=='space'?requestedNode.parentId:requested,model=mapModel(r,current,{filters:mapFilters});mapCenter=model.centerId;mapSelection=requested!==model.centerId?requested:null;mapOrbitRange=null;mapSearch='';$('mapObjectSearch').value='';refreshMapCenters();resetMapAmplification(model);api.openDialog('orbitMapDialog',$('mapToggle'));updateMap();}
  function changeMapOrbit(meters,id=mapSelection||mapModelCurrent?.centerId){if(!id||!Number.isFinite(meters)||!(meters>0))return;const result=renderer()?.setOrbitRadiusMeters?.(id,meters);if(result===false||result?.ok===false){api.toast(result?.reason||'This orbit could not be changed.');return;}api.markCustom?.();api.syncRendererState?.();api.refresh();updateMap();}
  let branchEdit=null;
  function closeBranchEditor(){branchEdit=null;$('mapBranchEditor').hidden=true;for(const id of ['mapAddChild','mapRemoveBranch'])$(id).setAttribute('aria-expanded','false');}
@@ -204,8 +226,8 @@ export function installViewportUI(api){
  const isShuttle=id=>api.objects().some(o=>o.id===id&&o.type==='shuttle');
  const isEnterprise=id=>api.objects().some(o=>o.id===id&&o.type==='enterprise');
  const isPilotable=id=>isShuttle(id)||isEnterprise(id);
- function setDriveAvailability(button,id,base=true){button.disabled=!base||!isPilotable(id);button.textContent='Flight controls';button.title='Show the vehicle’s Auto and Drive controls';}
- function drive(id){if(!isPilotable(id))return;api.selectObject(id);setPanel(null);api.refresh();$('pilotModeAuto')?.focus?.({preventScroll:true});}
+ function setDriveAvailability(button,id,base=true){button.disabled=!base||!isPilotable(id);const fleet=renderer()?.sceneId==='shuttle-space';button.textContent=fleet?'Take the helm':'Flight controls';button.title=fleet?'Drive this vehicle':'Show the vehicle’s Auto and Drive controls';}
+ function drive(id){if(!isPilotable(id))return;if(renderer()?.sceneId==='shuttle-space'&&api.takeLineupHelm?.(id))return;api.selectObject(id);setPanel(null);api.refresh();$('pilotModeAuto')?.focus?.({preventScroll:true});}
 
  const selectedTarget=()=>{const id=selection==='space'?null:selection==='binary'?'secondary':selection==='warp'?renderer()?.getState().warpObjectId:selection==='bridge'?(renderer()?.getState().bridgeObjectId||'bridge'):selection;return targets().find(t=>t.id===id);};
  function setPanel(next,focus=false){
@@ -230,7 +252,7 @@ export function installViewportUI(api){
   updateInspectorActions();
   setPanel('inspector',true);refreshElements();
  }
- function updateInspectorActions(){const target=selectedTarget();inspectorActions.hidden=!target?.canTrack;$('inspectorTrack').disabled=!target?.enabled;$('inspectorRide').hidden=!target?.canBoard;$('inspectorRide').disabled=!target?.enabled;$('inspectorChase').hidden=!isPilotable(target?.id);$('inspectorChase').disabled=!target?.enabled;$('inspectorDrive').hidden=!isPilotable(target?.id);setDriveAvailability($('inspectorDrive'),target?.id,!!target?.enabled);$('inspectorMap').hidden=['disk','jets','ring','belt','dyson','bridge'].includes(tree().find(n=>n.id===selection)?.type);}
+ function updateInspectorActions(){$('inspectorLineup').hidden=renderer()?.sceneId!=='shuttle-space';const target=selectedTarget();inspectorActions.hidden=!target?.canTrack;$('inspectorTrack').disabled=!target?.enabled;$('inspectorRide').hidden=!target?.canBoard;$('inspectorRide').disabled=!target?.enabled;$('inspectorChase').hidden=!isPilotable(target?.id);$('inspectorChase').disabled=!target?.enabled;$('inspectorDrive').hidden=!isPilotable(target?.id);setDriveAvailability($('inspectorDrive'),target?.id,!!target?.enabled);$('inspectorMap').hidden=['disk','jets','ring','belt','dyson','bridge'].includes(tree().find(n=>n.id===selection)?.type);}
  function focus(id,mode){setPanel(null);return api.stageMutation?api.stageMutation('Preparing viewpoint…',()=>focusNow(id,mode)):focusNow(id,mode);}
  function focusNow(id,mode){
   if(id==='space'){renderer()?.resetCamera();renderer()?.releaseFocus(false);api.refresh();setPanel(null);return;}
@@ -241,8 +263,8 @@ export function installViewportUI(api){
  function refreshElements(force=false){
   if(!force&&panel!=='elements')return;
   const nodes=tree();for(const n of nodes)if(!knownBranches.has(n.id)){knownBranches.add(n.id);if(nodes.length>40&&n.children?.length&&n.parentId!=='space'&&n.id!=='space')collapsed.add(n.id);}const signature=JSON.stringify([nodes.map(n=>[n.id,n.parentId,n.label,n.enabled,n.children]),selection,[...collapsed],objectSearch]);if(!force&&signature===lastSignature)return;lastSignature=signature;
-  const context=renderer()?.getObjectContext?.();$('viewportAdd').innerHTML=context?.kind==='bridge'?'↔ Change traveler <span>Enterprise · NASA Shuttle · Astronaut</span>':'＋ Add an object <span>Choose a parent, then a child</span>';
-  const glyph=n=>({space:'spark',blackhole:'blackhole',star:'spark',planet:'solar',moon:'orbit',planetoid:'solar',asteroid:'orbit',enterprise:'warp',shuttle:'shuttle',disk:'blackhole',jets:'arrow',ring:'orbit',belt:'orbit',dyson:'solar'}[n.type]||'select');
+  const context=renderer()?.getObjectContext?.();$('viewportAdd').innerHTML=context?.kind==='bridge'?'↔ Change traveler <span>NASA Warp Explorer · NASA Meridian · Astronaut</span>':'＋ Add an object <span>Choose a parent, then a child</span>';
+  const glyph=n=>({space:'spark',blackhole:'blackhole',star:'spark',planet:'solar',moon:'orbit',planetoid:'solar',asteroid:'orbit',enterprise:'warp',shuttle:'meridian',heritageShuttle:'shuttle',disk:'blackhole',jets:'arrow',ring:'orbit',belt:'orbit',dyson:'solar'}[n.type]||'select');
   const map=new Map(nodes.map(n=>[n.id,n]));
   const ancestors=n=>{const result=[];let p=map.get(n.parentId);while(p&&result.length<30){result.push(p);p=map.get(p.parentId);}return result;};
   const matches=nodes.filter(n=>n.label.toLowerCase().includes(objectSearch)),visible=new Set();if(objectSearch)for(const n of matches){visible.add(n.id);for(const p of ancestors(n))visible.add(p.id);}
@@ -251,6 +273,7 @@ export function installViewportUI(api){
   $('viewportElements').setAttribute('role','tree');$('viewportElements').setAttribute('aria-label','Objects in Space');
  }
  function refreshTargets(force=false){
+  $('viewportLineup').hidden=renderer()?.sceneId!=='shuttle-space';
   if(!force&&panel!=='camera')return;
   const list=targets().filter(t=>t.enabled&&t.canTrack&&(!cameraSearch||t.label.toLowerCase().includes(cameraSearch))),previous=$('viewportTarget').value,signature=JSON.stringify(list.map(t=>[t.id,t.label,t.canBoard]));
   const currentFocus=renderer()?.focusId;if(force||signature!==lastTargetSignature||currentFocus!==lastFocusedId){const focusChanged=currentFocus!==lastFocusedId;lastFocusedId=currentFocus;lastTargetSignature=signature;$('viewportTarget').innerHTML='<option value="space">Space · root view</option>'+list.map(t=>`<option value="${escape(t.id)}">${escape(t.label)}</option>`).join('');if(focusChanged&&list.some(t=>t.id===currentFocus))$('viewportTarget').value=currentFocus;else if(list.some(t=>t.id===previous))$('viewportTarget').value=previous;else if(list.some(t=>t.id===currentFocus))$('viewportTarget').value=currentFocus;}
@@ -267,9 +290,15 @@ export function installViewportUI(api){
   if(selection==='primary'){const label=api.state().whiteHole?'White hole':labelFor('primary');$('inspectorTitle').textContent=label;}
   refreshElements();refreshTargets();if(stats.vrError&&stats.vrError!==lastVRError){lastVRError=stats.vrError;api.toast(stats.vrError);}const s=api.state(),mode=stats.viewMode||s.viewMode;
 
-  $('plannedPathToggle').checked=!!s.plannedPath;
-  const overlaySignature=[!!s.annotations,!!s.metrics,s.spectrum==='geometry'].join('|');if(overlaySignature!==lastOverlaySignature){lastOverlaySignature=overlaySignature;
-   for(const id of ['gridShortcut','allGridToggle']){$(id).disabled=s.spectrum==='geometry';$(id).title=s.spectrum==='geometry'?'Geometry view keeps the grid on':'Toggle all spacetime grids';}
+  $('plannedPathToggle').checked=!!s.plannedPath;$('warpGridOnlyToggle').checked=!!s.warpGridOnly;$('warpGridOnlyToggle').disabled=s.spectrum==='geometry';
+  $('velocityArrowsToggle').checked=!!s.velocityArrows;
+  const overlaySignature=[s.sceneGridDensity,s.warpGridDensity,!!s.annotations,!!s.metrics,s.spectrum==='geometry'].join('|');if(overlaySignature!==lastOverlaySignature){lastOverlaySignature=overlaySignature;
+   for(const [id] of densityFields){
+    const slider=$(id),value=s[id]??DEFAULTS[id],label=Number(value.toFixed(2))+'×';
+    slider.value=value;slider.setAttribute('aria-valuetext',label);$(id+'Value').textContent=label;
+    slider.style.setProperty('--progress',((value-Number(slider.min))/(Number(slider.max)-Number(slider.min))*100)+'%');
+   }
+   for(const id of ['gridShortcut','allGridToggle']){$(id).disabled=s.spectrum==='geometry';$(id).title=s.spectrum==='geometry'?'Geometry view keeps the grid on':'Show or hide spacetime grids';}
   }
   const note=mode==='free'?'Drag to choose a heading. Scroll or pinch to travel forward or backward. W / S also move.':mode==='look'?'Drag to look around. Zoom out to track this body without changing your heading.':'Orbit a subject. Scroll or pinch to set your distance.';
   if($('viewportModeNote').textContent!==note)$('viewportModeNote').textContent=note;
@@ -285,6 +314,7 @@ export function installViewportUI(api){
  $('inspectorAddChild').addEventListener('click',()=>{$('addParent').value=selection;select('add');});
  $('inspectorDeleteBranch').addEventListener('click',()=>{const id=selection,label=labelFor(id);return api.stageMutation?.('Removing branch…',()=>{renderer()?.removeTreeObject?.(id);api.syncRendererState();api.markCustom();selection='space';api.refresh();setPanel('elements');api.toast(`${label} and its children removed.`);});});
  $('inspectorFree').addEventListener('click',()=>{renderer()?.freeRoamRelative?.(selectedTarget()?.id);api.syncViewMode('free');api.refresh();setPanel(null);});$('inspectorBack').addEventListener('click',()=>setPanel('elements'));$('closeInspector').addEventListener('click',()=>{setPanel(null);$('elementsToggle').focus({preventScroll:true});});
+ for(const id of ['inspectorLineup','viewportLineup'])$(id).addEventListener('click',()=>{api.showLineup?.();selection='space';setPanel(null);});
  $('inspectorDrive').addEventListener('click',()=>drive(selectedTarget()?.id));$('inspectorChase').addEventListener('click',()=>focus(selectedTarget()?.id,'chase'));
  $('inspectorTrack').addEventListener('click',()=>focus(selectedTarget()?.id,'track'));$('inspectorRide').addEventListener('click',()=>focus(selectedTarget()?.id,'onboard'));
  $('inspectorMap').addEventListener('click',()=>openMap(selection));$('orbitMapOpen').addEventListener('click',()=>openMap($('viewportTarget').value));$('mapToggle').addEventListener('click',()=>openMap('space'));$('closeOrbitMap').addEventListener('click',()=>mapDialog.close());mapDialog.addEventListener('close',()=>{mapOrbitPending=null;renderer()?.setTravelPreview?.(null);api.onDialogClose('orbitMapDialog');});
@@ -295,7 +325,7 @@ export function installViewportUI(api){
  $('mapFlightPlan').addEventListener('click',()=>openFlightPlan(mapCraftId));$('mapTravelQueue').addEventListener('click',()=>queueFromMap(mapTravelDestination||mapSelection||mapCenter));$('mapQuickQueue').addEventListener('click',()=>queueFromMap(mapSelection||mapCenter));
  $('mapCraftPicker').addEventListener('change',()=>{mapCraftId=$('mapCraftPicker').value;mapTravelDismissed=null;mapTravelKey='';updateMap();});
  $('mapTravelHeading').addEventListener('input',()=>{mapHeading=optionalHeading($('mapTravelHeading').value);mapTravelKey='';updateMapTravel();});
- $('mapTravelWarp').addEventListener('input',()=>{mapWarp=Math.max(1,Math.min(9.9999,Number($('mapTravelWarp').value)||1));mapTravelKey='';updateMapTravel();});
+ $('mapTravelWarp').addEventListener('input',()=>{mapWarp=Math.max(1,Math.min(sceneCruiseWarp(renderer()?.sceneId)??9.9999,Number($('mapTravelWarp').value)||1));mapTravelKey='';updateMapTravel();});
  $('orbitMapCenter').addEventListener('change',()=>centerMap($('orbitMapCenter').value));$('mapObjectSearch').addEventListener('input',()=>{mapSearch=$('mapObjectSearch').value.trim().toLowerCase();refreshMapCenters();});$('mapBodyPicker').addEventListener('change',()=>chooseMapBody($('mapBodyPicker').value));for(const id of ['mapLogDistance','mapLogSize'])$(id).addEventListener('change',updateMap);$('mapAmplification').addEventListener('input',updateMap);
  $('mapParentUp').addEventListener('click',()=>{const child=mapCenter,parent=mapModelCurrent?.parentId;if(parent){centerMap(parent);chooseMapBody(child);}});$('mapBreadcrumbs').addEventListener('click',event=>{const target=event.target.closest('[data-map-center]');if(target)centerMap(target.dataset.mapCenter);});$('mapCenterSelected').addEventListener('click',()=>centerMap(mapSelection||mapModelCurrent?.centerId));
  $('mapGrid').addEventListener('change',()=>{api.updateParameter('grid',$('mapGrid').checked);updateMap();});$('mapAnnotations').addEventListener('change',()=>{api.updateParameter('annotations',$('mapAnnotations').checked);updateMap();});

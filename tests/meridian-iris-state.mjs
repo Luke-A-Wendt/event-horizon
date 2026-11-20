@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
+import {fixture} from './render-fixture.mjs';
+
+const renderer=()=>new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});
+const main=renderer(),worker=renderer();
+const iris=(r,id)=>r.frameById.get(id).irisClosure;
+const packed=(r,id)=>r.bodyParamData[r.frameById.get(id).index*4];
+try{
+ main.loadScene('empty-space');
+ main.addChildObject('space','star',{radiusMeters:6.96e8});
+ const safe=1e12,hot=1.1e9;
+ const a=main.addChildObject('space','shuttle',{x:hot}).id;
+ const b=main.addChildObject('space','shuttle',{x:safe}).id;
+ const legacy=main.addChildObject('space','heritageShuttle',{x:hot}).id;
+ assert.equal(iris(main,a),1);assert.equal(iris(main,b),0);
+ assert.equal(iris(main,legacy),undefined);
+ main.focusTarget(b,'track');
+ main.updateObject(b,{x:hot});main.state.speed=1000;
+ main.advanceSimulation(100);main.advanceSimulation(150);
+ assert.equal(iris(main,b),0,'paused camera updates do not move the shutter');
+ main.state.paused=false;main.advanceSimulation(200);
+ const moving=iris(main,b);assert(moving>0&&moving<.25,'high playback still takes visible seconds');
+ main.focusTarget(b,'onboard');
+ assert.equal(main.cameraFrame.hideIndex,main.frameById.get(b).index);
+ assert.equal(packed(main,b),Math.fround(moving));
+ restoreRenderer(worker,snapshotRenderer(main));
+ assert.equal(iris(worker,b),moving);assert.equal(packed(worker,b),Math.fround(moving));
+ main.advanceSimulation(250);
+ const packet=snapshotRenderer(main,{includeObjects:false});
+ assert(!('objects' in packet));assert.equal(packet.meridianIrises[a],1);
+ restoreRenderer(worker,packet);
+ assert.equal(iris(worker,b),iris(main,b));assert.equal(packed(worker,b),Math.fround(iris(main,b)));
+ main.render(); // Compile the current four-slot scene before freezing its uniforms.
+ const still=main.beginPhotoCapture(),index=main.frameById.get(b).index*4;
+ const frozen=still.uniforms.find(u=>u.name==='uBodyParams[0]').args[0];
+ assert.equal(frozen[index],packed(main,b));
+ const photoValue=iris(main,b);
+ main.advanceSimulation(300);main.advanceSimulation(350);assert.equal(iris(main,b),photoValue);
+ main.endPhotoCapture();
+ for(let i=0;i<100;i++)main.updateMeridianIrises(.1);
+ assert.equal(iris(main,b),1);assert.equal(frozen[index],Math.fround(photoValue));
+ main.updateObject(b,{x:safe});main.updateMeridianIrises(.05);
+ assert(iris(main,b)>.8&&iris(main,b)<1);assert.equal(iris(main,a),1);
+ for(let i=0;i<100;i++)main.updateMeridianIrises(.1);
+ assert.equal(iris(main,b),0,'fully retracted must be exactly zero');
+ main.removeObject(a);assert(!Object.hasOwn(main.meridianIrises,a));
+ main.loadScene('empty-space');assert.deepEqual(main.meridianIrises,{});
+}finally{main.dispose();worker.dispose();}
+console.log('PASS: independent Meridian shutters initialize at placement, ease in viewer time and freeze on pause, in worker snapshots and in stills.');

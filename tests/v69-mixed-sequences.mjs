@@ -4,9 +4,10 @@ import {fixture} from './render-fixture.mjs';
 import {REFERENCE_RG_METERS as RG} from '../dist/objects.js';
 
 const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false,deferProgram:true});
-r.loadScene('shuttle-space');r.sceneLoad=null;r.state.paused=false;
-const craft=r.objects.find(o=>o.type==='shuttle'),plane=r.configCache.primaryBasis;
-Object.assign(craft,{parentId:'space',placement:'local',referenceId:null,x:0,y:0,z:0});r.refreshConfiguration();
+// Build the synthetic route in open space with only its intended obstacles.
+r.loadScene('empty-space');r.sceneLoad=null;r.state.paused=false;
+const {id}=r.addChildObject('space','shuttle',{x:0,y:0,z:0});
+const craft=r.objects.find(o=>o.id===id),plane=r.configCache.primaryBasis;
 function add(type,name,x,z){
  const p=plane[0].map((v,i)=>x*v+z*plane[2][i]);return r.addChildObject('space',type,{x:p[0],y:p[1],z:p[2],name,...(type==='planet'?{radiusMeters:5e6,massSolar:3e-6}:{})}).id;
 }
@@ -16,7 +17,7 @@ const q=()=>r.flightSequences[craft.id],state=()=>r.getFlightSequence(craft.id);
 const set=(ids,loop)=>{const result=r.setFlightSequence(craft.id,ids.map(targetId=>({targetId})),{loop,active:true});assert.ok(result&&!result.error,result?.error);assert.deepEqual(result.nodes.map(n=>n.targetId),ids);};
 let now=1000;r.lastTime=now;
 function tick(){now+=100;r.now=()=>now;r.advanceSimulation(now);r.fillObjects();assert(!q().error,q().error);}
-const until=(fn,maxTicks=185)=>{for(let n=0;n<maxTicks&&!fn();n++)tick();assert(fn(),JSON.stringify([q().error,q().index,q().inFlight,q().waitSeconds,r.transfer?.targetId]));};
+const until=(fn,maxTicks=700)=>{for(let n=0;n<maxTicks&&!fn();n++)tick();assert(fn(),JSON.stringify([q().error,q().index,q().inFlight,q().waitSeconds,r.transfer?.targetId]));};
 const fix=()=>r.getFocusFrame(craft.id).position.map(x=>x*RG);
 const closeVec=(a,b,tol=.05)=>assert(Math.hypot(...a.map((v,i)=>v-b[i]))<tol);
 set([A],false);until(()=>q().holding);assert.equal(craft.waypointHoldId,A);
@@ -30,8 +31,8 @@ let turns=0,arcs=0;
 for(const destination of [B,C,D,A]){
  until(()=>r.transfer?.targetId===destination||!!q().pointTurn||!!q().orbitWait);
  if(q().pointTurn){turns++;const position=fix();const t=q().pointTurn;tick();assert(t.elapsed>0,'alignment advances in the renderer frame clock');closeVec(fix(),position);assert.equal(craft.flight.speed,0);}
- if(q().orbitWait){arcs++;assert.equal(q().orbitWait.wallSeconds,5);assert(q().orbitWait.orbitalAccelerationG>0);}
- until(()=>r.transfer?.targetId===destination);const leg=r.transfer;assert.equal(leg.wallSeconds,10);until(()=>r.transfer!==leg);
+ if(q().orbitWait){arcs++;assert(q().orbitWait.wallSeconds>=4&&q().orbitWait.sweepRadians/q().orbitWait.wallSeconds<=2*Math.PI/24+1e-9);assert(q().orbitWait.orbitalAccelerationG>0);}
+ until(()=>r.transfer?.targetId===destination);const leg=r.transfer;assert(leg.wallSeconds>=10);until(()=>r.transfer!==leg);
 }
 assert.equal(arcs,2);assert(turns>0);assert.equal(craft.waypointHoldId,A);assert(state().holding);assert(!state().loop);assert.equal(craft.flight.speed,0);
 set([A,B],true);until(()=>r.transfer?.targetId===B);until(()=>r.transfer?.targetId===A);until(()=>r.transfer?.targetId===B);

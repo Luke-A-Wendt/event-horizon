@@ -29,7 +29,7 @@ for(const [type,destination] of [['shuttle','Moon'],['enterprise','Earth']]){
   if(i===118)assert(state.active,'Not complete before sixty active seconds');
  }
  const arrived=routeState(r);assert.equal(arrived.phase,'Arrived');assert.equal(craft.parentId,target.id);assert.equal(r.driveId,null);assert.equal(r.focusId,craft.id);assert(craft.orbitMeters>target.radiusMeters*1.04);near(arrived.properElapsedSeconds,preview.properSeconds);assert(arrived.estimatedDilationSeconds>=0);
- if(type==='shuttle'){near(craft.clock.properSeconds-originalProper,preview.properSeconds);assert(craft.clock.lagSeconds>0);near(arrived.dilationSeconds,preview.dilationSeconds,5e-4);}else assert(!craft.clock);
+ if(type==='shuttle'){near(craft.clock.properSeconds-originalProper,preview.properSeconds);assert(craft.clock.lagSeconds>0);near(arrived.dilationSeconds,preview.dilationSeconds,5e-4);}else{near(craft.clock.properSeconds-originalProper,preview.properSeconds);assert.equal(craft.clock.lagSeconds,0);}
  r.dispose();
 }
 // Exercise the actual moving-world update: recomputing shortest rotations from

@@ -3,7 +3,7 @@ import {CRAFT_GLSL,createCraftGLSL} from '../dist/craft-glsl.js';
 
 // Evaluate the actual model coordinates: a decal can be valid GLSL yet be
 // clipped by the triangular silhouette; a pylon can similarly miss its hull.
-const shuttle=CRAFT_GLSL.slice(CRAFT_GLSL.indexOf('// Shuttle: nose-to-engine'),CRAFT_GLSL.indexOf('// EMU-inspired'));
+const shuttle=(await import('../dist/heritage-shuttle-glsl.js')).HERITAGE_SHUTTLE_GEOMETRY;
 const wings=[...shuttle.matchAll(/vec2\(([-.\d]+)\*x,([-.\d]+)\),vec2\(([-.\d]+)\*x,([-.\d]+)\),vec2\(([-.\d]+)\*x,([-.\d]+)\),([-.\d]+)\)/g)].slice(0,2).map(m=>m.slice(1,7).map(Number));
 const inside=(x,z,t)=>{const cross=(a,b,c,d,e,f)=>(c-a)*(f-b)-(d-b)*(e-a),v=[cross(...t.slice(0,4),x,z),cross(...t.slice(2,6),x,z),cross(t[4],t[5],t[0],t[1],x,z)];return v.every(n=>n>0)||v.every(n=>n<0);};
 const decal=CRAFT_GLSL.match(/shuttleNasaMark\(vec2\(-\(hit\.x-([.\d]+)\)\/([.\d]+),\(hit\.z\+([.\d]+)\)\/([.\d]+)\)\)/);
@@ -13,7 +13,7 @@ for(const x of [-.81,.87])for(const z of [-.332,.332])assert(wings.some(t=>insid
 // surface (+Y). The previous +X,+Z map had negative handedness and mirrored NASA.
 assert(sx*sz>0,'Upper-wing decal basis faces +Y, matching its surface normal');
 
-const enterprise=CRAFT_GLSL.slice(CRAFT_GLSL.indexOf('// TOS studio-model silhouette.'),CRAFT_GLSL.indexOf('// Guild Heighliner:'));
+const {LEGACY_ENTERPRISE_GEOMETRY:enterprise}=await import('../dist/legacy-enterprise-glsl.js');
 const pylon=enterprise.match(/vec3 pr=ro-vec3\(0,0,([-.\d]+)\);\s*part=wingHit\(pr\.xzy,rd\.xzy,vec2\(([-.\d]+)\*x,([-.\d]+)\),vec2\(([-.\d]+)\*x,([-.\d]+)\),vec2\(([-.\d]+)\*x,([-.\d]+)\),([-.\d]+)\)/);
 assert(pylon);const [z,x1,y1,x2,y2,topX,topY,thickness]=pylon.slice(1).map(Number);
 const secondary=enterprise.match(/frustumHit\(ro,rd,vec3\(0,([-.\d]+),([-.\d]+)\),([-.\d]+),([-.\d]+),([-.\d]+)\)/);

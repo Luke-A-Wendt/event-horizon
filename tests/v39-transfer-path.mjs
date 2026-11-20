@@ -17,5 +17,9 @@ const line=captureTransferPath(distant,local)?.segments.flat();
 assert.deepEqual(line?.map(p=>p.x),[-.1,0,.1],'projection preserves local guide offsets despite identical global doubles and a distant lens');
 const covered={...local,bodies:[body],occluders:[hole,body]};
 assert.equal(captureTransferPath(distant,covered),null,'locally projected samples retain foreground occlusion');
+// A skipped turn never becomes a visible chord, even when both screen points are valid.
+const gaps=[0,.1,.2,Math.PI,Math.PI+.1],circle=gaps.map(a=>[Math.cos(a)*RG,Math.sin(a)*RG,0]);
+const broken=captureTransferPath({cameraFrame:context,travelPreview:{craftId:'ship',pathPoints:circle,pathAngles:gaps}},context);
+assert.deepEqual(broken.segments.map(s=>s.length),[3,2]);
 renderer.travelPreview=null;renderer.transfer=null;assert.equal(captureTransferPath(renderer,context),null);
 console.log('PASS: frame-aligned transfer path, preview/active curves, offscreen curve clipping, occlusion, and inactive zero-work behavior.');

@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {metricDistance,metricSpeed,metricNumber} from '../dist/metric-units.js';
+import {formatClockRate,formatClockDuration} from '../dist/object-clocks.js';
+import {formatGravity} from '../dist/pilot-ui.js';
+const au=149597870700,ly=9460730472580800;
+for(const [x,y] of [[0,'0 m'],[.00002,'20 µm'],[.03,'3 cm'],[999.99,'1 km'],[3.844e8,'384,000 km'],[au,'1 AU'],[4.25*ly,'4.25 ly'],[1e19*ly,'1×10¹⁹ ly'],[NaN,'—']])assert.equal(metricDistance(x),y);
+for(const [x,y] of [[0,'0 m/s'],[.035,'35 mm/s'],[7455,'7.46 km/s'],[299792457,'300 Mm/s'],[30.4e9,'30.4 Gm/s'],[NaN,'—']])assert.equal(metricSpeed(x),y);
+assert.equal(formatClockDuration(31557600e9),'1.0 Gyr');assert.equal(formatClockRate(1.10001),'> 1.10×');assert.equal(formatClockRate(1.008),'1.008×');
+assert.equal(formatClockRate(1.0000001),'≈ 1×');assert.equal(metricNumber(1e19),'1×10¹⁹');assert.equal(formatGravity(null),'—');
+console.log('PASS: compact lengths, speeds and clocks, near-unity and threshold indications, finite and unavailable values.');

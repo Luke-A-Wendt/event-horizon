@@ -1,3 +1,5 @@
+import {warpStudyId} from './warp-studies.js';
+import {edgeKerrMetric,kerrCircularState} from './kerr-transfer.js';
 import {cameraRelative} from './camera-framing.js';
 import {effectiveWarpRadius} from './warp-physics.js';
 // Orbital guides share the transfer's optical overlay. Geometry is sampled
@@ -30,7 +32,8 @@ export function parkedOrbitGeometry(r,craftId){
  // Use cos(d)-1 = -2 sin²(d/2). A short arc remains measurable beside the
  // shuttle even when both the body centre and absolute phase are enormous.
  const offsetAtAngle=d=>add(mul(outward,-2*radiusMeters*Math.sin(d/2)**2),mul(tangent,radiusMeters*Math.sin(d)));
- return {craftId,parentId:parent.id,parentRadius:(parent.radius||0)*RG,parentCenter:mul(parent.position,RG),circularSpeedMetersPerSecond:Math.sqrt(1.32712440018e20*Math.max(0,parent.massSolar||0)/radiusMeters),tangent,parentType:parent.type,craft,center,radius:radiusMeters,normal,u,v,phase,length,currentDistance:phase*radiusMeters,radial:outward,sampleAtDistance,offsetAtAngle};
+ const metric=edgeKerrMetric(r,object,parent.id);
+ return {craftId,parentId:parent.id,parentRadius:(parent.radius||0)*RG,parentCenter:mul(parent.position,RG),circularSpeedMetersPerSecond:metric?kerrCircularState(metric,radiusMeters).speed:Math.sqrt(1.32712440018e20*Math.max(0,parent.massSolar||0)/radiusMeters),tangent,parentType:parent.type,craft,center,radius:radiusMeters,normal,u,v,phase,length,currentDistance:phase*radiusMeters,radial:outward,sampleAtDistance,offsetAtAngle};
 }
 
 export function captureParkedOrbit(r,craftId){
@@ -58,7 +61,7 @@ export function captureParkedOrbit(r,craftId){
  // Sample signed angular offsets; do not round a tiny angle onto a large phase.
  for(let a=step,n=0;a<Math.PI&&n<60;a*=1.26,n++)for(const sign of [-1,1]){const d=sign*a;angles.add(d< -orbit.phase?d+TAU:d>TAU-orbit.phase?d-TAU:d);}
  const ordered=[...angles].sort((a,b)=>a-b),points=ordered.map(d=>orbit.sampleAtDistance((orbit.phase+d)*orbit.radius));
- return {craftId,kind:'orbit',pathPoints:points,pathOffsets:ordered.map(orbit.offsetAtAngle),pathDistances:ordered.map(d=>(orbit.phase+d)*orbit.radius),pathLengthMeters:orbit.length,orbit};
+ return {craftId,kind:'orbit',pathPoints:points,pathAngles:ordered,pathOffsets:ordered.map(orbit.offsetAtAngle),pathDistances:ordered.map(d=>(orbit.phase+d)*orbit.radius),pathLengthMeters:orbit.length,orbit};
 }
 
 function rotate(v,axis,sine,cosine){return add(add(mul(v,cosine),mul(cross(axis,v),sine)),mul(axis,dot(axis,v)*(1-cosine)));}
@@ -85,11 +88,21 @@ export function parkedCameraFraming(r,orbit){
  // parking circle is raised for disk clearance. Scene up fixes screen roll.
  const up=r.configCache?.primaryBasis?.[1]||orbit.normal,bodyRay=sub(orbit.craft.position,mul(orbit.parentCenter||orbit.center,1/RG));
  const orbital=unit(cross(orbit.normal,orbit.radial)),bodyRadius=orbit.parentRadius/RG*(r.state.lensing&&['hole','blackhole','whitehole'].includes(orbit.parentType)?2.7:1),forward=limbForward(bodyRay,orbital,up,bodyRadius),eye=mul(forward,-1),right=unit(cross(forward,up));
+ // Keep the shadow above Meridian's broad observation deck. Raise the
+ // tracking eye progressively as the apparent angular size of the hole grows.
+ if(r.sceneId==='nasa-shuttle'&&orbit.craft.type==='shuttle'&&orbit.parentId==='primary'){
+  const near=clamp(3*bodyRadius/Math.max(bodyRadius,Math.hypot(...bodyRay)),0,1);
+  const pitch=.135+.115*near*near*(3-2*near);
+  const level=unit(sub(eye,mul(up,dot(eye,up))));
+  const elevated=add(mul(level,Math.cos(pitch)),mul(up,Math.sin(pitch)));
+  const distance=Math.max(7,2.8/(aspect*fov));
+  return {eye:elevated,up,distance,compositionY:0,targetOffset:mul(up,distance*orbit.craft.radius*.05),width,height,fov};
+ }
  // The visible shell extends beyond its characteristic metric radius. Fit
  // its projected silhouette instead of the hull when following the field.
  if(orbit.craft.type==='enterprise'&&r.state.warp&&r.warpObjectId===orbit.craftId&&(r.state.warpFactor>0||r.state.blackHole)){
   const field=r.warpEnvelope?.(orbit.craft)?.radius??effectiveWarpRadius(r.state.warpFactor),radius=field*1.22;
-  if(r.sceneId==='warp-orbit'){
+  if(warpStudyId(r.sceneId)==='warp-orbit'){
    // Keep the shadow to port, the craft to starboard, and the upper
    // face of the disk visible. Angular composition adapts to portrait.
    const horizontal=aspect*fov,angle=Math.min(.53,.35*horizontal),centerRay=unit(mul(bodyRay,-1));

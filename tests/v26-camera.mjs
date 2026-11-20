@@ -16,11 +16,15 @@ for(const [width,height,cssWidth,cssHeight] of [[1440,806,1460,1000],[960,632,98
   const q=body.position.map((v,i)=>v-cam.observer[i]),depth=dot(q,cam.forward);near(dot(q,cam.right)/depth,0,1e-5);near(dot(q,cam.up)/depth,0,1e-5);
   if(power>0){const R=fit.radius*body.radius,pixels=height/fit.fov*R/Math.sqrt(depth*depth-R*R);near(pixels,fit.pixels,2e-3);for(const [x0,y0,x1,y1] of fit.obstacles){const gap=Math.hypot(Math.max(x0-width/2,0,width/2-x1),Math.max(y0-height/2,0,height/2-y1));assert(gap-pixels>=fit.margin-1e-3,'Bubble clears closed HUD controls');}}
   else{
-   const points=[];for(const x of [-.416,.416])for(const y of [-.264,.194])for(const z of [-.921,.921]){const p=[x,y,z].map((_,i)=>q[i]+body.radius*(body.frame[0][i]*x+body.frame[1][i]*y+body.frame[2][i]*z)),d=dot(p,cam.forward);points.push([width/2+height/fit.fov*dot(p,cam.right)/d,height/2-height/fit.fov*dot(p,cam.up)/d]);}
+   // Sample the actual ring lips and the nose/tail, independent of the
+   // helper's conservative hull bounds.
+   const surface=[[-.16,.15,-.92],[.16,-.15,-.92],[0,0,.92]];
+   for(const z of [-.516,-.344,.344,.516])for(let i=0;i<40;i++){const a=i*Math.PI/20;surface.push([.53*Math.cos(a),.53*Math.sin(a),z]);}
+   const points=surface.map(([x,y,z])=>{const p=q.map((v,i)=>v+body.radius*(body.frame[0][i]*x+body.frame[1][i]*y+body.frame[2][i]*z)),d=dot(p,cam.forward);return [width/2+height/fit.fov*dot(p,cam.right)/d,height/2-height/fit.fov*dot(p,cam.up)/d];});
    const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]),box=[Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];
    assert(box[0]>=11.99&&box[1]>=11.99&&box[2]<=width-11.99&&box[3]<=height-11.99);
    for(const [a,b,c,d]of fit.obstacles)assert(!(box[2]+11.99>a&&box[0]-11.99<c&&box[3]+11.99>b&&box[1]-11.99<d),'Hull clears closed HUD controls');
-   assert(box[2]-box[0]>width*.3,'Zero warp actually inspects the hull rather than preserving bubble distance');
+   assert(box[2]-box[0]>1.5*fit.pixels,'The hull spans at least 75% of the HUD-clear diameter, including on short landscape screens');
   }
  }
  r.setFlightPower(9);settle();const far=r.camera.focusDistance;r.setFlightPower(0);assert(r.target.focusDistance<r.camera.focusDistance);assert.equal(r.camera.focusDistance,far,'Zoom in is eased, not snapped');settle();

@@ -5,13 +5,19 @@ import {fixture} from './render-fixture.mjs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {CpuRenderer,cpuVisibleBodies} from '../dist/cpu-renderer.js';
 import {CpuCommandCanvas} from '../dist/cpu-commands.js';
-import {dysonShellHit,dysonHabitableRadius,dysonIllumination,stellarLuminositySolar,ASTRONOMICAL_UNIT} from '../dist/dyson.js';
+import {dysonSpin,dysonShellHit,dysonHabitableRadius,dysonIllumination,stellarLuminositySolar,ASTRONOMICAL_UNIT} from '../dist/dyson.js';
+import {dysonObserverUnderGlass,dysonCanopyHit} from '../dist/dyson-preview.js';
 import {STELLAR_CLASSES} from '../dist/stellar-physics.js';
 import {REFERENCE_RG_METERS} from '../dist/objects.js';
 import {createFragment,VERTEX} from '../dist/shaders.js';
 
 assert.equal(dysonHabitableRadius({type:'star',massSolar:1}),ASTRONOMICAL_UNIT);
 assert.equal(dysonIllumination({type:'star',massSolar:1},ASTRONOMICAL_UNIT),1);
+const design=dysonSpin(ASTRONOMICAL_UNIT,1),gSun=1.32712440018e20/ASTRONOMICAL_UNIT**2;
+assert(Math.abs(design.periodSeconds/86400-8.979)<.002);
+assert(Math.abs(design.angularVelocity**2*ASTRONOMICAL_UNIT-gSun-9.80665)<1e-12);
+assert.equal(dysonSpin(1e17,1),null,'A superluminal rim is not a realizable floor');
+assert(dysonSpin(ASTRONOMICAL_UNIT,0).periodSeconds>design.periodSeconds,'The central star pulls off the floor');
 assert.equal(dysonIllumination({type:'star',massSolar:1,collapsed:true},ASTRONOMICAL_UNIT),0);
 const luminosity=style=>stellarLuminositySolar({type:'star',starStyle:style,...STELLAR_CLASSES[style]});
 for(const style of Object.keys(STELLAR_CLASSES))assert(luminosity(style)>0&&Number.isFinite(luminosity(style)));
@@ -42,6 +48,14 @@ for(const Renderer of [BlackHoleRenderer,CpuRenderer]){
  assert(!r.getOrbitEditInfo(shell.id).editable,'Concentric center has no nonzero orbital-radius control');
  r.fillHoles();r.fillObjects();let sf=r.getFocusFrame(shell.id),st=r.getFocusFrame(star.id);
  assert.deepEqual(sf.position,st.position);
+ // A quarter turn in physical chart time; this is longitude, not a motion of the shell centre.
+ const tick=18*REFERENCE_RG_METERS/299792458,phase0=sf.bodyParams[2];
+ r.time+=design.periodSeconds/(4*tick);r.fillObjects();sf=r.getFocusFrame(shell.id);
+ assert(Math.abs(sf.bodyParams[2]-phase0-Math.PI/2)<1e-8);
+ assert.deepEqual(sf.position,st.position);
+ const phase=sf.bodyParams[2];r.updateObject(shell.id,{radiusMeters:2*ASTRONOMICAL_UNIT});
+ assert(Math.abs(r.getFocusFrame(shell.id).bodyParams[2]-phase)<1e-8,'A resize at fixed time preserves longitude');
+ r.updateObject(shell.id,{radiusMeters:ASTRONOMICAL_UNIT});
  r.updateObject(shell.id,{orbitMeters:1e14,height:20,radius:50});sf=r.getFocusFrame(shell.id);st=r.getFocusFrame(star.id);
  assert.deepEqual(sf.position,st.position,'Legacy orbital controls cannot displace the shell');
  r.focusTarget(shell.id,'onboard',false,true);r.updateCameraFrame();
@@ -50,6 +64,16 @@ for(const Renderer of [BlackHoleRenderer,CpuRenderer]){
  assert(r.renderObjects.some(o=>o.id===shell.id),'Enclosing shell remains in the visible object slots');
  assert(cpuVisibleBodies(r.objectFrames,r.cameraFrame,480,320,shell.id).some(o=>o.id===shell.id),'CPU retains the enclosure even when its center is behind the view');
  assert(r.validateFrameGeometry());
+ r.updateObject(shell.id,{dysonCutaway:.4});
+ for(const t of [0,design.periodSeconds*.5/tick]){
+  r.time=t;r.fillObjects();r.updateCameraFrame();sf=r.getFocusFrame(shell.id);
+  const eye=r.cameraFrame.observer.map((v,i)=>(v-sf.position[i])/sf.radius);
+  assert(dysonObserverUnderGlass(eye),'The visitor remains in the tube as its longitude changes');
+  assert(dysonCanopyHit(eye,r.cameraFrame.up),'Looking up from the garden intersects its glass roof');
+  assert.equal(r.bodyParamData[sf.index*4],0,'Exterior cutaway is inactive while standing on deck');
+ }
+ r.focusTarget(shell.id,'track',false,true);r.updateCameraFrame();
+ assert(Math.abs(r.bodyParamData[sf.index*4]-.4)<1e-6,'Leaving the garden restores the inspection cut');
  r.updateStellar(star.id,{radiusMeters:1000,angularVelocity:0});
  assert(r.getFocusFrame(star.id).collapsed);
  assert.equal(r.getFocusFrame(shell.id).bodyParams[1],0,'Collapsing star removes stellar interior illumination');

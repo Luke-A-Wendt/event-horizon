@@ -1,3 +1,4 @@
+import {edgeKerrMetric} from './kerr-transfer.js';
 import {compactExteriorRadius} from './object-clocks.js';
 import {REFERENCE_RG_METERS} from './objects.js';
 const RG=REFERENCE_RG_METERS;
@@ -13,10 +14,14 @@ export function diskParkingHeight(diskThickness,holeRg,hullRadius){
 }
 // Elevated cinematic parking circles; not unpowered Keplerian orbits.
 export function orbitClearance(r,craft,parentId){
- if(!['enterprise','shuttle','iss','astronaut'].includes(craft?.type)||r.state.bridge)return 0;
+ if(!['enterprise','shuttle','iss','classicEnterprise','heritageShuttle','astronaut'].includes(craft?.type)||r.state.bridge)return 0;
+ // The edge itinerary is defined in the Kerr equator through the hole.
+ // The tilted luminous disc is an emitter, not a supporting surface.
+ if(edgeKerrMetric(r,craft,parentId))return 0;
  let height=0;const hull=r.objectRadius(craft);
  if(r.state.blackHole&&r.state.disk&&['primary','secondary'].includes(parentId)){height=diskParkingHeight(r.state.diskThickness,r.massScale,hull);}
  for(const ring of r.objects||[]){if(ring.parentId!==parentId||!['ring','disk'].includes(ring.type))continue;
+ if(craft.hullModel==='janusPod'&&craft.orbitMeters>1.05*r.objectRadius(ring)*RG)continue; // circular orbit entirely beyond this ring
  const parent=r.objects.find(o=>o.id===parentId),tilt=(ring.axialTilt??parent?.axialTilt??0)*Math.PI/180;
  height=Math.max(height,parkingHeight(r.objectRadius(ring)*(Math.abs(Math.sin(tilt))+Math.max(.02,ring.thicknessRatio||.015)*2),hull));
  }
@@ -33,6 +38,8 @@ export function compactCircleMinimum(horizon,craftRadius,height=0){
 }
 export function stopMinimumMeters(r,craft,target,heightMeters){
  const f=r.getFocusFrame(target),bodyRadius=(f?.physicalRadius||f?.radius||0)*RG,craftRadius=r.objectRadius(craft)*RG;
+ const metric=edgeKerrMetric(r,craft,target);
+ if(metric)return 1.01*r.configCache.isco[0]*metric.rg;
  if(!f?.collapsed)return Math.max(1,bodyRadius+craftRadius);
  const height=heightMeters??Math.max(orbitClearance(r,craft,target)*RG,craft.parentId===target?craft.routeParkingHeightMeters||0:0);
  // Round *up* to a millimetre so the km input and a saved itinerary can

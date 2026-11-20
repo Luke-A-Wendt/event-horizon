@@ -3,7 +3,7 @@
 Native EGL/GLES, Pillow and NumPy are build-time tools only. No progressive
 photo sampling, fixed rendering delay, or partially initialized tiles are used.
 """
-import argparse,base64,ctypes as C,ctypes.util,json,os,time,io,hashlib,fcntl
+import argparse,base64,ctypes as C,ctypes.util,json,os,time,io,hashlib,fcntl,sys
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -21,6 +21,7 @@ def bake(args):
   if record_path.exists():record=json.loads(record_path.read_text())
   elif manifest_path.exists():record=json.loads(manifest_path.read_text()).get('scenes',{}).get(data['id'])
   if record and record.get('renderHash',record.get('sourceHash'))==data.get('renderHash',data['sourceHash']) and record.get('preset')=='quick' and record.get('width')==args.width and record.get('height')==args.height and record.get('imageHash')==hashlib.sha256(output.read_bytes()).hexdigest():
+   record['sourceHash']=data['sourceHash'] # Identical recorded frame, current source revision.
    record_path.write_text(json.dumps(record,indent=2)+'\n');print(json.dumps(record),flush=True);return
  textures=json.loads((Path(args.snapshot).parent/'textures.json').read_text())
  egl=C.CDLL(ctypes.util.find_library('EGL'));gl=C.CDLL(ctypes.util.find_library('GLESv2') or ctypes.util.find_library('GL'))
@@ -68,10 +69,16 @@ def bake(args):
  if err:raise RuntimeError('GL error '+hex(err))
  if not np.all(pixels[:,:,3]==255):raise RuntimeError('Incomplete screenshot: unwritten or non-opaque pixels')
  elapsed=time.monotonic()-started
- image=Image.fromarray(pixels[::-1,:,:3],'RGB');output.parent.mkdir(parents=True,exist_ok=True);temporary=output.with_name(output.name+'.'+str(os.getpid())+'.tmp');encoded=io.BytesIO();image.save(encoded,'WEBP',quality=92,method=6)
+ image=Image.fromarray(pixels[::-1,:,:3],'RGB')
+ if data.get('overlay'):
+  sys.dont_write_bytecode=True
+  from thumbnail_overlay import composite
+  image=composite(image,data['overlay'],(data['width'],data['height']))
+ output.parent.mkdir(parents=True,exist_ok=True);temporary=output.with_name(output.name+'.'+str(os.getpid())+'.tmp');encoded=io.BytesIO();image.save(encoded,'WEBP',quality=92,method=6)
  with temporary.open('wb') as stream:stream.write(encoded.getvalue());stream.flush();os.fsync(stream.fileno())
  temporary.replace(output)
  report={'scene':data['id'],'sourceHash':data['sourceHash'],'renderHash':data.get('renderHash',data['sourceHash']),'imageHash':hashlib.sha256(output.read_bytes()).hexdigest(),'width':width,'height':height,'preset':'quick','renderSeconds':round(elapsed,3),'compileSeconds':round(compile_seconds,3),'completePasses':1,'minimumPixelSamples':1,'baseSteps':192,'detail':2,'backend':'native EGL / actual live High GLSL'}
+ if data.get('overlay'):report['backend']+=' + live SVG locators'
  record_path=output.with_suffix('.render.json');temporary_record=record_path.with_name(record_path.name+'.'+str(os.getpid())+'.tmp');temporary_record.write_text(json.dumps(report,indent=2)+'\n');temporary_record.replace(record_path);print(json.dumps(report),flush=True)
  api(egl,'eglMakeCurrent',U,[P,P,P,P])(display,None,None,None);api(egl,'eglDestroyContext',U,[P,P])(display,context);api(egl,'eglDestroySurface',U,[P,P])(display,surface);api(egl,'eglTerminate',U,[P])(display)
 if __name__=='__main__':

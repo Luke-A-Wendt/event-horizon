@@ -33,13 +33,13 @@ try{
 
  r.loadScene('nasa-shuttle');r.sceneLoad=null;
  const shuttle=r.objects.find(o=>o.type==='shuttle'),bh=r.getFlightSequence(shuttle.id);
- assert.equal(bh.nodes.length,4);assert(bh.nodes.every(n=>n.targetId==='primary'&&n.extraLaps===1));
+ assert(bh.nodes.every(n=>n.targetId==='primary'));assert.deepEqual(bh.nodes.map(n=>n.extraLaps),[1,2,3,4]);
  const radii=bh.nodes.map(n=>n.radiusMeters),[outer,inner,disc,endpoint]=radii,GM=1.32712440018e20*r.parentMassSolar(shuttle);
  const returnWorkPerMetre=rad=>GM*(1/rad-1/outer)/(2*Math.sqrt((outer-rad)*(outer+rad)));
  near(GM/(outer**2+shuttle.routeParkingHeightMeters**2),9.80665);assert(inner<outer&&returnWorkPerMetre(inner)<=9.80665&&returnWorkPerMetre(inner-1.1)>9.80665);
  near(disc,r.getFocusFrame('disk').radius*RG);assert(inner>disc&&disc>endpoint,'Four descending orbits');
  assert.equal(shuttle.orbitMeters,outer);
- const names=radii.map(rad=>edgeOrbitName(r,shuttle,'primary',rad,radii));assert.deepEqual(names,['Field orbit','Return benchmark','Disc edge','Horizon approach']);
+ const names=radii.map(rad=>edgeOrbitName(r,shuttle,'primary',rad,radii));assert.deepEqual(names,['Field orbit','Return benchmark','Disc edge','Innermost stable stop']);
  assert.equal(edgeOrbitName(r,shuttle,'primary',disc*.9,[outer,disc*.9,endpoint]),'Custom orbit 2','Edited radii do not retain a misleading landmark name');
  const customized=bh.nodes.map((n,i)=>i<2?{...n,extraLaps:i===0?0:3,defaultExtraLaps:undefined}:n);
  r.setFlightSequence(shuttle.id,customized,{loop:true,active:true});

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {CpuQualityBudget,CPU_QUALITY_PROFILES,CPU_ADAPTIVE_PROFILES,CPU_STARTUP_PROFILE} from '../dist/cpu-quality.js';
+import {CpuQualityBudget,CPU_LIVE_FLOOR,CPU_QUALITY_PROFILES,CPU_ADAPTIVE_PROFILES,CPU_STARTUP_PROFILE} from '../dist/cpu-quality.js';
 
 const b=new CpuQualityBudget();
 assert.equal(b.profile,CPU_STARTUP_PROFILE);
@@ -17,8 +17,8 @@ assert.equal(b.rung,high,'35FPS is inside the hold band');
 b.note(41,22100);assert(b.rung<high,'Below 25FPS reduces resolution promptly');
 const before=b.rung;b.note(120,22200);assert(b.rung<before,'Large stalls reduce work faster');
 for(let now=22300;now<24500;now+=100)b.note(100,now);
-assert.equal(b.rung,0,'Persistent slow frames reach the minimum');
-assert.equal(b.relief,2,'Legacy relief reports the new floor');
+assert.equal(b.rung,CPU_LIVE_FLOOR,'Persistent slow frames retain live resolution');
+assert.equal(b.cadence.target,15,'Prioritize readability under sustained pressure');
 for(let now=24500;now<40000;now+=25)b.note(25,now);
 assert.equal(b.level,'ultra','Recovery is not held behind long retry timers');
 for(let i=1;i<CPU_ADAPTIVE_PROFILES.length;i++){

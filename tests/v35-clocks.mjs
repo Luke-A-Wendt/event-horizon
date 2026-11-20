@@ -24,13 +24,16 @@ assert.equal(formatClockDuration(0),'0 s');assert.equal(formatClockDuration(1e-9
 class LogicHost extends RenderHost{startBackend(){}queueSnapshot(){}resize(){}}
 for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
  const f=fixture(),canvas=Class===CpuRenderer?new CpuCommandCanvas():f.canvas;if(Class===CpuRenderer)canvas.getBoundingClientRect=f.canvas.getBoundingClientRect;
- const r=new Class(canvas,{autoStart:false,bindControls:false});r.loadScene('disk');const actors=['astronaut','shuttle','iss'].map(type=>{const id=r.addObject(type,12,0,1).id;return r.objects.find(o=>o.id===id);});
+ const r=new Class(canvas,{autoStart:false,bindControls:false});r.loadScene('disk');r.update({disk:false}); // Remove disc lift for the near-horizon equatorial reference.
+const actors=['astronaut','shuttle','iss'].map(type=>{const id=r.addObject(type,12,0,1).id;return r.objects.find(o=>o.id===id);});
  for(const actor of actors){r.updateObject(actor.id,{height:0,radius:r.minimumObjectRadiusRg(actor)});const rate=r.getObjectClock(actor.id);assert(rate.rateFactor>900&&Number.isFinite(rate.rateFactor));assert(rate.horizonGapMeters>0);r.updateObject(actor.id,{radius:5});}
- // Full active elapsed wall-time, independent of animation speed and its .1s cap.
+ // Each passive lap follows the animated chart interval. Switching to a
+ // manual burn changes the interval authority but never resets lifetime totals.
+ const dtChart=18*REFERENCE_RG_METERS/CLOCK_LIGHT_SPEED,epoch=r.time;
  r.sceneLoad?.complete(r.sceneLoad.revision);r.lastTime=1000;r.state.paused=false;r.state.speed=10;r.advanceSimulation(3000);
- for(const actor of actors){near(actor.clock.properSeconds,2);assert(actor.clock.coordinateSeconds>2);}
- const ship=actors.find(o=>o.type==='shuttle');const before=structuredClone(ship.clock);r.setFreeDrive(ship.id,true);assert.deepEqual(ship.clock,before);r.advanceSimulation(3500);near(ship.clock.properSeconds,2.5);const beforeHome=structuredClone(ship.clock);r.setFreeDrive(ship.id,false);assert.deepEqual(ship.clock,beforeHome);assert(ship.clock.coordinateSeconds>before.coordinateSeconds);
- for(const speed of [.25,1,4]){r.state.speed=speed;const tau=ship.clock.properSeconds;r.advanceSimulation(r.lastTime+1000);near(ship.clock.properSeconds-tau,1);}
+ for(const actor of actors){near(actor.clock.coordinateSeconds,(r.time-epoch)*dtChart);near(actor.clock.properSeconds,actor.clock.coordinateSeconds/r.getObjectClock(actor.id).rateFactor);}
+ const ship=actors.find(o=>o.type==='shuttle');const before=structuredClone(ship.clock);r.setFreeDrive(ship.id,true);assert.deepEqual(ship.clock,before);r.setFlightPower(.5);r.advanceSimulation(3500);assert(ship.clock.properSeconds>before.properSeconds&&ship.clock.properSeconds-before.properSeconds<=1.001);const beforeHome=structuredClone(ship.clock);r.setFreeDrive(ship.id,false);assert.deepEqual(ship.clock,beforeHome);assert(ship.clock.coordinateSeconds>before.coordinateSeconds);
+ for(const speed of [.25,1,4]){r.state.speed=speed;const coordinate=ship.clock.coordinateSeconds,time=r.time;r.advanceSimulation(r.lastTime+1000);near(ship.clock.coordinateSeconds-coordinate,(r.time-time)*dtChart);}
  r.state.paused=true;const frozen=structuredClone(ship.clock);r.advanceSimulation(r.lastTime+1000);assert.deepEqual(ship.clock,frozen);
  const serialized=serializeScene(r);assert.equal(parseScene(serialized).objects.find(o=>o.id===ship.id).clock.coordinateSeconds,ship.clock.coordinateSeconds);
  // Guard all eligible bodies, including forced/manual positions at a center.
@@ -45,6 +48,6 @@ for(const Class of [BlackHoleRenderer,CpuRenderer,LogicHost]){
  // supplying explicit swept manual positions for the horizon guard tests.
  r.releaseOrbitHold(shuttle);assert.equal(shuttle.flight.orbitHold,false);shuttle.drivePosition=[-10*horizon,0,0];r.clockSweepStarts=new Map([[shuttle.id,start]]);r.fillObjects();assert(r.getFocusFrame(shuttle.id).position[0]>horizon,'A single long flight step cannot tunnel through a compact horizon');assert.equal(r.clockSweepStarts.size,0);const clearStart=[10*horizon,4*horizon,0],clearEnd=[-10*horizon,4*horizon,0];shuttle.drivePosition=[...clearEnd];r.clockSweepStarts.set(shuttle.id,clearStart);r.fillObjects();assert.deepEqual(r.getFocusFrame(shuttle.id).position,clearEnd,'A clear segment remains unchanged');r.setFreeDrive(testShip.id,false);
  r.loadScene('binary');const nearby=r.addChildObject('secondary','iss',{orbitMeters:1});assert(nearby.id);r.fillObjects();const secondary=r.getObjectClock(nearby.id);assert(Number.isFinite(secondary.rateFactor));assert(secondary.horizonGapMeters>0);
- r.loadScene('warp-lab');assert.equal(r.getObjectClock(r.objects.find(o=>o.type==='enterprise').id),null);r.dispose();
+ r.loadScene('warp-lab');assert.equal(r.getObjectClock(r.objects.find(o=>o.type==='enterprise').id).lossRate,0);r.dispose();
 }
-console.log('PASS: exact supplied Schwarzschild/constant-proper-acceleration equations and integrated t, coasting/reverse burns, full active wallτ independent of FPS/playrate, finite exterior guards, lifetime persistence, 2sig readable formatting, GPU/CPU/host consistency.');
+console.log('PASS: exact supplied Schwarzschild/constant-proper-acceleration equations and integrated t, coasting/reverse burns, physical orbital intervals at different playback speeds, finite exterior guards, lifetime persistence, 2sig readable formatting, GPU/CPU/host consistency.');

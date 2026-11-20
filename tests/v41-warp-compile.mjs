@@ -10,6 +10,7 @@ const isolated={warp:true,craftMask:8,objectSlots:2,grid:true,warpLocal:true,war
 const fast=createFragment(isolated);
 assert(!body(fast,'main').includes('i<288'),'Isolated warp has no unused astronomical integration loop');
 assert(body(fast,'main').includes('warpLocalTrace')&&body(fast,'main').includes('skyForWarpTravel'));
+assert(body(fast,'main').includes('coordinateGridEscape'),'The isolated live compositor retains the world reference sheet');
 assert(!body(fast,'objectHit').includes('CraftSurface surface=craftHit'),'Sole locally traced craft is not compiled into the world loop');
 const orbit=createFragment({...isolated,warpOnly:false});assert(body(orbit,'main').includes('i<288'),'Combined scenes retain astronomical ray bending');
 const companion=createFragment({...isolated,warpOnly:false,warpLocalOnlyCraft:false,craftMask:10});assert(body(companion,'objectHit').includes('CraftSurface surface=craftHit'),'Other spacecraft keep their geometry');

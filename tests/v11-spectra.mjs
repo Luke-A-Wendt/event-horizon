@@ -13,7 +13,7 @@ for(const scene of ['disk','bridge','orbital-expedition','nasa-shuttle','warp-la
  if(scene==='nasa-shuttle')renderer.focusObject(renderer.getObjects()[0].id,'onboard');
  for(const [index,spectrum] of bands.entries()){
   renderer.update({spectrum,paused:true});renderer.render();
-  if(scene==='nasa-shuttle')assert.equal(f.uniforms.get('uCockpitMode').args[0],0);
+  if(scene==='nasa-shuttle')assert.equal(f.uniforms.get('uCockpitMode').args[0],1);
   assert.equal(renderer.state.spectrum,spectrum);
   assert.equal(f.uniforms.get('uSpectrum').args[0],index,`${scene}: ${spectrum} reaches the live shader`);
   const snapshot=renderer.beginPhotoCapture();renderer.endPhotoCapture();

@@ -1,6 +1,6 @@
 // Frame-aligned route geometry, with bounded optical projection and no extra
 // render pass. Smooth guides share the scene lensing and bounded point budget.
-import {REFERENCE_RG_METERS} from './objects.js';
+import {hullType,REFERENCE_RG_METERS} from './objects.js';
 const RG=REFERENCE_RG_METERS;
 import {projectLensedPoint,projectDirectVisible,directProjection,hasWeakOpticalField,prepareDirectOcclusion} from './optical-projection.js';
 import {captureParkedOrbit} from './orbit-path.js';
@@ -9,13 +9,32 @@ const add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,s)=
 const transform=(basis,p)=>[0,1,2].map(i=>basis[0][i]*p[0]+basis[1][i]*p[1]+basis[2][i]*p[2]);
 function hull(points){const p=points.filter(Boolean).sort((a,b)=>a.x-b.x||a.y-b.y),cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);if(p.length<3)return [];const a=[],b=[];for(const v of p){while(a.length>1&&cross(a.at(-2),a.at(-1),v)<=0)a.pop();a.push(v);}for(let i=p.length-1;i>=0;i--){const v=p[i];while(b.length>1&&cross(b.at(-2),b.at(-1),v)<=0)b.pop();b.push(v);}return a.slice(0,-1).concat(b.slice(0,-1));}
 const ellipsoid=(center,radii)=>{const p=[];for(const y of [-1,-.7,0,.7,1])for(let i=0;i<12;i++){const a=i*Math.PI/6,s=Math.sqrt(1-y*y);p.push([center[0]+radii[0]*Math.cos(a)*s,center[1]+radii[1]*y,center[2]+radii[2]*Math.sin(a)*s]);}return p;};
-const SHUTTLE=[ellipsoid([0,-.005,.12],[.14,.13,.74]),...[-1,1].flatMap(sign=>[
- [[.11,-.065,.42],[.205,-.065,-.18],[.55,-.065,-.55],[.10,-.065,-.67]].map(p=>[p[0]*sign,p[1],p[2]]),ellipsoid([sign*.142,.086,-.535],[.065,.074,.195])]),
- [[-.014,.055,-.69],[.014,.055,-.69],[.014,.495,-.65],[.014,.515,-.49],[.014,.10,-.22],[-.014,.10,-.22],[-.014,.515,-.49],[-.014,.495,-.65]],
- ...[[0,.08],[.078,-.05],[-.078,-.05]].map(([x,y])=>ellipsoid([x,y,-.77],[.059,.059,.09]))];
-const ENTERPRISE=[ellipsoid([0,.057,.505],[.415,.065,.415]),ellipsoid([0,.142,.505],[.086,.025,.084]),ellipsoid([0,-.17,-.075],[.093,.093,.35]),
- ...[-1,1].flatMap(sign=>[ellipsoid([sign*.292,.132,-.425],[.06,.06,.495]),[[.02,-.135,-.314],[.032,-.19,-.314],[.3,.092,-.314],[.278,.151,-.314],[.02,-.135,-.236],[.032,-.19,-.236],[.3,.092,-.236],[.278,.151,-.236]].map(p=>[p[0]*sign,p[1],p[2]])]),
- ...[-1,1].map(sign=>[[.022*sign,-.135,.005],[.022*sign,-.105,.175],[.022*sign,.060,.455],[.022*sign,.060,.195]])];
+// Meridian is a stack of circular sections around its thrust axis (+Z).
+// Keep the sky between the deck, tank pods and engines clear of the route mask.
+const section=(x,y,r,z)=>Array.from({length:24},(_,i)=>{const t=i*Math.PI/12;return [x+r*Math.cos(t),y+r*Math.sin(t),z];});
+const revolved=(profile,x=0,y=0)=>profile.flatMap(([z,r])=>section(x,y,r,z));
+const MERIDIAN=[revolved([[.175,.160],[.31,.400],[.35,.460],[.45,.49],[.56,.49],[.665,.446],[.68,.405]]),
+ revolved(Array.from({length:8},(_,i)=>{const t=i*Math.PI/14;return [.68+.18*Math.sin(t),.405*Math.cos(t)];})),
+ revolved([[-.60,.13],[.18,.16]]),
+ ...[0,1,2,3].map(i=>ellipsoid([.18*Math.cos(i*Math.PI/2),.18*Math.sin(i*Math.PI/2),-.23],[.055,.055,.24])),
+ ...[-.13,.13].flatMap(x=>[-.13,.13].map(y=>revolved([[-.86,.09],[-.67,.055]],x,y)))];
+// Mask the hull and individual pieces of each annulus, not a solid disc:
+// a planned orbit remains visible through the open spaces between the spokes.
+const ringPoint=(angle,r,z)=>[Math.cos(angle)*r,Math.sin(angle)*r,z];
+const WARP_EXPLORER=[ellipsoid([0,0,0],[.176,.15,.68]),ellipsoid([0,0,.56],[.235,.105,.36]),ellipsoid([0,0,-.70],[.166,.15,.22]),
+ ...[-.43,.43].flatMap(z=>[
+  ...Array.from({length:16},(_,i)=>[0,1].flatMap(k=>[.415,.53].flatMap(r=>[-.086,.086].map(dz=>ringPoint((i+k)*Math.PI/8,r,z+dz))))),
+  ...Array.from({length:4},(_,i)=>[-.047,.047].flatMap(da=>[.13,.416].flatMap(r=>[-.026,.026].map(dz=>ringPoint((i+.5)*Math.PI/2+da,r,z+dz)))))
+ ])];
+// The route overlay needs the same negative space as the visible hull.
+const CLASSIC_ENTERPRISE=[
+ ellipsoid([0,.06,.505],[.415,.08,.415]),ellipsoid([0,-.17,-.075],[.093,.093,.33]),
+ [[-.025,-.16,-.03],[.025,-.16,-.03],[-.025,.02,.45],[.025,.02,.45]],
+ ...[-1,1].flatMap(s=>[ellipsoid([s*.292,.132,-.425],[.06,.06,.495]),[[s*.02,-.17,-.31],[s*.02,-.17,-.24],[s*.292,.132,-.24],[s*.292,.132,-.31]]])];
+const HERITAGE_SHUTTLE=[
+ ellipsoid([0,0,0],[.15,.14,.86]),[[0,.055,-.69],[0,.495,-.65],[0,.515,-.49],[0,.10,-.22]],
+ ...[-1,1].map(s=>[[s*.11,-.065,.42],[s*.205,-.065,-.18],[s*.55,-.065,-.55],[s*.10,-.065,-.67]])];
+const ROUTE_MASKS={enterprise:WARP_EXPLORER,shuttle:MERIDIAN,classicEnterprise:CLASSIC_ENTERPRISE,heritageShuttle:HERITAGE_SHUTTLE};
 function craftSilhouette(renderer,c,craft,straight){
  if(!craft||!craft.frame||renderer.focusMode==='onboard'&&renderer.focusId===craft.id)return [];
  const frame=renderer.cameraFrame,local=frame.eyeOrigin&&frame.eyeOffset;
@@ -25,8 +44,8 @@ function craftSilhouette(renderer,c,craft,straight){
  const center=straight?direct:renderer.annotationSolvedPose?.values?.find(o=>o.id===craft.id)?.anchor||projectLensedPoint(c,craft.position,{id:craft.id,radius:craft.radius});if(!center)return [];
  // A local image-plane translation follows the lensed center. Project actual
  // hull components separately: the route stays visible through pylon gaps and
- // beside wings rather than disappearing inside a bounding-circle cutout.
- const pieces=craft.type==='enterprise'?ENTERPRISE:SHUTTLE;
+ // beside the engine spine rather than disappearing inside a bounding-circle cutout.
+ const pieces=ROUTE_MASKS[hullType(craft)]||[];
  return pieces.map(piece=>hull(piece.map(p=>{const a=directProjection(add(craftCenter,transform(craft.frame,mul(p,craft.radius))),view,c.aspect,c.fov);return a?{x:a.x+center.x-direct.x,y:a.y+center.y-direct.y}:null;}))).filter(p=>p.length>=3);
 }
 // In a small neighborhood of the camera, even a distant strong lens has
@@ -60,6 +79,20 @@ export function captureTransferPath(renderer,optics){
  const count=Math.min(points.length,directRadius>0?192:32),segments=[];let segment=[];
  let indices=Array.from({length:count},(_,i)=>Math.round(i*(points.length-1)/(count-1)));
  if(points.length>count){const context=straight?32:8,near=distances.map((d,i)=>({i,d})).sort((a,b)=>a.d-b.d).slice(0,count-context).map(p=>p.i);indices=[...new Set([...near,...Array.from({length:context},(_,i)=>Math.round(i*(points.length-1)/(context-1)))])].sort((a,b)=>a-b);}
+ const angles=route.pathAngles?.length===points.length?route.pathAngles:null;
+ if(angles&&points.length>count){
+  // Reserve enough of the fixed budget for the orbital outline, independent
+  // of the many magnified points around the vehicle. Never span unseen turns.
+  const arcCount=Math.min(count-4,Math.max(2,Math.ceil((angles.at(-1)-angles[0])/.27)+1)),arc=[];
+  for(let j=0,i=0;j<arcCount;j++){
+   const a=angles[0]+(angles.at(-1)-angles[0])*j/(arcCount-1);
+   while(i+1<angles.length&&Math.abs(angles[i+1]-a)<=Math.abs(angles[i]-a))i++;
+   arc.push(i);
+  }
+  const nearest=distances.map((d,i)=>({d,i})).sort((a,b)=>a.d-b.d);
+  const keep=new Set(arc);for(const {i} of nearest){if(keep.size>=count)break;keep.add(i);}
+  indices=[...keep].sort((a,b)=>a-b);
+ }
  const projected=[],order=straight?indices:[...indices].sort((a,b)=>distances[a]-distances[b]);
  for(const i of order){
   const p=targets[i],direct=straight||distances[i]<=directRadius;
@@ -67,7 +100,11 @@ export function captureTransferPath(renderer,optics){
   const a=direct?projectDirectVisible(chart,p,route.craftId):projectLensedPoint(chart,p,{id:route.craftId,radius:0});
   if(a&&Number.isFinite(a.x+a.y))projected[i]={x:a.x,y:a.y,opacity:craftCenter ? .34+.66/(1+(Math.hypot(...sub(p,craftCenter))/fadeDistance)**1.4):1};
  }
- for(const i of indices){const a=projected[i];if(a)segment.push(a);else{if(segment.length>1)segments.push(segment);segment=[];}}
+ let last=-1;for(const i of indices){
+  const a=projected[i];
+  if(!a||angles&&last>=0&&angles[i]-angles[last]>.36){if(segment.length>1)segments.push(segment);segment=[];}
+  if(a)segment.push(a);last=i;
+ }
  if(segment.length>1)segments.push(segment);
  return segments.length?{segments,craftSilhouette:craftSilhouette(renderer,c,craft,straight||!!craftCenter&&Math.hypot(...sub(craftCenter,c.observer))<=directRadius),kind:route.kind||'transfer',active,progress:route.progress||0}:null;
 }

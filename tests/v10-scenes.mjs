@@ -1,4 +1,4 @@
-const SHUTTLE_COCKPIT_EYE=[0,.28,.65];
+const SHUTTLE_COCKPIT_EYE=[.115,.025,.758];
 import assert from 'node:assert/strict';
 import {fixture} from './render-fixture.mjs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
@@ -18,7 +18,7 @@ for(const p of [primary,secondary])assert(Math.abs(p[0])<.55&&Math.abs(p[1])<.38
 r.loadScene('polar');assert(r.state.mass>DEFAULTS.mass);assert.equal(r.state.spin,.998);assert(r.state.grid&&r.state.jets);
 r.loadScene('nasa-shuttle');assert.equal(r.state.diskStyle,DEFAULTS.diskStyle);assert.equal(r.state.diskColor,DEFAULTS.diskColor);assert.equal(r.objects[0].type,'shuttle');
 const shuttle=r.objects[0];r.target.lookYaw=2;r.camera.lookYaw=2;r.focusTarget(shuttle.id,'onboard');r.render();
-assert.deepEqual(r.cameraFrame.inspectCamera,SHUTTLE_COCKPIT_EYE);r.cameraFrame.inspectForward.forEach((v,i)=>near(v,[0,0,1][i]));assert.equal(f.uniforms.get('uCockpitMode').args[0],0);
+assert.deepEqual(r.cameraFrame.inspectCamera,SHUTTLE_COCKPIT_EYE);r.cameraFrame.inspectForward.forEach((v,i)=>near(v,[0,0,1][i]));assert.equal(f.uniforms.get('uCockpitMode').args[0],1);
 r.time=30;r.render();r.cameraFrame.inspectForward.forEach((v,i)=>near(v,[0,0,1][i]));
 r.target.lookYaw=r.camera.lookYaw=1;r.target.lookPitch=r.camera.lookPitch=.5;r.focusTarget(shuttle.id,'onboard');assert.equal(r.camera.lookYaw,0);assert.equal(r.camera.lookPitch,0);r.cameraFrame.inspectForward.forEach((v,i)=>near(v,[0,0,1][i]));
 r.loadScene('bridge');r.render();assert.equal(r.state.nebula,false);assert.equal(r.state.stars,true);assert.equal(r.state.bridgeOtherNebula,true);assert.equal(r.state.bridgeOtherColor,'#875ba3');

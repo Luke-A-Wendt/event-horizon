@@ -1,4 +1,4 @@
-const SHUTTLE_COCKPIT_EYE=[0,.28,.65];
+const SHUTTLE_COCKPIT_EYE=[.115,.025,.758];
 import assert from 'node:assert/strict';
 import {fixture} from './render-fixture.mjs';
 import {BlackHoleRenderer} from '../dist/renderer.js';
@@ -12,7 +12,7 @@ r.loadScene('empty-space');r.render();assert.equal(r.state.blackHole,false);asse
 close(r.camera.distance*REFERENCE_RG_METERS,1000,1e-8);r.zoom(.8);close(r.target.distance*REFERENCE_RG_METERS,800,1e-8);
 r.zoom(1e-8);close(r.target.distance*REFERENCE_RG_METERS,.1);r.setDistanceMeters(1200);close(r.target.distance*REFERENCE_RG_METERS,1200,1e-8);
 const ship=r.addObject('enterprise');let walker=r.addObject('astronaut');r.updateObject(walker.id,{x:220,y:15,z:-30,phase:.4});r.fillObjects();
-assert.equal(r.getObjects().find(o=>o.id===walker.id).placement,'local');assert.equal(r.getObjects().find(o=>o.id===walker.id).referenceLabel,'Starship Enterprise');
+assert.equal(r.getObjects().find(o=>o.id===walker.id).placement,'local');assert.equal(r.getObjects().find(o=>o.id===walker.id).referenceLabel,'NASA Warp Explorer');
 let sf=r.objectFrames.find(o=>o.id===ship.id),wf=r.objectFrames.find(o=>o.id===walker.id);vector(localOffset(sf,wf),[220,15,-30],1e-8);
 const initial=[...wf.position];r.time=80;r.fillObjects();vector(r.objectFrames.find(o=>o.id===walker.id).position,initial,1e-20);
 r.updateObject(walker.id,{radius:99,height:20});assert.equal(r.objects.find(o=>o.id===walker.id).radius,12,'Local objects ignore black-hole orbit fields');
@@ -32,7 +32,7 @@ const bridgeParent=r.objectFrames.find(o=>o.id===r.bridgeObjectId),bridgePasseng
 vector(localOffset(bridgeParent,bridgePassenger),[20*coordinateScale,0,0],1e-8);close(bridgePassenger.physicalRadius*REFERENCE_RG_METERS,objectRadiusMeters('astronaut'),1e-9);assert(bridgePassenger.radius<bridgePassenger.physicalRadius,'Bridge coordinates preserve passenger physical dimensions through the conformal factor');
 r.loadScene('bridge');r.time=17;r.render();const travelerId=r.bridgeObjectId,routeTime=r.bridgeTime;r.focusTarget(travelerId,'onboard');
 for(const type of ['shuttle','astronaut','enterprise']){const traveler=r.setBridgeTraveler(type);assert.equal(traveler.id,travelerId);assert.equal(r.bridgeTime,routeTime);assert.equal(r.focusId,travelerId);assert.equal(r.focusMode,'onboard');assert.equal(traveler.type,type);assert.equal(traveler.placement,'bridge');assert.equal(traveler.bridgeTraveler,true);assert.equal(r.warpObjectId,null);close(traveler.renderRadiusMeters,objectRadiusMeters(type),1e-8);close(r.configCache.bridgeRadius*REFERENCE_RG_METERS,objectRadiusMeters(type)*r.state.bridgeRadius,1e-8);}
-assert.equal(r.addObject('planet'),false);assert.equal(r.addObject('shuttle').id,travelerId);assert.equal(r.objects.length,1);r.render();vector(r.cameraFrame.inspectCamera,SHUTTLE_COCKPIT_EYE);assert.equal(f.uniforms.get('uCockpitMode').args[0],0);
+assert.equal(r.addObject('planet'),false);assert.equal(r.addObject('shuttle').id,travelerId);assert.equal(r.objects.length,1);r.render();vector(r.cameraFrame.inspectCamera,SHUTTLE_COCKPIT_EYE);assert.equal(f.uniforms.get('uCockpitMode').args[0],1);
 const localForward=[...r.cameraFrame.inspectForward];r.time+=30;r.render();vector(r.cameraFrame.inspectForward,localForward);assert.equal(r.focusId,travelerId);assert.equal(r.state.viewMode,'look');
 r.update({bridgeOtherColor:'#123456',bridgeOtherShape:'spiral',bridgeOtherScale:2,bridgeOtherIntensity:2.5,bridgeOtherRotation:90});r.render();assert.deepEqual(f.uniforms.get('uBridgeSkyParams').args,[3,2,2.5,Math.PI/2]);vector(f.uniforms.get('uBridgeSkyColor').args[0],[18/255,52/255,86/255]);assert(['near','far','throat'].includes(r.getState().bridgeRegion));
 r.loadScene('disk');r.update({grid:false});r.loadScene('warp-cruise');assert.equal(r.state.grid,true);assert.equal(r.state.warpGrid,true);close(r.camera.yaw,-Math.PI/2);close(r.camera.pitch,0);r.loadScene('empty-space');assert.equal(r.state.grid,false);assert.equal(r.objects.length,0);assert.equal(r.focusId,null);

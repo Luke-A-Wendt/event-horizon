@@ -32,13 +32,13 @@ for(const [width,height] of [[1440,900],[900,650],[390,740],[360,640],[740,340]]
  r.dispose();
 }
 const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});r.loadScene('radiant-descent');const traveler=r.objects[0],stop=r.configCache.horizon[0]+15/REFERENCE_RG_METERS;
-let previousDistance=Infinity,previousSpeed=Infinity;
+let previousDistance=Infinity,previousSpeed=0;
 for(let step=0;step<=100;step++){
- r.time=step/10;r.fillObjects();r.updateCameraFrame();const body=r.getFocusFrame(traveler.id),distance=Math.hypot(...body.position),speed=Math.hypot(...body.velocity);
- assert(distance<=previousDistance+1e-8);assert(speed<=previousSpeed+1e-8);assert(distance>=stop-1e-9);previousDistance=distance;previousSpeed=speed;
+ r.time=step/10;r.fillObjects();r.updateCameraFrame();const body=r.getFocusFrame(traveler.id),distance=Math.hypot(...body.position),speed=r.getObjectClock(traveler.id).speedMetersPerSecond;
+ assert(distance<=previousDistance+1e-8);assert(speed>=previousSpeed-1e-8);assert(distance>=stop-1e-9);previousDistance=distance;previousSpeed=speed;
  const toward=body.position.map(v=>-v/distance);assert(dot(body.frame[2],toward)>.999999,'Default ride faces the hole throughout descent');
- if(step===0)assert(distance>180*r.massScale);
- if(step===50)assert(distance/r.massScale>20&&distance/r.massScale<27,'Outer rings arrive near halfway');
+ if(step===0)assert(distance>=180*r.massScale*(1-1e-12));
+ if(step===50)assert(distance>stop&&distance<180*r.massScale,'Still descending at half playback time');
 }
 near(previousDistance,stop,1e-10);assert(previousSpeed>0,'freeze on the incoming velocity');
 r.time=30;r.fillObjects();near(Math.hypot(...r.getFocusFrame(traveler.id).position),stop,1e-10);

@@ -71,7 +71,10 @@ assert.equal(host.sceneRevision,host.getState().sceneLoadRevision);
 worker.emit({type:'status',stats:{frameReady:true,renderedSignature:renderSignature(host),sceneRevision:host.sceneRevision}});assert.equal(host.getState().sceneLoadState,'ready');
 // A worker that sends telemetry but no new complete frames cannot hold the
 // loading overlay forever. Explicit error UI gets a finite failure result.
-host.now=()=>now;host.requestSceneLoad();host.loadScene('binary');worker.emit({type:'status',stats:{shaderCompiling:true}});assert.equal(host.getDiagnostics().deadlineMs,60000);now+=45001;host.frame(now);host.checkSceneLoad();assert.equal(host.getState().sceneLoadState,'loading','The old 45s heartbeat guard cannot cut off a cold scene');assert(!worker.terminated);now+=15000;host.checkSceneLoad();
+host.now=()=>now;host.requestSceneLoad();host.loadScene('binary');
+// A real worker ACKs the applied state before reporting shader preparation.
+while(host.mailbox.inflight)worker.emit({type:'ack',serial:host.mailbox.serial});
+worker.emit({type:'render-phase',phase:'compiling',signature:renderSignature(host),sceneRevision:host.sceneRevision});assert.equal(host.getDiagnostics().deadlineMs,60000);now+=45001;host.frame(now);host.checkSceneLoad();assert.equal(host.getState().sceneLoadState,'loading','The old 45s heartbeat guard cannot cut off a cold scene');assert(!worker.terminated);now+=15000;host.checkSceneLoad();
 assert.equal(host.getState().sceneLoadState,'failed');assert.equal(host.getState().renderBusy,false);assert(worker.terminated);assert(!host.cpu);
 const failedWorker=worker;host.loadScene('disk');worker=workers.at(-1);assert.notEqual(worker,failedWorker);assert.equal(host.getState().sceneLoadState,'loading');
 worker.emit({type:'ready',available:true});failedWorker.emit({type:'status',stats:{frameReady:true,renderedSignature:renderSignature(host),sceneRevision:host.sceneRevision}});assert.equal(host.getState().renderReady,false);

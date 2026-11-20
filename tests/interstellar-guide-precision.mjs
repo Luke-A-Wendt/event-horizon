@@ -97,7 +97,10 @@ function run(id,near=false,sideView=false){
   let now=0;r.now=()=>now;r.loadScene(id);r.sceneLoad=null;r.state.paused=false;
   scene.objects=objects;
   const names=new Map(r.objects.map(b=>[b.id,b.name]));let arrivals=0,turned=false;
-  for(let n=1;n<=2000;n++){
+  // Approach pacing spends real screen time on each change of scale. Let
+  // the existing arrival gates end the run, with a finite six-minute watchdog.
+  const maxFrames=6*60*30;
+  for(let n=1;n<=maxFrames;n++){
    now=n*1000/30;const was=!!r.transfer;r.advanceChartStages(1/30);
    if(was&&!r.transfer)arrivals++;
    // Rotate and zoom the production tracking camera once, before measuring
@@ -112,9 +115,14 @@ function run(id,near=false,sideView=false){
    let stage=t?t.targetName+' straight':(names.get(r.getFocusFrame().parentId)||r.getFocusFrame(r.getFocusFrame().parentId)?.label)+' arc';
    if(id==='shuttle-sgra-direct'){
     if(t){
-     if(arrivals===0&&t.progress>.85)stage='Sgr approach';
+     // A straight 3D tangent can have a curved optical image once the lens
+     // is resolved. Use the apparent Schwarzschild shadow scale in pixels,
+     // not presentation progress (the approach uses a nonlinear time map).
+     const o=createOpticalContext(r),hole=o.holes.find(h=>h.mass>0);
+     const opticalContact=hole&&3*Math.sqrt(3)*hole.mass/Math.hypot(...sub(hole.center,o.observer))*o.height/o.fov>=.5;
+     if(arrivals===0&&opticalContact)stage='Sgr approach';
      if(arrivals===1)stage=t.progress<.15?'Sgr depart inner':t.progress>.85?'Sgr arrive outer':'Sgr recovery';
-     if(arrivals===2&&t.progress<.15)stage='Sgr depart outer';
+     if(arrivals===2&&opticalContact)stage='Sgr depart outer';
     }else if(arrivals===1)stage='Sgr inner arc';else if(arrivals===2)stage='Sgr outer arc';
    }
    if(!stage.startsWith('Sgr ')&&t&&(t.progress<.15||t.progress>.85))continue;
@@ -123,6 +131,7 @@ function run(id,near=false,sideView=false){
    if(id==='shuttle-sgra-direct'&&arrivals>=3)break;
    const e=measurements(r,stage.startsWith('Sgr '));(collected[stage]??=[]).push(e);
   }
+  assert.equal(arrivals,id==='shuttle-sgra-direct'?3:2,'The guide check must finish each measured leg before the watchdog');
  }finally{scene.objects=objects;r.dispose()}
  return collected;
 }

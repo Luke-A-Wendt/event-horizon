@@ -130,7 +130,7 @@ console.log('PASS: craft-specific shader compatibility preserves each requested 
 // Specialization removes absent geometry, never detail within a selected model.
 // Compare complete balanced model bodies against the original full source.
 {
- const anchors=['// ISS: x extent','// Shuttle: nose-to-engine','// EMU-inspired articulated pressure suit.','// TOS studio-model silhouette.'];
+ const anchors=['// ISS: x extent','// NASA Meridian: pressure decks','// EMU-inspired articulated pressure suit.','// NASA twin-ring warp surveyor.'];
  const modelBody=(source,anchor)=>{
   const marker=source.indexOf(anchor);assert(marker>=0);const start=source.lastIndexOf('{',marker);let depth=1,end=start+1;
   for(;depth&&end<source.length;end++){if(source[end]==='{')depth++;else if(source[end]==='}')depth--;}

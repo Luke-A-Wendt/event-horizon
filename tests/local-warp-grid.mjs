@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {BlackHoleRenderer} from '../dist/renderer.js';
+import {makePreset} from '../dist/config.js';
 import {fixture} from './render-fixture.mjs';
 import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
 import {serializeScene,parseScene} from '../dist/scene-file.js';
@@ -17,6 +18,15 @@ const near=(a,b,eps=1e-7)=>assert(Math.abs(a-b)<=eps,`${a} and ${b} differ`);
 const lab=rig('warp-lab'),orbit=rig('warp-orbit'),worker=rig('disk');
 try{
  const l0=lab.draw(),o0=orbit.draw(),l1=lab.tick(4),o1=orbit.tick(4);
+ const preset=makePreset('warp-lab');
+ assert(!preset.grid&&!preset.warpGrid&&preset.warpGridOnly,'The lab opens with the warp sheet alone');
+ const flags=()=>[lab.f.uniforms.get('uFlags').args[0],lab.f.uniforms.get('uWarpFlags').args[2],lab.f.uniforms.get('uWarpGridLocalPatch').args[0]];
+ assert.deepEqual(flags(),[1,1,1]);
+ assert(lab.r.gridWorldElevation()<0,'The global reference plane is visible below the side-on ship');
+ const elevation=lab.r.gridWorldElevation(),originalWarp=lab.r.state.warpFactor;
+ lab.r.update({warpFactor:1,warpGridOnly:true});lab.draw();
+ assert.equal(lab.r.gridWorldElevation(),elevation);assert.deepEqual(flags(),[0,1,1]);
+ lab.r.update({grid:true,warpFactor:originalWarp});lab.draw();assert.deepEqual(flags(),[1,1,1]);
  const labSpeed=distance(l0,l1)/.2;
  near(labSpeed,.07*lab.r.state.warpFactor);near(distance(o0,o1)/.2,.07*orbit.r.state.warpFactor);
  // Transmitting a camera/phase-only worker snapshot must not depend on resending geometry.

@@ -30,7 +30,7 @@ accumulateCrewExposure(clock,100,1.5);assert.equal(clock.highGExposureSeconds,0)
 const make=()=>new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false,deferProgram:true});
 const r=make(),copy=make();
 try{
- r.loadScene('orbital-expedition');const iss=r.objects.find(o=>o.type==='iss');const station=()=>r.getObjectClock(iss.id);
+ r.loadScene('orbital-expedition');const added=r.addObject('iss',16,1.25,1);r.fillObjects();const iss=r.objects.find(o=>o.id===added.id);const station=()=>r.getObjectClock(iss.id);
  assert(station().speedMetersPerSecond>0&&station().crewLoadG>8&&station().minimumReturnG>1);
  assert(iss.id!==r.driveId);r.advanceClocks(8*day);close(station().highGExposureSeconds,8*day);close(station().extremeGExposureSeconds,8*day);
  restoreRenderer(copy,parseScene(serializeScene(r)));close(copy.getObjectClock(iss.id).extremeGExposureSeconds,8*day);

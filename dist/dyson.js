@@ -16,27 +16,27 @@ export function dysonIllumination(star,radiusMeters){return Math.min(4,Math.pow(
 
 // Reference intersection used by the Canvas preview and geometric checks.
 // The cap opens toward +Z; cutaway is its fraction of total shell area.
-export function dysonShellHit(origin,direction,cutaway=0,maximum=Infinity){
+export function dysonShellHit(origin,direction,cutaway=0,maximum=Infinity,bandOnly=false){
  const b=origin.reduce((n,v,i)=>n+v*direction[i],0),cross=[origin[1]*direction[2]-origin[2]*direction[1],origin[2]*direction[0]-origin[0]*direction[2],origin[0]*direction[1]-origin[1]*direction[0]],disc=1-cross.reduce((n,v)=>n+v*v,0);
  if(disc<0)return null;
  const root=Math.sqrt(disc),cap=1-2*Math.max(0,Math.min(.8,cutaway));
  for(const t of [-b-root,-b+root]){
   if(t<1e-7||t>maximum)continue;
   const point=origin.map((v,i)=>v+direction[i]*t);
-  if(cutaway>0&&point[2]>cap)continue;
+  if((cutaway>0&&point[2]>cap)||(bandOnly&&Math.abs(point[1])>.075))continue;
   return {t,point,inside:point.reduce((n,v,i)=>n+v*direction[i],0)>0};
  }
  return null;
 }
 
-// A low-detail material approximation for the explicitly selected CPU mode.
-export function dysonPreviewMaterial(point,inside,illumination=1){
- const [x,y,z]=point,u=Math.atan2(z,x)/Math.PI,v=Math.asin(Math.max(-1,Math.min(1,y)))/Math.PI;
- const n=Math.sin(x*19+Math.sin(z*11))*Math.cos(z*17-y*9)+Math.sin(y*25+x*8)*.35;
- if(!inside){const seam=Math.abs(Math.sin(u*80))<.08||Math.abs(Math.sin(v*50))<.08;return seam?'#172431':n>.15?'#a2adb7':'#627687';}
- if(illumination<.01)return n>.85?'#b88640':'#020805';
- if(n<-.32||Math.abs(Math.sin(u*24+Math.sin(v*17)*2))<.07)return '#327da3';
- if(Math.sin(u*62)*Math.sin(v*87)>.75)return '#203654';
- if(n>.7)return '#b8b5a5';
- return n>.1?'#759d4c':'#315c38';
+
+
+// Weak-field Newtonian model at the walking deck. The star pulls toward
+// the centre, so the floor supplies only the rest of the centripetal force.
+export function dysonSpin(radiusMeters,massSolar){
+ if(!(radiusMeters>0)||!Number.isFinite(radiusMeters)||!Number.isFinite(massSolar)||massSolar<0)return null;
+ const stellarGravity=1.32712440018e20*massSolar/(radiusMeters*radiusMeters);
+ const floorGravity=9.80665,angularVelocity=Math.sqrt((floorGravity+stellarGravity)/radiusMeters);
+ if(angularVelocity*radiusMeters>=299792458)return null; // No physical rigid rotation at this speed.
+ return {angularVelocity,periodSeconds:2*Math.PI/angularVelocity,stellarGravity,floorGravity};
 }

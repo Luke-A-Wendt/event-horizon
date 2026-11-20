@@ -1,3 +1,8 @@
+import {JANUS_HELPERS,JANUS_GEOMETRY,JANUS_FINISH} from './janus-pod-glsl.js';
+import {MERIDIAN_HELPERS,MERIDIAN_GEOMETRY,MERIDIAN_FINISH} from './meridian-glsl.js';
+import {HERITAGE_SHUTTLE_GEOMETRY} from './heritage-shuttle-glsl.js';
+import {HABITAT_HELPERS,HABITAT_BODY,HABITAT_FINISH} from './habitat-glsl.js';
+import {LEGACY_ENTERPRISE_GEOMETRY} from './legacy-enterprise-glsl.js';
 // Original procedural spacecraft geometry and materials; no external models.
 export const CRAFT_GLSL = `
 // Every model is an analytic union of small primitives inside a unit sphere.
@@ -122,7 +127,30 @@ vec4 hollowCylinderHit(vec3 ro,vec3 rd,float halfLength,float outerRadius,float 
  }
  return vec4(normal,best==100000.0?-1.0:best);
 }
-CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
+// Beveled annular coil: this is a closed revolved cross section, not a
+// translucent disc. Use exact wall hits rather than marching over a thin lip.
+vec4 coilRingHit(vec3 ro,vec3 rd){
+ vec4 best=hollowCylinderHit(ro,rd,.065,.530,.415);
+ vec4 cap=hollowCylinderHit(ro,rd,.086,.511,.434);
+ if(cap.w>=0.0&&(best.w<0.0||cap.w<best.w))best=cap;
+ for(int end=0;end<2;end++){
+  float side=end==0?-1.0:1.0;
+  vec3 q=vec3(ro.xy,ro.z*side),d=vec3(rd.xy,rd.z*side);
+  for(int wall=0;wall<2;wall++){
+   vec4 lip=wall==0?frustumHit(q,d,vec3(0,0,.0755),.0105,.530,.511):
+                     frustumHit(q,d,vec3(0,0,.0755),.0105,.415,.434);
+   if(lip.w>=0.0&&(best.w<0.0||lip.w<best.w)){
+    float face=wall==0?1.0:-1.0;
+    best=vec4(lip.xyz*vec3(face,face,face*side),lip.w);
+   }
+  }
+ }
+ return best;
+}
+${JANUS_HELPERS}
+${HABITAT_HELPERS}
+${MERIDIAN_HELPERS}
+CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type,float irisClosure,float dockExtension){
  // Only the tracked craft model keeps its fine silhouette and markings when
  // the full-frame pixel/ray budget falls. No extra render pass is introduced.
  float detail=max(uDetail,abs(type-uCraftFocusType)<.25?2.0:0.0);
@@ -186,62 +214,7 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    }
   }
  }else if(type<4.5){
-  // Shuttle: nose-to-engine extent 1.72, span 1.10; 37.24 m x 23.79 m.
-  // The cockpit is part of the raised forward cabin, not a bubble canopy.
-  // Full cylindrical payload bay, tapering cheeks, then a blunt rounded nose.
-  // The forebody closes its short nose cap at the 0.86 forward endpoint;
-  // a separate overlapping cap produces an artificial muzzle in front view.
-  selectSurface(capsuleHit(ro,rd,vec3(0,.008,-.54),vec3(0,.008,.29),.128),white,2.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.025,.460),vec3(.137,.115,.400)),white,2.0,s);
-  selectSurface(shuttleCabinHit(ro,rd),white,12.0,s);
-  selectSurface(shuttleAftHit(ro,rd),white,2.0,s);
-  for(int side=0;side<2;side++){
-   float x=side==0?-1.0:1.0;
-   // Compound-delta planform: steep inner sweep, then the shallower outer edge.
-   // Triangulate through the kink B to the rear root D. A-to-tip C would
-   // bridge the concavity and erase the double-delta shape entirely.
-   selectSurface(wingHit(ro-vec3(0,-.065,0),rd,vec2(.110*x,.42),vec2(.205*x,-.18),vec2(.10*x,-.67),.012),white,2.0,s);
-   selectSurface(wingHit(ro-vec3(0,-.065,0),rd,vec2(.205*x,-.18),vec2(.55*x,-.55),vec2(.10*x,-.67),.012),white,2.0,s);
-   // OV-101 aerodynamic aft fairings; no operational OMS/RCS is implied.
-   selectSurface(ellipsoidHit(ro,rd,vec3(.142*x,.086,-.535),vec3(.065,.074,.195)),white,2.0,s);
-   // Forward fuselage chine merges the broad underside into the tapered nose.
-   selectSurface(wingHit(ro-vec3(0,-.050,0),rd,vec2(.115*x,.40),vec2(.043*x,.77),vec2(.118*x,.18),.012),white,2.0,s);
-  }
-  // Swept vertical stabilizer, clipped as a triangular prism in the yz plane.
-  // Trapezoidal stabilizer with a clipped tip, broad root and swept leading edge.
-  vec4 fin=wingHit(ro.yxz,rd.yxz,vec2(.055,-.69),vec2(.495,-.65),vec2(.515,-.49),.014);
-  selectSurface(vec4(fin.yxz,fin.w),white,13.0,s);
-  fin=wingHit(ro.yxz,rd.yxz,vec2(.055,-.69),vec2(.515,-.49),vec2(.10,-.22),.014);
-  selectSurface(vec4(fin.yxz,fin.w),white,13.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,.122,-.47),vec3(.034,.041,.23)),white,2.0,s);
-  // Three dummy main-engine bells, as on OV-101's tailcone-off ALT flights.
-  // OV-101 was an atmospheric prototype: all space placement is hypothetical.
-  for(int engine=0;engine<3;engine++){
-   float angle=float(engine)*2.0*PI/3.0+.5*PI;
-   vec3 center=vec3(cos(angle)*.083,sin(angle)*.083-.005,-.78);
-   selectSurface(frustumHit(ro,rd,center,.08,.058,.033),silver,14.0,s);
-   selectSurface(ellipsoidHit(ro,rd,center-vec3(0,0,.077),vec3(.049,.049,.003)),dark,0.0,s);
-  }
-  if(detail>=1.0){
-   // Raised payload door hinge rails, nose chine and split elevon surfaces.
-   for(int side=0;side<2;side++){
-    float x=side==0?-1.0:1.0;
-    selectSurface(capsuleHit(ro,rd,vec3(.083*x,.097,-.48),vec3(.083*x,.097,.29),.004),vec3(.58,.61,.60),0.0,s);
-    selectSurface(capsuleHit(ro,rd,vec3(.11*x,-.054,.32),vec3(.045*x,-.050,.77),.004),dark,0.0,s);
-    selectSurface(capsuleHit(ro,rd,vec3(.18*x,-.052,-.586),vec3(.48*x,-.052,-.562),.002),dark,0.0,s);
-    // Simulated tile band over the leading edges, not glowing thrusters.
-    selectSurface(capsuleHit(ro,rd,vec3(.112*x,-.065,.41),vec3(.205*x,-.065,-.18),.005),vec3(.10,.105,.11),0.0,s);
-    selectSurface(capsuleHit(ro,rd,vec3(.205*x,-.065,-.18),vec3(.547*x,-.065,-.55),.006),vec3(.10,.105,.11),0.0,s);
-    // Twin pod nozzles and dark RCS ports distinguish the raised aft shoulders.
-    selectSurface(frustumHit(ro,rd,vec3(.146*x,.089,-.734),.032,.026,.015),silver,14.0,s);
-    selectSurface(ellipsoidHit(ro,rd,vec3(.146*x,.089,-.765),vec3(.022,.022,.002)),dark,0.0,s);
-    for(int port=0;port<3;port++){
-     selectSurface(ellipsoidHit(ro,rd,vec3(.204*x,.069,-.50-float(port)*.043),vec3(.003,.010,.012)),dark,0.0,s);
-    }
-    // Flush pod fairing ends; avoid exposed rectangular aft equipment blocks.
-   }
-   selectSurface(capsuleHit(ro,rd,vec3(0,.49,-.610),vec3(0,.17,-.66),.002),dark,0.0,s);
-  }
+${MERIDIAN_GEOMETRY}
  }else if(type<5.5){
   // EMU-inspired articulated pressure suit. y extent [-.88,.84] = 1.72.
   selectSurface(boxHit(ro,rd,vec3(0,.08,-.175),vec3(.165,.25,.105)),white,10.0,s);
@@ -314,59 +287,69 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    selectSurface(boxHit(ro,rd,vec3(0,.168,-.342),vec3(.067,.058,.010)),white,10.0,s);
   }
  }else if(type<6.5){
-  // TOS studio-model silhouette. The longitudinal extent is exactly 1.84:
-  // aft nacelle cap z=-.92 to the forward saucer rim z=.92.
-  // Saucer diameter .83 / 1.84 matches the approximately 417 / 947 ft ratio.
-  vec3 hull=vec3(.78,.80,.75);
-  // A bevelled solid saucer, not a flattened ellipsoid. Its planar rim and
-  // shallow conical upper/lower decks reproduce the original stepped profile.
-  vec3 saucer=vec3(0,.057,.505);vec4 part;
-  part=frustumHit(ro.xzy,rd.xzy,saucer.xzy,.017,.409,.415);
-  selectSurface(vec4(part.xzy,part.w),hull,7.0,s);
-  part=frustumHit(ro.xzy,rd.xzy,vec3(0,.505,.097),.023,.415,.195);
-  selectSurface(vec4(part.xzy,part.w),hull,7.0,s);
-  part=frustumHit(ro.xzy,rd.xzy,vec3(0,.505,.014),.026,.165,.409);
-  selectSurface(vec4(part.xzy,part.w),hull,7.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,.113,.505),vec3(.198,.027,.198)),hull,7.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.012,.505),vec3(.167,.025,.167)),hull,7.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.036,.505),vec3(.064,.022,.064)),hull,17.0,s);
-  // Bridge/B-C decks and the lower sensor/planetary dome.
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,.142,.505),vec3(.086,.025,.084)),hull,7.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,.169,.505),vec3(.045,.020,.046)),hull,7.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.054,.505),vec3(.032,.013,.032)),vec3(.95,.84,.58),20.0,s);
-  // The dorsal neck joins the forward engineering hull to the underside of
-  // the saucer, just aft of its center. Its upper edge stays inside the saucer
-  // rim; an aft-mounted neck made the silhouette look unlike the TOS ship.
-  part=wingHit(ro.yxz,rd.yxz,vec2(-.135,.005),vec2(-.105,.175),vec2(.060,.455),.022);
-  selectSurface(vec4(part.yxz,part.w),hull,19.0,s);
-  part=wingHit(ro.yxz,rd.yxz,vec2(-.135,.005),vec2(.060,.455),vec2(.060,.195),.022);
-  selectSurface(vec4(part.yxz,part.w),hull,19.0,s);
-  // Tapered secondary hull: markedly shorter and farther forward than v4.
-  selectSurface(frustumHit(ro,rd,vec3(0,-.17,-.075),.325,.044,.093),hull,16.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.17,.245),vec3(.093,.093,.037)),hull,16.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.17,-.40),vec3(.044,.044,.016)),hull,16.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.17,-.415),vec3(.032,.032,.004)),vec3(.23,.26,.25),18.0,s);
-  // Nested copper deflector rings and central antenna, all separate geometry.
-  selectSurface(frustumHit(ro,rd,vec3(0,-.17,.275),.019,.081,.072),vec3(.41,.34,.24),17.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.17,.299),vec3(.070,.070,.011)),vec3(.69,.46,.24),17.0,s);
-  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.17,.309),vec3(.049,.049,.006)),vec3(.56,.34,.16),17.0,s);
-  selectSurface(capsuleHit(ro,rd,vec3(0,-.17,.312),vec3(0,-.17,.353),.007),vec3(.72,.51,.30),17.0,s);
+  // NASA twin-ring warp surveyor. The fixed 1.84 length preserves scene scale.
+  // The wide forward visor and equipment spine pass through both open coils.
+  vec3 ceramic=vec3(.86,.88,.855),steel=vec3(.30,.355,.395),carbon=vec3(.070,.094,.113);
+  selectSurface(ellipsoidHit(ro,rd,vec3(0,0,-.12),vec3(.171,.148,.70)),ceramic,42.0,s);
+  vec3 qr=ro*vec3(1,1.18,1),dr=rd*vec3(1,1.18,1);
+  vec4 part=frustumHit(qr,dr,vec3(0,0,-.10),.51,.164,.168);
+  selectSurface(vec4(unit(part.xyz*vec3(1,1.18,1)),part.w),ceramic,42.0,s);
+  // Pressurized command module; windscreens follow its continuously curved roof.
+  selectSurface(ellipsoidHit(ro,rd,vec3(0,0,.56),vec3(.235,.105,.36)),ceramic,43.0,s);
+  selectSurface(ellipsoidHit(ro,rd,vec3(0,.068,.535),vec3(.135,.065,.232)),ceramic,43.0,s);
+  selectSurface(ellipsoidHit(ro,rd,vec3(0,-.060,.535),vec3(.161,.079,.236)),steel,42.0,s);
+  // The steering bores are cut into the existing aft pressure collar. Their
+  // annular lips follow the collar surface and add nothing to its silhouette.
+  vec4 shoulder=ellipsoidHit(ro,rd,vec3(0,0,-.641),vec3(.174,.151,.127));
+  if(shoulder.w>=0.0){
+   vec3 hit=ro+rd*shoulder.w;bool vertical=abs(hit.y)>abs(hit.x);
+   vec3 axis=vertical?vec3(0,sign(hit.y),0):vec3(sign(hit.x),0,0);
+   vec2 q=vec2(vertical?hit.x:hit.y,hit.z+.641),d=vec2(vertical?rd.x:rd.y,rd.z);
+   float radius=length(q);vec3 finish;
+   if(radius<.0085){
+    float a=dot(d,d),b=dot(q,d),c=dot(q,q)-.0085*.0085;
+    float wall=a>1e-9?(-b+sqrt(max(0.0,b*b-a*c)))/a:10000.0;
+    float axial=dot(rd,axis),floorT=axial<-.00001?((vertical?.151:.174)-.005-dot(hit,axis))/axial:10000.0;
+    if(floorT<wall){shoulder.w+=floorT;shoulder.xyz=axis;finish=vec3(.035,.040,.045);}
+    else{shoulder.w+=wall;vec2 v=-normalize(q+wall*d);shoulder.xyz=vertical?vec3(v.x,0,v.y):vec3(0,v.x,v.y);finish=carbon;}
+    selectSurface(shoulder,finish,45.0,s);
+   }else if(radius<.0115){selectSurface(shoulder,vec3(.40,.44,.46),41.0,s);}
+   else{selectSurface(shoulder,steel,42.0,s);}
+  }
+  for(int k=0;k<2;k++){
+   float z=k==0?-.43:.43;
+   selectSurface(coilRingHit(ro-vec3(0,0,z),rd),ceramic,40.0,s);
+   for(int strut=0;strut<4;strut++){
+    vec2 axis=vec2(strut==0||strut==3?.70710678:-.70710678,strut<2?.70710678:-.70710678);
+    vec2 edge=vec2(-axis.y,axis.x);
+    // Flat titanium webs with forked roots; no disc fills the negative space.
+    vec3 u=vec3(dot(ro.xy,axis),dot(ro.xy,edge),ro.z-z);
+    vec3 d=vec3(dot(rd.xy,axis),dot(rd.xy,edge),rd.z);
+    part=boxHit(u,d,vec3(.28,0,0),vec3(.146,.011,.028));
+    selectSurface(vec4(axis*part.x+edge*part.y,part.zw),steel,41.0,s);
+    if(detail>=1.0){
+     part=boxHit(u,d,vec3(.397,0,0),vec3(.023,.031,.047));
+     selectSurface(vec4(axis*part.x+edge*part.y,part.zw),carbon,41.0,s);
+     selectSurface(capsuleHit(ro,rd,vec3(axis*.152,z-.102),vec3(axis*.34,z),.012),steel,41.0,s);
+     selectSurface(capsuleHit(ro,rd,vec3(axis*.152,z+.102),vec3(axis*.34,z),.012),steel,41.0,s);
+    }
+   }
+  }
   for(int side=0;side<2;side++){
-   float x=side==0?-1.0:1.0;
-   // Flat structural pylons: outboard in front view, nearly vertical in side.
-   vec3 pr=ro-vec3(0,0,-.275);
-   part=wingHit(pr.xzy,rd.xzy,vec2(.020*x,-.135),vec2(.032*x,-.190),vec2(.300*x,.092),.039);
-   selectSurface(vec4(part.xzy,part.w),hull,19.0,s);
-   part=wingHit(pr.xzy,rd.xzy,vec2(.020*x,-.135),vec2(.300*x,.092),vec2(.278*x,.151),.039);
-   selectSurface(vec4(part.xzy,part.w),hull,19.0,s);
-   // Long cylindrical nacelles lie just above the saucer, as in the TOS model.
-   selectSurface(frustumHit(ro,rd,vec3(.292*x,.132,-.425),.435,.052,.058),hull,16.0,s);
-   selectSurface(ellipsoidHit(ro,rd,vec3(.292*x,.132,-.860),vec3(.052,.052,.060)),vec3(.27,.30,.29),18.0,s);
-   selectSurface(frustumHit(ro,rd,vec3(.292*x,.132,-.007),.018,.060,.060),vec3(.40,.40,.34),17.0,s);
-   selectSurface(ellipsoidHit(ro,rd,vec3(.292*x,.132,.012),vec3(.056,.056,.058)),vec3(1.0,.27,.055),4.0,s);
-   // Raised intercooler ridges and dark side grilles on the aft nacelles.
-   selectSurface(boxHit(ro,rd,vec3(.292*x,.185,-.655),vec3(.023,.008,.145)),hull,16.0,s);
-   selectSurface(boxHit(ro,rd,vec3(.347*x,.133,-.625),vec3(.004,.020,.142)),vec3(.20,.23,.23),18.0,s);
+   float h=side==0?-1.0:1.0;
+   // Thermal radiators flank the pressure vessel; metallic rails protect them.
+   selectSurface(boxHit(ro,rd,vec3(h*.155,-.047,-.105),vec3(.023,.040,.220)),carbon,44.0,s);
+   if(detail>=1.0){
+    selectSurface(capsuleHit(ro,rd,vec3(h*.174,-.083,-.332),vec3(h*.174,-.083,.127),.0065),steel,41.0,s);
+    selectSurface(capsuleHit(ro,rd,vec3(h*.174,-.010,-.332),vec3(h*.174,-.010,.127),.0065),steel,41.0,s);
+   }
+  }
+  for(int motor=0;motor<4;motor++){
+   vec2 xy=vec2(mod(float(motor),2.)<.5?-.090:.090,motor<2?.090:-.090);
+   selectSurface(capsuleHit(ro,rd,vec3(xy,-.814),vec3(xy,-.67),.051),steel,41.0,s);
+   selectSurface(frustumHit(ro,rd,vec3(xy,-.851),.069,.067,.041),vec3(.32,.26,.215),45.0,s);
+   selectSurface(hollowCylinderHit(ro-vec3(xy,-.914),rd,.006,.067,.058),steel,41.0,s);
+   selectSurface(ellipsoidHit(ro,rd,vec3(xy,-.854),vec3(.052,.052,.009)),carbon,45.0,s);
   }
  }else if(type>11.5&&type<12.5){
   // Guild Heighliner: open cylindrical transit bay, a 10 km illustrative scale.
@@ -385,6 +368,14 @@ CraftSurface craftHit(vec3 ro,vec3 rd,float maximum,float type){
    }
   }
 
+ }else if(type>13.5&&type<14.5){
+${HABITAT_BODY}
+ }else if(type>14.5&&type<15.5){
+${LEGACY_ENTERPRISE_GEOMETRY}
+ }else if(type>15.5&&type<16.5){
+${HERITAGE_SHUTTLE_GEOMETRY}
+ }else if(type>17.5&&type<18.5){
+${JANUS_GEOMETRY}
  }
  return s;
 }
@@ -678,6 +669,144 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
   emission+=inside*windows*.8;
   albedo+=inside*windows*vec3(.34,.26,.11);
  }
+ if(material>39.5&&material<40.5){
+  float radius=length(hit.xy),theta=atan(hit.y,hit.x),z=hit.z-sign(hit.z)*.43;
+  float sectors=theta*(12.0/PI),u=fract(sectors+.5)-.5;
+  float panel=floor(sectors+.5);
+  float inner=step(dot(n.xy,hit.xy),-.15);
+  float axial=abs(n.z);
+  // Ceramic cassettes and joints follow the ring, including the chamfers.
+  float joint=smoothstep(.475,.496,abs(u));
+  albedo*=.925+.075*hash(vec2(mod(panel,24.0),sign(hit.z)));
+  albedo*=1.0-.42*joint;
+  float stripe=1.0-smoothstep(.002,.004,abs(abs(z)-.051));
+  float land=1.0-smoothstep(.009,.014,abs(abs(z)-.051));
+  albedo=mix(albedo,vec3(.125,.175,.205),land*(1.0-axial)*.85);
+  float sockets=(1.0-smoothstep(.29,.35,abs(u)))*(1.0-joint);
+  float emitter=stripe*sockets*(1.0-axial);
+  albedo=mix(albedo,vec3(.10,.74,.88),emitter);
+  // Recessed graphite vane packs glow only on the inner circumference.
+  if(inner>.5&&axial<.4){
+   float fieldLane=1.0-smoothstep(.034,.04,abs(z));
+   albedo=mix(albedo,vec3(.10,.145,.18),fieldLane);
+   float fins=smoothstep(.24,.34,abs(fract(sectors*3.0)-.5));
+   albedo=mix(albedo,vec3(.40,.52,.57),.75*fieldLane*fins);
+   emitter=max(emitter,fieldLane*(1.0-fins)*.36);
+  }
+  if(axial>.95){
+   float groove=min(abs(radius-.451),abs(radius-.496));
+   albedo*=1.0-.32*(1.0-smoothstep(.001,.003,groove));
+   float seal=(1.0-smoothstep(.004,.009,abs(radius-.442)))*(1.0-smoothstep(.28,.36,abs(u)));
+   albedo=mix(albedo,vec3(.12,.23,.28),seal);
+   emitter=max(emitter,seal*.22);
+   if(detail>=1.0){
+    vec2 hole=vec2((abs(u)-.39)*.123,radius-.478);
+    float bolt=1.0-smoothstep(.002,.0037,length(hole));
+    albedo=mix(albedo,vec3(.20,.25,.27),bolt);
+   }
+  }
+  // A readable two-sided stencil, with its baseline upright in each side view.
+  if(hit.z>0.0&&inner<.5&&abs(n.x)>.87&&abs(hit.y)<.052){
+   float stencil=shuttleNasaMark(vec2(-z*sign(n.x)/.073,hit.y/.076));
+   albedo=mix(albedo,vec3(.66,.032,.037),stencil);
+  }
+  // The face marking is visible looking through either aperture.
+  if(hit.z>0.0&&hit.y>.440&&axial>.95){
+   float stencil=shuttleNasaMark(vec2(hit.x*sign(n.z)/.108,(hit.y-.472)/.074));
+   albedo=mix(albedo,vec3(.65,.031,.038),stencil);
+  }
+  emission=.93*emitter;spec*=1.32;
+ }
+ if(material>40.5&&material<41.5){
+  float hand=pow(1.0-NdotV,3.0);
+  albedo+=vec3(.038,.055,.069)*hand+reflectedSky*(.07+.09*hand);
+  spec*=1.55;
+ }
+ if(material>41.5&&material<42.5){
+  float theta=atan(hit.y*1.18,hit.x),station=fract((hit.z+.67)*5.8);
+  float seam=1.0-smoothstep(.009,.023,min(station,1.0-station));
+  float rib=smoothstep(.483,.499,abs(fract(theta*4.0/PI)-.5));
+  albedo*=1.0-.32*seam-.14*rib;
+  // Flight-deck windows and the hull's much larger readable side marking.
+  float ax=abs(n.x);
+  if(ax>.59&&hit.z>-.28&&hit.z<.30){
+   float sill=1.0-smoothstep(.002,.005,abs(hit.y+.003));
+   albedo=mix(albedo,vec3(.11,.18,.235),sill);
+   if(abs(hit.y-.047)<.039){
+    float stencil=shuttleNasaMark(vec2(-(hit.z-.02)*sign(n.x)/.174,(hit.y-.047)/.092));
+    albedo=mix(albedo,vec3(.70,.028,.034),stencil);
+   }
+   if(hit.z>.181&&hit.z<.260&&hit.y>.022&&hit.y<.063){
+    vec2 flag=vec2(.5-sign(n.x)*(hit.z-.2205)/.079,(hit.y-.022)/.041);
+    albedo=mix(vec3(.92),vec3(.69,.075,.072),step(.5,fract(flag.y*6.5)));
+    if(flag.x<.43&&flag.y>.46)albedo=vec3(.038,.084,.17);
+   }
+  }
+  if(hit.z<-.49){
+   float ribbing=smoothstep(.35,.47,abs(fract(hit.z*58.0)-.5));
+   albedo=mix(albedo,vec3(.19,.235,.265),.36*ribbing);
+  }
+  spec*=1.19;
+ }
+ if(material>42.5&&material<43.5){
+  vec2 q=hit.xz-vec2(0,.56);float belt=1.0-smoothstep(.007,.014,abs(hit.y+.002));
+  albedo=mix(albedo,vec3(.115,.18,.20),belt);
+  float az=atan(hit.x/.235,(hit.z-.56)/.36);
+  // Separate bridge panes, with slanted ceramic pillars, deep rubber gaskets
+  // and sunshades. Preserve a substantial crown and nose below the windows.
+  if(hit.z>.38&&hit.y>.019&&hit.y<.084&&abs(az)<2.10){
+   float y=(hit.y-.026)/.050;
+   float sector=abs(az)/.385+.16*(clamp(y,0.0,1.0)-.5);
+   float glassX=abs(fract(sector)-.5);
+   float frame=smoothstep(-.10,.005,y)*(1.0-smoothstep(.96,1.08,y))*(1.0-smoothstep(.397,.45,glassX));
+   float pane=smoothstep(.07,.16,y)*(1.0-smoothstep(.86,.97,y))*(1.0-smoothstep(.321,.372,glassX));
+   vec3 glazing=mix(vec3(.018,.046,.065),vec3(.068,.24,.32),clamp(y,.0,1.0))+reflectedSky*.20;
+   // Above the sill, the visor catches the sky in a narrow blue reflection.
+   glazing+=vec3(.032,.061,.072)*(1.0-smoothstep(.025,.12,abs(y-.65+.095*fract(sector))));
+   albedo=mix(albedo,vec3(.049,.057,.065),frame);
+   albedo=mix(albedo,glazing,pane);
+   spec*=1.0+pane*2.7;
+  }
+  if(n.y>.58&&hit.y>.077&&hit.z>.54){
+   // Flush dorsal avionics hatch and latches; visible even in a three-quarter view.
+   vec2 door=vec2((hit.x-.034)/.034,(hit.z-.629)/.049);
+   float outline=length(door);
+   albedo=mix(albedo,vec3(.38,.43,.44),1.0-smoothstep(.94,1.05,outline));
+   albedo=mix(albedo,vec3(.72,.75,.73),1.0-smoothstep(.77,.88,outline));
+   float latch=1.0-smoothstep(.065,.13,length(vec2(abs(door.x)-.56,door.y-.06)));
+   albedo=mix(albedo,vec3(.48,.22,.07),latch);
+   vec2 slit=vec2((abs(hit.x)-.070)/.014,(hit.z-.684)/.047);
+   if(abs(slit.x)<1.0&&abs(slit.y)<1.0){
+    float slot=(1.0-smoothstep(.50,.84,abs(slit.x)))*smoothstep(.1,.35,abs(fract(slit.y*2.1)-.5));
+    albedo=mix(albedo,vec3(.23,.29,.31),slot*.8);
+   }
+  }
+  if(hit.z>.768&&hit.y<.007){
+   // Forward navigation sensor behind a dark lens below the instrument belt.
+   vec2 eye=vec2(hit.x/.055,(hit.y+.031)/.013);
+   float cover=length(eye);
+   albedo=mix(albedo,vec3(.22,.255,.27),1.0-smoothstep(.88,1.04,cover));
+   albedo=mix(albedo,vec3(.027,.055,.073)+reflectedSky*.23,1.0-smoothstep(.65,.82,cover));
+  }
+  float deck=length(q/vec2(.235,.36));
+  float seams=min(abs(deck-.72),abs(deck-.85));
+  albedo*=1.0-.18*(1.0-smoothstep(.002,.012,seams));
+ }
+ if(material>43.5&&material<44.5){
+  float fins=smoothstep(.31,.46,abs(fract(hit.z*48.0)-.5));
+  albedo=mix(albedo,vec3(.31,.39,.43),fins);
+  spec*=1.6;
+ }
+ if(material>44.5&&material<45.5){
+  float angle=atan(hit.y-sign(hit.y)*.090,hit.x-sign(hit.x)*.090);
+  float flute=.5+.5*cos(angle*18.0);
+  albedo*=.70+.30*flute;
+  albedo+=vec3(.023,.012,.004)*flute;
+  spec*=1.7;
+ }
+${HABITAT_FINISH}
+${MERIDIAN_FINISH}
+${JANUS_FINISH}
  float roughness=material>9.5&&material<10.5?.07:.42;
  vec3 result=albedo*(.24+NdotL*.92)+vec3(.65,.74,.81)*spec*roughness+vec3(.07,.12,.16)*rim;
  if(material>3.5&&material<4.5){
@@ -692,31 +821,35 @@ vec3 shadeCraft(CraftSurface surface,vec3 hit,vec3 localDirection,vec3 light,vec
 
 // Keep the full model geometry for every selected craft, while omitting models
 // that are absent from this scene before the driver parses or specializes GLSL.
-// Bits: ISS=1, Shuttle=2, astronaut=4, Enterprise=8, Heighliner=16.
+// Bits: ISS=1, Shuttle=2, astronaut=4, NASA warp ship=8, Heighliner=16, Garden Station=32, classic Enterprise=64, original Shuttle=128, Janus=256.
 // Materials are pruned only when no selected model can use them. Every
 // reachable material and primitive stays identical to the full shader.
-export function createCraftGLSL({mask=31}={}) {
- const selected=Number.isInteger(mask)?mask&31:31;
- if(selected===31)return CRAFT_GLSL;
+export function createCraftGLSL({mask=511}={}) {
+ const selected=Number.isInteger(mask)?mask&511:511;
+ if(selected===511)return CRAFT_GLSL;
  const headers=[
   '\n if(type<3.5){\n',
   '\n }else if(type<4.5){\n',
   '\n }else if(type<5.5){\n',
-  '\n }else if(type<6.5){\n  // TOS studio-model silhouette.',
-  '\n }else if(type>11.5&&type<12.5){\n'
+  '\n }else if(type<6.5){\n  // NASA twin-ring warp surveyor.',
+  '\n }else if(type>11.5&&type<12.5){\n',
+  '\n }else if(type>13.5&&type<14.5){\n',
+  '\n }else if(type>14.5&&type<15.5){\n',
+  '\n }else if(type>15.5&&type<16.5){\n',
+  '\n }else if(type>17.5&&type<18.5){\n'
  ];
  const start=CRAFT_GLSL.indexOf('CraftSurface craftHit(');
  const positions=headers.map(header=>CRAFT_GLSL.indexOf(header,start));
- const end=CRAFT_GLSL.indexOf('\n }\n return s;\n}',positions[4]);
+ const end=CRAFT_GLSL.indexOf('\n }\n return s;\n}',positions[8]);
  if(start<0||positions.some((position,i)=>position<start||(i>0&&position<=positions[i-1]))||end<0)throw new Error('Craft shader model boundaries changed');
- const tests=['type>2.5&&type<3.5','type>=3.5&&type<4.5','type>=4.5&&type<5.5','type>=5.5&&type<6.5','type>11.5&&type<12.5'];
+ const tests=['type>2.5&&type<3.5','type>=3.5&&type<4.5','type>=4.5&&type<5.5','type>=5.5&&type<6.5','type>11.5&&type<12.5','type>13.5&&type<14.5','type>14.5&&type<15.5','type>15.5&&type<16.5','type>17.5&&type<18.5'];
  const branches=[];
- for(let i=0;i<5;i++){
+ for(let i=0;i<headers.length;i++){
   if(!(selected&(1<<i)))continue;
   // Only remove the branch delimiter. Keep every vertex, marking, dimension,
   // primitive call and material assignment in the selected model unchanged.
   const opening=CRAFT_GLSL.indexOf('{',positions[i])+1;
-  const body=CRAFT_GLSL.slice(opening,i<4?positions[i+1]:end);
+  const body=CRAFT_GLSL.slice(opening,positions[i+1]??end);
   branches.push(`\n ${branches.length?'else if':'if'}(${tests[i]}){${body}\n }`);
  }
  let result=CRAFT_GLSL.slice(0,positions[0])+branches.join('')+CRAFT_GLSL.slice(end+3);
@@ -729,7 +862,7 @@ export function createCraftGLSL({mask=31}={}) {
  const guards=[
   ['material>9.5&&material<10.5&&detail>=1.0',[10]],['material>.5&&material<1.5',[1]],
   ['(material>1.5&&material<2.5)||(material>11.5&&material<12.5)',[2,12]],
-  ...[3,4,5,6,7,10,12,13,15,16,17,18,19,20,21,22,23,24].map(value=>[`material>${value-.5}&&material<${value+.5}`,[value]]),
+  ...[3,4,5,6,7,10,12,13,15,16,17,18,19,20,21,22,23,24,40,41,42,43,44,45,50,51,52,53,60,61,62,63,64,65,66,70,71,72,73].map(value=>[`material>${value-.5}&&material<${value+.5}`,[value]]),
   ['material>30.5&&material<32.5',[31,32]]
  ];
  for(const [condition,ids] of guards){

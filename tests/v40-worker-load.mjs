@@ -34,6 +34,29 @@ for(const preset of SCENE_PRESETS){
 host.setQuality('high');host.sceneRevision++;host.loadScene('bridge');
 await worker.handle({type:'state',serial:9999,snapshot:snapshotRenderer(host),signature:renderSignature(host),presentationPaused:false});
 assert.equal(worker.renderer.budget.effectiveQuality,'high','Explicit manual quality is retained');
+
+// An annotated worker presents status as often as every frame. Building a
+// 500-body UI catalog here consumes a substantial fraction of a frame.
+function checkTelemetry(renderer){
+ const full=renderer.getState(),compact=renderer.getRenderStats();
+ for(const [key,value] of Object.entries(compact))assert.equal(full[key],value,key);
+ for(const key of ['objects','objectTree','sceneTargets'])assert(!Object.hasOwn(compact,key));
+ renderer.getObjectTree=renderer.getObjects=()=>assert.fail('Telemetry built the object catalog');
+ return compact;
+}
+host.sceneRevision++;host.loadScene('solar-system-natural');
+const solarSignature=renderSignature(host);
+await worker.handle({type:'state',serial:10000,snapshot:snapshotRenderer(host),signature:solarSignature,presentationPaused:false});
+assert(worker.renderer.objects.length>=500);
+const compact=checkTelemetry(worker.renderer);
+messages.length=0;
+worker.renderer.completed(solarSignature,99999);
+worker.renderer.statsStart=99999;worker.renderer.emitStats(100700);
+const notices=messages.filter(m=>m.type==='status');
+assert(notices.some(m=>m.stats.frameReady));assert(notices.length>=2);
+for(const {stats} of notices){
+ for(const key of ['qualityReduced','steps','adaptiveLevel','targetFps','effectiveQuality','webgl'])assert.equal(stats[key],compact[key],key);
+}
 await worker.handle({type:'dispose'});host.dispose();
 
 fixture();const canvas=new CpuCommandCanvas();canvas.getBoundingClientRect=()=>({width:390,height:700});
@@ -42,5 +65,6 @@ cpu.cpuBudget.level='high';cpu.loadScene('solar-system');assert.equal(cpu.cpuBud
 cpu.cpuBudget.level='high';restoreRenderer(cpu,{sceneRevision:7,sceneId:'solar-system'});assert.equal(cpu.cpuBudget.level,'high','CPU scene revision preserves its separate budget');
 cpu.cpuBudget.level='medium';restoreRenderer(cpu,{sceneRevision:7,time:2});assert.equal(cpu.cpuBudget.level,'medium');
 cpu.setQuality('high');cpu.loadScene('bridge');assert.equal(cpu.cpuBudget.mode,'high','CPU manual choice survives scene changes');assert.equal(cpu.cpuBudget.level,'high','Manual CPU scenes retain their selected quality');cpu.noteCpuCost(10,1000,'frame');assert.equal(cpu.cpuBudget.level,'high');
+const cpuTelemetry=checkTelemetry(cpu);assert.equal(cpuTelemetry.webgl,0);assert.equal(cpuTelemetry.effectiveQuality,'high');assert.equal(cpu.getRenderStats().targetFps,cpu.cpuBudget.cadence.target);
 cpu.dispose();
-console.log('PASS: all49 worker scene snapshots produce matching complete frames; GPU/CPU Adaptive fidelity retention, camera-message retention, and explicit manual quality.');
+console.log(`PASS: ${SCENE_PRESETS.length} worker scene snapshots, GPU/CPU fidelity retention and lightweight presentation telemetry.`);

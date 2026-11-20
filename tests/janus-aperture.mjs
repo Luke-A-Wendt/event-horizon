@@ -1,0 +1,44 @@
+import assert from 'node:assert/strict';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {snapshotRenderer,restoreRenderer} from '../dist/render-state.js';
+import {CpuCommandCanvas} from '../dist/cpu-commands.js';
+import {CpuRenderer} from '../dist/cpu-renderer.js';
+import {janusAperture,janusLocalField,janusSkyAngle,paintJanusAperture} from '../dist/janus-aperture.js';
+import {advanceJanusExchanges,startJanusExchange} from '../dist/janus-exchange.js';
+import {createFragment} from '../dist/shaders.js';
+const initialize=r=>{r.loadScene('earth-andromeda-bridge');r.sceneLoad=null;r.camera={...r.target};r.state.paused=false;update(r);};
+function update(r){r.fillHoles();r.fillObjects();r.updateCameraFrame();}
+function advance(r,d){advanceJanusExchanges(r,d);update(r);}
+const visual=r=>janusAperture(r,r.cameraFrame,640,422);
+const gpu=()=>new BlackHoleRenderer(fixture().canvas,{bindControls:false,autoStart:false});
+const r=gpu();initialize(r);assert(!visual(r).active);
+advance(r,8.80);const open=visual(r);
+assert(open.active&&open.charge&&open.peer.catalogId==='aster-vale'&&open.peerSide!==open.side);
+assert.equal(open.rings.length,2);assert(open.rings.every(b=>!r.objectFrames.includes(b)),'M31 rings remain out of the native departure render');
+assert(open.radius>.15&&open.radius<.45&&Math.hypot(open.cx,open.cy)<.001);
+const worker=gpu();restoreRenderer(worker,snapshotRenderer(r));update(worker);
+assert.deepEqual(visual(worker).center,open.center);assert.equal(visual(worker).radius,open.radius);
+advance(r,1.899);const contact=visual(r),axis=[...r.cameraFrame.forward];
+assert(contact.radius>Math.hypot(.5,640/844),'remote chart covers all viewport corners before commit');
+advance(r,.00101);const live=visual(r);assert(!live.charge&&live.side===contact.peerSide);
+const dest=r.frameById.get(contact.peer.id),pod=r.frameById.get(contact.pod.id);
+const after=dest.janusLocalPosition.map((x,i)=>x-pod.janusLocalPosition[i]+live.rel[i]);
+assert(Math.hypot(...after.map((x,i)=>x-contact.center[i]))<dest.radius*1e-4,'portal rays line up with the actual receiving orbit');
+assert(Math.hypot(...axis.map((v,i)=>v-r.cameraFrame.forward[i]))<1e-4,'no heading jump');
+advance(r,2.5);assert.equal(visual(r).active,false);
+assert(startJanusExchange(r,pod.id,{addressLy:[13201,48,-359],label:'Deep survey'}));advance(r,1.6);const empty=visual(r);
+assert(empty.active&&empty.charge&&!empty.peer&&empty.peerSide!==empty.side);
+advance(r,4.0);assert.equal(visual(r).side,janusSkyAngle('deep:13201,48,-359'));assert.equal(r.objectFrames.length,1,'no nearby planets at a distant address');
+assert(janusLocalField(r,r.cameraFrame,640,422)?.radius>0,'The stationary cabin keeps its bubble in empty deep space after arrival');
+const cpuFixture=fixture(),commands=new CpuCommandCanvas();commands.getBoundingClientRect=cpuFixture.canvas.getBoundingClientRect;
+const renderer=new CpuRenderer(commands,{autoStart:false});initialize(renderer);advance(renderer,8.8);
+commands.beginFrame();assert(renderer.render(9000,false,true));
+const frame=commands.takeFrame();assert(frame.commands.length<20000&&frame.commands.some(c=>c[0]==='clip')&&frame.commands.some(c=>c[0]==='bezierCurveTo'),'command-only worker paints the full destination hardware and storm belts');
+assert(frame.commands.flat().every(x=>typeof x!=='number'||Number.isFinite(x))&&commands.stack.length===0);
+const paintOrder=[];let clips=0;renderer.context2d=new Proxy({clip(){clips++;}},{get:(o,k)=>k in o?o[k]:()=>{}});
+renderer.sky=()=>paintOrder.push('remote-sky');renderer.bodyStages=function*(body){paintOrder.push(body.catalogId);};
+const original=renderer.cameraFrame;
+for(const _ of paintJanusAperture(renderer,visual(renderer))){}
+assert.equal(renderer.cameraFrame,original);assert.equal(clips,1);assert(paintOrder.includes('aster-rings')&&paintOrder.includes('aster-vale')&&paintOrder[0]==='remote-sky');
+const variants=r.shaderFeatures();assert.equal(typeof createFragment({...variants,photo:true}),'string');console.log('PASS: native planet/ring aperture, paired sky, split orbit handoff, worker snapshot, remote address and clipped CPU projection.');

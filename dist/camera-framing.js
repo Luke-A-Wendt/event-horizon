@@ -21,8 +21,16 @@ export function warpViewObstacles(width,height,driving=false,cssWidth=width,cssH
  return rectangles.filter(([x0,y0,x1,y1])=>x1>x0&&y1>y0);
 }
 
-// Exact perspective extent for the bubble's bounding sphere; projected hull
-// bounds at zero warp, so a long, flat Enterprise is not fitted as a sphere.
+// In normalized model coordinates the two transverse rings dominate the beam;
+// the nose and engines are narrower. Circumscribe each circular ring with a
+// 12-sided prism so even an oblique track view cannot crop its silhouette.
+const warpHullBounds=[...[-.43,.43].flatMap(z=>[-.088,.088].flatMap(dz=>Array.from({length:12},(_,i)=>{
+ const angle=(i+.5)*Math.PI/6,r=.533/Math.cos(Math.PI/12);
+ return [r*Math.cos(angle),r*Math.sin(angle),z+dz];
+}))),...[-.921,.921].flatMap(z=>[-.20,.20].flatMap(x=>[-.15,.15].map(y=>[x,y,z])))];
+
+// Exact perspective extent for the bubble's bounding sphere; use the craft's
+// transverse rings and longitudinal bounds when fitting the hull at zero warp.
 export function warpSideFraming(width,height,factor=4,{enabled=true,fieldRadius,yaw=-Math.PI/2,pitch=0,lookYaw=0,lookPitch=0,driving=false,cssWidth=width,cssHeight=height}={}){
  width=Math.max(1,width);height=Math.max(1,height);
  const aspect=width/height,fov=.83*Math.max(1,1.35/aspect),projection=height/fov,margin=12,cx=width*.5,cy=height*.5,obstacles=warpViewObstacles(width,height,driving,cssWidth,cssHeight);
@@ -32,13 +40,11 @@ export function warpSideFraming(width,height,factor=4,{enabled=true,fieldRadius,
  const centered=Math.abs(lookYaw)+Math.abs(lookPitch)<1e-10;
  if(radius&&centered)distance=radius*Math.sqrt(1+(projection/pixels)**2);
  else{
-  // Bounds of the procedural TOS hull: exact1.84 normalized length, with a
-  // small tolerance around the saucer rim, bridge and engineering hull keel.
   const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],eye=[Math.cos(pitch)*Math.sin(yaw),Math.sin(pitch),Math.cos(pitch)*Math.cos(yaw)],baseForward=eye.map(x=>-x),baseRight=[Math.cos(yaw),0,-Math.sin(yaw)],baseUp=[-Math.sin(pitch)*Math.sin(yaw),Math.cos(pitch),-Math.sin(pitch)*Math.cos(yaw)];
   const forward=eye.map((_,i)=>(baseForward[i]*Math.cos(lookYaw)+baseRight[i]*Math.sin(lookYaw))*Math.cos(lookPitch)+baseUp[i]*Math.sin(lookPitch)),right=eye.map((_,i)=>baseRight[i]*Math.cos(lookYaw)-baseForward[i]*Math.sin(lookYaw)),up=[right[1]*forward[2]-right[2]*forward[1],right[2]*forward[0]-right[0]*forward[2],right[0]*forward[1]-right[1]*forward[0]],center=[-dot(eye,right),-dot(eye,up),-dot(eye,forward)],corners=[];
   const clear=([x0,y0,x1,y1])=>x0>=margin&&x1<=width-margin&&y0>=margin&&y1<=height-margin&&!obstacles.some(([a,b,c,d])=>x1+margin>a&&x0-margin<c&&y1+margin>b&&y0-margin<d);
   if(center[2]<=0||!clear([cx+projection*center[0]/center[2],cy-projection*center[1]/center[2],cx+projection*center[0]/center[2],cy-projection*center[1]/center[2]]))return {distance:null,radius,pixels,fov,margin,obstacles};
-  for(const x of [-.416,.416])for(const y of [-.264,.194])for(const z of [-.921,.921]){const point=[x,y,z];corners.push([dot(point,right),dot(point,up),dot(point,forward)]);}
+  for(const point of warpHullBounds)corners.push([dot(point,right),dot(point,up),dot(point,forward)]);
   const fits=d=>{
    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
    if(radius){

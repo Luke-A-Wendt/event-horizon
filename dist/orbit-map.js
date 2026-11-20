@@ -1,4 +1,11 @@
+import {TOROID_LANES,TOROID_ID} from './toroid-swarm.js';
+import {K2_GRID} from './kardashev-solar.js';
+import {LIGHT_SPEED} from './stellar-physics.js';
+import {EARTH_RADIUS,GEO_RADIUS,NETWORK_RADIUS,ELEVATOR_PORTS,networkPort,transferOrbit,CIVIL_RINGS,civilRingPoint} from './kardashev-earth.js';
 // An explicitly rescaled educational chart. It never changes scene geometry.
+import {SWARM_LANES} from './dyson-swarm.js';
+import {brainTier} from './matrioshka.js';
+import {SHKADOV_AXIS,SHKADOV_HALF_ANGLE} from './shkadov.js';
 import { REFERENCE_RG_METERS } from './objects.js';
 import { objectCategory,mapCategoryVisible } from './object-taxonomy.js';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -35,21 +42,22 @@ export function mapModel(renderer,centerId,{filters=null}={}){
  const xAxis=center.frame?.[0]||[1,0,0],yAxis=center.frame?.[2]||[0,0,1];
  const body=frame=>{
   const original=objectMap.get(frame.id)||frame,node=nodeMap.get(frame.id);
-  const relative=frame.position.map((x,i)=>x-center.position[i]),velocity=frame.velocity?.map((x,i)=>x-(center.velocity?.[i]||0));
+  const relative=(frame.physicalPosition||frame.position).map((x,i)=>x-(center.physicalPosition||center.position)[i]),velocity=frame.velocity?.map((x,i)=>x-(center.velocity?.[i]||0));
   // Built-in discs and jets share their owner's tracking frame, not its mass or horizon.
+  const velocityUnits=frame.physicalPosition?LIGHT_SPEED/18:REFERENCE_RG_METERS;
   const attachment=['disk','jets','ring','belt','dyson'].includes(frame.type);
   const compact=frame.collapsed&&!attachment&&(frame.horizonRadius||frame.radius)>0;
   let massSolar=attachment?(objectMap.get(frame.id)?.massSolar||0):frame.massSolar??original.massSolar;
   if(massSolar==null)massSolar=frame.id==='planet'?(renderer.state.planetMass||1)*3.00349e-6:['space','waypoint','bridge'].includes(frame.type)?0:renderer.objectMassSolar?.(original)??(frame.type==='star'?1:0);
-  return {id:frame.id,parentId:node?.parentId,name:node?.label||original.name||frame.type,type:node?.type||frame.type,
+  return {id:frame.id,catalogId:original.catalogId,...(original.catalogId==='earth-elevator-network'?{networkPhase:frame.bodyParams?.[1]||0}:{}),parentId:node?.parentId,name:node?.label||original.name||frame.type,type:node?.type||frame.type,
    horizonMeters:compact?(frame.horizonRadius||frame.radius)*REFERENCE_RG_METERS:null,category:objectCategory(original),
    radiusMeters:original.radiusMeters?original.radiusMeters*(original.scale||1):(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS,
    distanceMeters:Math.hypot(...relative)*REFERENCE_RG_METERS,x:dot(relative,xAxis)*REFERENCE_RG_METERS,y:dot(relative,yAxis)*REFERENCE_RG_METERS,
-   vx:velocity?dot(velocity,xAxis)*REFERENCE_RG_METERS:null,vy:velocity?dot(velocity,yAxis)*REFERENCE_RG_METERS:null,
+   vx:velocity?dot(velocity,xAxis)*velocityUnits:null,vy:velocity?dot(velocity,yAxis)*velocityUnits:null,
    color:original.color||(['star','blackhole','hole'].includes(frame.type)?'#ffe1a0':'#8ebfe6'),massSolar,dataNote:original.dataNote||'',eccentricity:original.eccentricity||0,innerRadiusRatio:original.innerRadiusRatio||.55};
  };
- const allEntries=nodes.filter(n=>n.parentId===id).map(n=>getFrame(n.id)).filter(Boolean).map(body),entries=allEntries.filter(b=>mapCategoryVisible(b,filters)),children=entries.filter(b=>!['disk','jets','belt','ring','dyson','warp','bridge'].includes(b.type)),attachments=entries.filter(b=>['ring','belt','disk','dyson'].includes(b.type)),host=body(center);
- return{centerId:id,parentId:nodeMap.get(id)?.parentId||null,host,children,attachments,entries,allEntries,filters,hiddenCount:allEntries.length-entries.length,maximum:Math.max(host.radiusMeters*5,...children.map(b=>Math.max(b.distanceMeters*1.1,b.radiusMeters*3)),...attachments.map(b=>b.radiusMeters*1.1)),nodes};
+ const allEntries=nodes.filter(n=>n.parentId===id).map(n=>getFrame(n.id)).filter(Boolean).map(body),entries=allEntries.filter(b=>mapCategoryVisible(b,filters)),children=entries.filter(b=>b.catalogId==='swarm-aster'||!['disk','jets','belt','ring','dyson','warp','bridge'].includes(b.type)),attachments=entries.filter(b=>b.catalogId!=='swarm-aster'&&['ring','belt','disk','dyson'].includes(b.type)),host=body(center);
+ return{centerId:id,xAxis,yAxis,parentId:nodeMap.get(id)?.parentId||null,host,children,attachments,entries,allEntries,filters,hiddenCount:allEntries.length-entries.length,maximum:Math.max(host.radiusMeters*5,...children.map(b=>Math.max(b.distanceMeters*1.1,b.radiusMeters*3)),...attachments.map(b=>b.radiusMeters*1.1)),nodes};
 }
 export function renderOrbitMap(model,{logDistance=true,logSize=true,amplification=6,grid=true,annotations=true,metrics=annotations,selectedId=null,viewportWidth=900}={}){
  const {host,children,maximum}=model,width=clamp(viewportWidth,300,1000),height=width<600?Math.max(360,width):600,cx=width/2,cy=height/2,extent=Math.min(width*.32,height*.4),reference=Math.max(host.radiusMeters,maximum*1e-6,1),project=r=>extent*mapRadius(r,maximum,reference,logDistance);
@@ -64,10 +72,53 @@ export function renderOrbitMap(model,{logDistance=true,logSize=true,amplificatio
  const attachmentLabels=[];
  for(const ring of model.attachments){
   const outer=project(ring.radiusMeters),inner=project(ring.radiusMeters*ring.innerRadiusRatio),selected=ring.id===selectedId;
-  if(ring.type==='dyson'){
-   const label=ring.name.length>26?ring.name.slice(0,25)+'…':ring.name,labelY=Math.max(43,cy-outer-9),labelWidth=Math.min(180,label.length*6.2+8);
-   parts.push(`<g class="map-body map-shell" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · shell radius ${(ring.radiusMeters/149597870700).toPrecision(3)} AU</title><circle cx="${cx}" cy="${cy}" r="${f(outer)}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke"/><circle cx="${cx}" cy="${cy}" r="${f(outer)}" fill="none" stroke="${selected?'#d9f0ff':escape(ring.color)}" stroke-opacity="${selected?'1':'.7'}" stroke-width="${selected?'2.2':'1.4'}"/>${annotations?`<text x="${cx}" y="${f(labelY)}" text-anchor="middle" fill="#bfd4df" font-family="system-ui,sans-serif" font-size="11">${escape(label)}</text>`:''}</g>`);
-   if(annotations)attachmentLabels.push({x:cx-labelWidth/2,y:labelY-12,w:labelWidth,h:17});
+  const projected=v=>{
+   const x=dot(v,model.xAxis),y=dot(v,model.yAxis),len=Math.hypot(x,y),d=len>0?project(ring.radiusMeters*len)/len:0;
+   return [cx+x*d,cy-y*d];
+  };
+  const stroke=points=>points.map(([x,y],i)=>(i?'L':'M')+f(x)+' '+f(y)).join('');
+  if(ring.catalogId===K2_GRID){
+   // Use the same physical heliocentric distances and optional log projection
+   // as the planet markers. The network has links, not an annulus of debris.
+   const ports=children.filter(b=>b.type==='planet').map(b=>{
+    const a=Math.atan2(b.y,b.x),r=project(b.distanceMeters);return [cx+Math.cos(a)*r,cy-Math.sin(a)*r];
+   }),power=ports.map(end=>stroke([[cx,cy],end])).join(''),freight=ports.slice(2).map((end,i)=>stroke([ports[i],end])).join('');
+   parts.push(`<g class="map-body map-solar-network" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>Solar relay network · beamed power and freight routes</title><path d="${power}" fill="none" stroke="#bd904d" stroke-opacity=".75"/><path d="${freight}" fill="none" stroke="#559ca9" stroke-opacity=".85"/></g>`);
+  }else if(ring.catalogId==='earth-elevator-network'){
+   const phase=ring.networkPhase,loc=(n,r)=>projected(n.map(v=>v*r/NETWORK_RADIUS));
+   const viaduct=CIVIL_RINGS.map((_,index)=>stroke(Array.from({length:81},(_,j)=>{
+    const [x,y,z]=civilRingPoint(index,j*Math.PI/40),c=Math.cos(phase),s=Math.sin(phase);
+    return loc([x*c-z*s,y,z*c+x*s],EARTH_RADIUS);
+   }))+'Z').join(' ');
+   const paths=ELEVATOR_PORTS.map((_,i)=>{const {n}=networkPort(i,phase),a=loc(n,EARTH_RADIUS),g=loc(n,GEO_RADIUS),b=loc(n,8.70*EARTH_RADIUS);
+    return `<path d="${stroke([a,b])}" fill="none" stroke="#b89a66" stroke-width="1.7"/><circle cx="${f(g[0])}" cy="${f(g[1])}" r="3.5" fill="#dce7dc"/><circle cx="${f(b[0])}" cy="${f(b[1])}" r="2.4" fill="#b39d86"/>`;
+   }).join('');
+   const relays=[0,1,2].map(i=>{const t=transferOrbit(i,phase),[x,y]=loc(t.n,t.r*EARTH_RADIUS);return `<rect x="${f(x-2.5)}" y="${f(y-2.5)}" width="5" height="5" fill="#6cb4c3"/>`;}).join('');
+   parts.push(`<g class="map-body map-elevators" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>Inclined and equatorial rail rings, six geostationary elevator ports and three free-flying stations</title><path d="${viaduct}" fill="none" stroke="#7eaaa7" stroke-width="1.6"/>${paths}${relays}</g>`);
+  }else if(ring.catalogId==='dyson-collectors'||ring.catalogId===TOROID_ID){
+   const lanes=ring.catalogId===TOROID_ID?TOROID_LANES:SWARM_LANES;
+   const paths=lanes.map(l=>stroke(Array.from({length:57},(_,i)=>{
+    const angle=i*Math.PI/28;return projected(l.u.map((val,j)=>l.radius*(val*Math.cos(angle)+l.v[j]*Math.sin(angle))));
+   }))+'Z').join('');
+   parts.push(`<g class="map-body map-fleet" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · ${ring.catalogId===TOROID_ID?'ten':'six'} independent orbital lanes</title><path d="${paths}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="8"/><path d="${paths}" fill="none" stroke="${escape(ring.color)}" stroke-width="${selected?'1.6':'1'}" stroke-opacity="${selected?'1':'.63'}"/></g>`);
+  }else if(ring.catalogId==='shkadov-mirror'){
+   // Draw sections of the actual spherical cap. The radial map scale can
+   // be logarithmic, so project each sample instead of rescaling an ellipse.
+   const a=SHKADOV_AXIS,p=[-a[2],0,a[0]].map(v=>v/Math.hypot(a[0],a[2])),q=[a[1]*p[2],a[2]*p[0]-a[0]*p[2],-a[1]*p[0]];
+   const point=(theta,phi)=>{
+    const v=a.map((n,i)=>n*Math.cos(theta)+Math.sin(theta)*(p[i]*Math.cos(phi)+q[i]*Math.sin(phi)));
+    return projected(v);
+   };
+   const hoop=(t)=>stroke(Array.from({length:49},(_,i)=>point(t,Math.PI*i/24)))+'Z',rim=hoop(SHKADOV_HALF_ANGLE);
+   let ribs=hoop(SHKADOV_HALF_ANGLE*.5);
+   for(let j=0;j<8;j++)ribs+=stroke(Array.from({length:17},(_,i)=>point(SHKADOV_HALF_ANGLE*i/16,Math.PI*j/4)));
+   const [labelX,labelY]=point(0,0);
+   parts.push(`<g class="map-body map-mirror" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · mirror radius ${(ring.radiusMeters/149597870700).toPrecision(3)} AU</title><path d="${rim}" fill="${escape(ring.color)}" fill-opacity=".12" stroke="${escape(ring.color)}" stroke-width="${selected?'2':'1.3'}"/><path d="${ribs}" stroke="${escape(ring.color)}" fill="none" stroke-width=".8"/>${annotations?`<text x="${f(labelX)}" y="${f(labelY-8)}" text-anchor="middle" fill="#e2d4ba" font-family="system-ui,sans-serif" font-size="11">${escape(ring.name)}</text>`:''}</g>`);
+   if(annotations)attachmentLabels.push({x:labelX-50,y:labelY-20,w:100,h:16});
+  }else if(ring.type==='dyson'||brainTier(ring.catalogId)){
+   const tier=brainTier(ring.catalogId),show=annotations&&(!tier||selected),label=ring.name.length>26?ring.name.slice(0,25)+'…':ring.name,labelY=Math.max(43,cy-outer-9),labelWidth=Math.min(180,label.length*6.2+8);
+   parts.push(`<g class="map-body map-shell" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · ${tier?'tier radius':ring.catalogId==='ringworld'?'equatorial deck radius':'shell radius'} ${(ring.radiusMeters/149597870700).toPrecision(3)} AU</title><circle cx="${cx}" cy="${cy}" r="${f(outer)}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke"/><circle cx="${cx}" cy="${cy}" r="${f(outer)}" fill="none" stroke="${selected?'#d9f0ff':escape(ring.color)}" stroke-opacity="${selected?'1':'.7'}" stroke-width="${selected?'2.2':'1.4'}"/>${show?`<text x="${cx}" y="${f(labelY)}" text-anchor="middle" fill="#bfd4df" font-family="system-ui,sans-serif" font-size="11">${escape(label)}</text>`:''}</g>`);
+   if(show)attachmentLabels.push({x:cx-labelWidth/2,y:labelY-12,w:labelWidth,h:17});
   }else parts.push(`<g class="map-body" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)}</title><circle cx="${cx}" cy="${cy}" r="${f((outer+inner)/2)}" fill="none" stroke="${escape(ring.color)}" stroke-opacity="${selected?'.45':'.18'}" stroke-width="${f(Math.max(7,outer-inner))}"/></g>`);
  }
  const size=b=>6;
@@ -76,8 +127,8 @@ export function renderOrbitMap(model,{logDistance=true,logSize=true,amplificatio
  if(annotations&&host.type!=='space')parts.push(`<text x="${cx}" y="${f(cy+centerSize+23)}" text-anchor="middle" class="map-host-label" fill="#e5f2fb" font-family="system-ui,sans-serif" font-size="14" font-weight="600">${escape(host.name)}</text>`);
  const candidates=[];
  for(const b of [...children].sort((a,b)=>b.distanceMeters-a.distanceMeters)){
-  const r=project(b.distanceMeters),a=Math.atan2(b.y,b.x),x=cx+Math.cos(a)*r,y=cy-Math.sin(a)*r,s=size(b)*(children.length>60?.65:1),selected=b.id===selectedId;
-  if(b.type!=='waypoint')parts.push(`<circle cx="${cx}" cy="${cy}" r="${f(r)}" fill="none" stroke="${selected?'#9fd1f5':'#64819c'}" stroke-opacity="${selected?'.7':priority(b)>=10?'.24':'.045'}" stroke-width="${selected?'1.4':'.8'}" ${b.eccentricity>.03?'stroke-dasharray="3 5"':''}/>`);
+  const tracked=b.catalogId==='swarm-aster',r=project(tracked?Math.hypot(b.x,b.y):b.distanceMeters),a=Math.atan2(b.y,b.x),x=cx+Math.cos(a)*r,y=cy-Math.sin(a)*r,s=size(b)*(children.length>60?.65:1),selected=b.id===selectedId;
+  if(!tracked&&b.type!=='waypoint')parts.push(`<circle cx="${cx}" cy="${cy}" r="${f(r)}" fill="none" stroke="${selected?'#9fd1f5':'#64819c'}" stroke-opacity="${selected?'.7':priority(b)>=10?'.24':'.045'}" stroke-width="${selected?'1.4':'.8'}" ${b.eccentricity>.03?'stroke-dasharray="3 5"':''}/>`);
   if(metrics&&b.type!=='waypoint'&&(priority(b)>=10||selected)){const v=mapProjectedVelocity(b.x,b.y,b.vx??-b.y,b.vy??b.x,maximum,reference,extent,logDistance),length=Math.hypot(...v),scale=(width<500?16:26)/Math.max(length,1e-25);if(length>1e-25)parts.push(`<path d="M${f(x)} ${f(y)}l${f(v[0]*scale)} ${f(v[1]*scale)}" fill="none" stroke="#edcc88" stroke-opacity=".78" stroke-width="1.2" marker-end="url(#map-velocity-tip)"/>`);}
   parts.push(`<g class="map-body" data-map-object="${escape(b.id)}" role="button" tabindex="0" aria-label="Select ${escape(b.name)}"><title>${escape(b.name)} · ${(b.distanceMeters/149597870700).toPrecision(4)} AU from ${escape(host.name)}</title><circle cx="${f(x)}" cy="${f(y)}" r="${f(Math.max(12,s+4))}" fill="#000000" fill-opacity="0"/>${b.type==='waypoint'?`<path d="M${f(x)} ${f(y-s)}l${f(s)} ${f(s)} -${f(s)} ${f(s)} -${f(s)} -${f(s)}z" fill="#101d2c" stroke="#a9dfff" stroke-width="${selected?'2.4':'1.5'}"/>`:`<circle cx="${f(x)}" cy="${f(y)}" r="${f(s)}" fill="${escape(b.color)}" stroke="${selected?'#eef7ff':'#d5e8f6'}" stroke-width="${selected?'2.4':'.7'}"/>`}</g>`);
   candidates.push({b,x,y,s,selected});bodyBoxes.push({id:b.id,x:x-s-3,y:y-s-3,w:2*s+6,h:2*s+6});

@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import {fixture} from './render-fixture.mjs';
+import {BlackHoleRenderer} from '../dist/renderer.js';
+import {mapModel,renderOrbitMap} from '../dist/orbit-map.js';
+import {captureAnnotationFrame,openSurfacePick} from '../dist/annotations.js';
+import {SHKADOV_AXIS} from '../dist/shkadov.js';
+
+const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false});
+const chart=(id,selected)=>{r.loadScene(id);r.fillObjects();r.updateCameraFrame();const star=r.objects.find(o=>o.type==='star'),model=mapModel(r,star.id);return [model,renderOrbitMap(model,{viewportWidth:460,selectedId:r.objects.find(b=>b.catalogId===selected)?.id}).svg];};
+const [swarm,fleetSvg]=chart('dyson-swarm');
+const aster=swarm.children.find(b=>b.catalogId==='swarm-aster');
+assert(aster&&aster.distanceMeters>0,'Aster is a tracked formation on its actual orbit.');
+assert.equal(swarm.attachments.length,1);assert.match(fleetSvg,/six independent orbital lanes/);
+const [brain,tierSvg]=chart('matrioshka-brain','brain-memory');
+assert.equal(brain.attachments.length,4);
+assert.equal((tierSvg.match(/tier radius/g)||[]).length,4);
+assert.match(tierSvg,/Memory and interconnect<\/text>/);
+const [mirror,mirrorSvg]=chart('shkadov-thruster','shkadov-mirror');
+assert.match(mirrorSvg,/map-mirror/);assert(!mirrorSvg.includes('shell radius')&&!mirrorSvg.includes('NaN'));
+const payload=structuredClone(captureAnnotationFrame(r));
+const body={...payload.openSurfaces.find(b=>b.id===mirror.attachments[0].id),position:[0,0,0],radius:1};
+const aim=direction=>({observer:[0,0,0],forward:direction,right:[0,0,1],up:[0,1,0]});
+assert(Math.abs(openSurfacePick(body,aim(SHKADOV_AXIS),0,0)-1)<1e-12);
+assert.equal(openSurfacePick(body,aim(SHKADOV_AXIS.map(n=>-n)),0,0),null,'Empty sky inside the projected bounding disc is not a mirror click.');
+r.dispose();
+console.log('PASS: formation map tracks, distinct computing tiers, and actual mirror coverage and picking.');

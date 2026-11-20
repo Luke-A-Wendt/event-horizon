@@ -10,7 +10,7 @@ try{
  render.setFlightSequence(craft.id,[{targetId:p,radiusMeters:a,extraLaps:1},{targetId:p,radiusMeters:b,extraLaps:2}],{loop:true,active:true});
  let time=0,departures=0,arrivals=0,wasFlying=false,samples=0;
  render.now=()=>time*1000;
- for(let i=0;i<1200&&arrivals<2;i++){
+ for(let i=0;i<3200&&arrivals<2;i++){
   const q=render.flightSequences[craft.id];
   if(q.orbitWait){
    assert(q.orbitWait.radiusChange);
@@ -21,7 +21,7 @@ try{
   time+=.05;render.advanceChartStages(.05);render.fillHoles();render.fillObjects();render.updateCameraFrame();
   const flying=!!render.transfer;
   if(flying){
-   assert(render.transfer.radiusTransfer);assert.equal(render.transfer.wallSeconds,10);
+   assert(render.transfer.radiusTransfer);assert(render.transfer.wallSeconds>=10,'The radius change includes the time needed to turn between burns');
    assert(render.parkedCamera&&!render.parkedCamera.released,'Orbital guide remains in control');
    const orbit=parkedOrbitGeometry(render,craft.id),desired=parkedCameraFraming(render,orbit).eye;
    assert(dot(render.cameraFrame.forward,desired)<-.9999,'Sightline stays on the same orbital limb during both burns');
@@ -31,5 +31,5 @@ try{
   wasFlying=flying;
  }
  assert.equal(departures,2);assert.equal(arrivals,2);assert(samples>=395);
- console.log('PASS: exact full laps, ten-second bidirectional radius burns and continuous level limb camera');
+ console.log('PASS: exact full laps, paced bidirectional radius burns and continuous level limb camera');
 }finally{render.dispose();}

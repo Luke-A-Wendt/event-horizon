@@ -841,32 +841,12 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .scene.has-flight-controls.has-playlist{--flight-strip:100px}
 .scene.has-playlist .pilot-main{grid-column:1/-1;width:min(100%,880px);gap:16px}
 .pilot-auto-controls{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;align-content:center;position:relative}
-.route-editor-head{display:flex;align-items:center;gap:8px;min-width:0}
-.route-editor-head strong{color:#d3e9f7;font:600 12px/1.1 var(--sans,system-ui)}
-.route-editor-head select,.pilot-auto-controls .route-editor-head button{height:34px;min-height:34px;min-width:0;max-width:100%;padding:3px 8px;border:1px solid #3a5469;border-radius:6px;background:#0d1e2e;color:#d4e7f3;font-size:12px}
-.route-editor-head select{margin-left:auto;max-width:min(54%,260px)}
-.pilot-auto-controls .route-editor-head button{gap:4px;white-space:nowrap}
-.pilot-auto-controls .route-editor-head button[aria-pressed="true"]{background:#284757;border-color:#83c9e9;color:#ddf5ff}
-#flightPlanStops{display:flex;align-items:center;gap:6px;list-style:none;padding:1px 0 3px;margin:0;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin;scrollbar-color:#415c70 transparent;min-width:0}
-#flightPlanStops li{box-sizing:border-box;display:flex;align-items:center;flex:0 0 auto;gap:6px;border:1px solid #304759;background:#0c1c2a;border-radius:7px;padding:2px 4px 2px 6px;min-height:38px}
-#flightPlanStops li[aria-current="step"]{border-color:#86bddb;background:#112b3b}
-.route-number{color:#91aec0;font:10px var(--mono);border-right:1px solid #3c5364;padding-right:5px}
-.route-stop-name{min-width:0}.route-stop-name strong,.route-stop-name small{display:block;max-width:148px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.route-stop-name strong{font-size:12px;color:#e2f2fc}.route-stop-name small{font-size:9px;color:#9bb5c6}
-.route-edit-actions{display:flex;gap:1px}.pilot-auto-controls .route-edit-actions button{border:0;background:transparent;width:31px;min-width:31px;height:34px;min-height:34px;padding:1px;color:#c6dfef;font-size:16px}
-.pilot-auto-controls .route-edit-actions button:disabled{opacity:.28}
-#flightPlanStops label{font-size:9px;color:#a9c4d5}#flightPlanStops input{display:block;width:56px;min-height:22px;box-sizing:border-box;background:#071725;color:#d2e5f3;border:1px solid #385266;border-radius:3px;font-size:11px;padding:1px 2px}
-#flightPlanStops .route-empty{background:transparent;border-style:dashed;color:#a0bbcd;font-size:11px;padding-inline:10px;white-space:normal}
-.pilot-auto-controls #flightPlanStatus{position:absolute;bottom:100%;left:0;max-width:100%;background:#38202b;color:#ffdfdf;border:1px solid #855866;border-radius:6px;padding:5px 8px;font-size:11px}
 @media(max-width:600px){
  .scene.has-playlist .pilot-main{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:40px auto;gap:4px}
  .scene.has-playlist .pilot-mode-options{grid-area:1/1;justify-self:start;align-self:center;z-index:1}
  .scene.has-playlist .pilot-auto-controls{grid-area:1/1/3/2}
- .scene.has-playlist .route-editor-head{padding-left:101px;min-height:40px;gap:5px}
  .pilot-console .pilot-mode-options button{min-width:43px;padding:3px;height:36px;min-height:36px}
- .route-editor-head strong{font-size:11px}.route-editor-head select{font-size:11px;max-width:46%;padding-inline:3px}
- .pilot-auto-controls .route-editor-head button{font-size:11px;padding:3px 5px}
  .scene.has-flight-controls.has-playlist{--flight-strip:108px}
- .pilot-auto-controls .route-edit-actions button{width:36px;min-width:36px;height:38px;min-height:38px}
  .scene.has-flight-controls:not(.has-playlist) .pilot-main{gap:4px}
  .scene.has-flight-controls:not(.has-playlist) .pilot-mode-options{gap:0}
  .scene.has-flight-controls:not(.has-playlist) .pilot-mode-options button{min-width:36px;height:40px;min-height:40px;padding:2px 3px}
@@ -881,26 +861,12 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .scene.has-playlist-launcher .pilot-mode-options{flex-direction:row}
 .scene.has-playlist-launcher .pilot-mode-options button,#pilotPlaylist{min-height:40px}
 #pilotPlaylistCount{border-radius:1em;background:#253e50;padding:2px 7px;font-variant-numeric:tabular-nums}
-#vehiclePlaylistDialog{width:min(540px,94vw);max-height:82dvh;overflow:auto}
-#vehiclePlaylistDialog #flightPlanStops{display:grid;overflow:visible;gap:8px}
-#vehiclePlaylistDialog #flightPlanStops li{flex-wrap:wrap;min-height:44px}
-#vehiclePlaylistDialog .route-stop-name{flex:1;min-width:75px}
-#vehiclePlaylistDialog #flightPlanStatus{position:static}
-
-#vehiclePlaylistDialog [data-stop-index]{cursor:grab;user-select:none}
-#vehiclePlaylistDialog .route-grip,#vehiclePlaylistDialog .route-stop-name,#vehiclePlaylistDialog .route-number{touch-action:none}
-#vehiclePlaylistDialog .route-grip{border:0;background:transparent;color:#a7c4d5;cursor:grab;font-size:20px;min-width:28px;padding:3px}
-#vehiclePlaylistDialog li.dragging{opacity:.6;cursor:grabbing}
-#vehiclePlaylistDialog li.insert-before{box-shadow:0 -3px #a7e4ff}
-#vehiclePlaylistDialog li.insert-after{box-shadow:0 3px #a7e4ff}
-
 .scene.has-playlist-launcher #pilotAutoControls{display:flex;align-items:center;min-width:0;gap:6px}
 #pilotPlaylist{flex:none}
 .pilot-destination{display:grid;align-content:center;min-width:0;width:clamp(76px,23vw,170px);height:40px;box-sizing:border-box;padding:2px 8px;border:1px solid #304759;border-radius:6px;background:#091723;color:#dcf0ff;text-align:left;line-height:1.15}
 .pilot-destination small{font-size:9px;letter-spacing:.05em;color:#9db7cb}
 .pilot-destination output{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-#flightPlanStops input[data-plan-radius]{width:clamp(6em,18vw,10em);max-width:100%}
 .scene.has-flight-controls .pilot-main #pilotFlightReadout{position:static;width:auto;max-width:100%;max-height:none;margin:0;text-shadow:none;text-align:left}
 #pilotFlightReadout .pilot-flight-body,#pilotFlightReadout .pilot-flight-metrics{display:flex;align-items:center;gap:12px}
 #pilotFlightReadout .pilot-flight-route{padding:0}
@@ -948,7 +914,6 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .tour-estimate[hidden],.viewport-panel-open .tour-estimate{display:none}
 @media(max-width:420px),(max-height:440px){.tour-estimate{left:max(6px,env(safe-area-inset-left));font-size:10px;padding:4px 6px;max-width:calc(49% - 8px)}.tour-estimate dl{gap:1px 5px}}
 
-#vehiclePlaylistDialog .route-lap-help{margin:4px 0 0;color:#a9c4d5;font-size:11px;line-height:1.45}
 #vehiclePlaylistDialog input[data-plan-laps]{width:3.5em;min-height:28px;font-variant-numeric:tabular-nums}
 @media(pointer:coarse){#vehiclePlaylistDialog input[data-plan-laps]{font-size:16px;min-height:32px}}
 
@@ -963,7 +928,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .motion-stack .shuttle-escape-note{padding:0;background:none;font-size:1em;font-weight:800;color:#ff8383;overflow-wrap:anywhere}
 @media(max-height:460px){.motion-stack{gap:2px}.motion-hud{gap:1px;padding:3px 6px}.motion-stack .tour-estimate{padding:2px 6px}}
 
-.motion-hud .motion-log,.motion-hud .motion-log output{color:#ff8383;font-size:1em;font-weight:800}.motion-hud .motion-log[hidden]{display:none}
+.motion-hud .motion-log,.motion-hud .motion-log output{color:#e1edf6;font-size:1em;font-weight:500}.motion-hud .motion-log.metric-alert,.motion-hud .motion-log.metric-alert output{color:#ff8383;font-weight:800}.motion-hud .motion-log[hidden]{display:none}
 
 .motion-stack .motion-hud{font-size:clamp(16px,1.35vw,21px);line-height:1.3;padding:7px 10px;gap:4px}
 
@@ -984,8 +949,6 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 .motion-stack .trip-caption{color:#c7deee;font-size:10px;font-weight:650;letter-spacing:.1em;margin-bottom:4px}
 .motion-stack .tour-estimate{border-bottom:1px solid #879dad55;padding-bottom:5px}
 
-.scene-heading #crewedApproach{pointer-events:auto;margin:5px 0 0;padding:4px 0;background:none;border:0;color:#acc9db;font:inherit;font-size:.8125rem;text-align:left;text-decoration:underline;text-underline-offset:.2em;cursor:pointer}
-.scene-heading #crewedApproach:is(:hover,:focus-visible){color:#e7f5ff}
 
 /* Read-only instruments use the same two corners as a powered craft. */
 .scene.has-station-instruments .gesture-hint{display:none}
@@ -1108,34 +1071,113 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
  #orbitMapDialog .map-object-actions{grid-column:2;grid-row:6/8;margin:0}
 }
 
-/* Flight playlist: an ordered route schematic separate from the hierarchy map. */
-#vehiclePlaylistDialog .flight-view-tabs{display:flex;align-items:center;gap:4px;margin:0 0 12px;padding-bottom:5px;border-bottom:1px solid #2b4353}
-#vehiclePlaylistDialog .flight-view-tabs button{height:34px;min-width:76px;padding:4px 12px;border-radius:5px;border:1px solid transparent;background:transparent;color:#a8c5d7;font-size:13px}
-#vehiclePlaylistDialog .flight-view-tabs button[aria-selected=true]{background:#153346;color:#e3f4ff;border-color:#47728a}
-#vehiclePlaylistDialog [role=tabpanel][hidden],#vehiclePlaylistDialog .flight-route-detail[hidden]{display:none!important}
-#vehiclePlaylistDialog #flightPlanStops{margin-block:8px}
-.flight-route-summary{font-weight:650;color:#daebf5;font-size:14px;margin:0 0 3px}
-.flight-route-note{margin:0 0 12px;color:#a0bbc9;font-size:12px;line-height:1.45}
-.flight-route-diagram{list-style:none;padding:0;margin:0}
-.flight-route-station{position:relative;margin:0;padding:0;list-style:none}
-#vehiclePlaylistDialog .flight-route-node,#vehiclePlaylistDialog .flight-route-leg{height:auto;min-height:34px;min-width:0;text-align:left;cursor:pointer;white-space:normal}
-#vehiclePlaylistDialog .flight-route-node{display:flex;justify-content:flex-start;gap:9px;width:100%;background:#0d202f;border:1px solid #334e60;border-radius:7px;font-size:14px;padding:5px 10px 5px 5px;color:#ddecf5;font-weight:600}
-.flight-route-node small{margin-left:auto;color:#abc1cf;font-size:11px;font-weight:400}
-.flight-route-index{display:grid;place-content:center;width:23px;height:23px;flex:0 0 auto;border:1px solid #547b91;border-radius:50%;background:#172f3e;font:600 11px/1 system-ui,sans-serif}
-#vehiclePlaylistDialog .flight-route-node[aria-current=step]{border-color:#88cfbb}
-.flight-route-node[aria-current=step] .flight-route-index{background:#acf0d9;border-color:#acf0d9;color:#153027}
-.flight-route-link{margin:0 0 0 17px;border-left:2px solid #456e7b;padding:2px 0 2px 11px}
-#vehiclePlaylistDialog .flight-route-leg{display:inline-flex;gap:8px;align-items:center;background:transparent;border:0;border-radius:4px;color:#aedacc;font-size:12px;line-height:1.2;padding:3px 6px}
-#vehiclePlaylistDialog .flight-route-leg:after{content:'+';font:600 13px/1 system-ui;color:#9dd2c8}
-#vehiclePlaylistDialog .flight-route-leg[aria-expanded=true]:after{content:'−'}
-#vehiclePlaylistDialog .flight-route-leg:hover,#vehiclePlaylistDialog .flight-route-leg:focus-visible{background:#17312f}
-#vehiclePlaylistDialog .flight-route-node[aria-expanded=true]{background:#183245}
-.flight-route-detail{background:#101e28;border:1px solid #2e4553;border-radius:6px;margin:4px 0 5px 16px;padding:9px 11px;color:#dcebf4}
-.flight-route-link .flight-route-detail{margin:2px 0 4px}
-.flight-route-detail h4{margin:0 0 5px;font-size:13px;color:#dcebf4}
-.flight-route-detail dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px 12px;margin:0}
-.flight-route-detail dt{font-size:11px;color:#a9c0ce}.flight-route-detail dd{font-size:14px;margin:2px 0 0;font-variant-numeric:tabular-nums}
-.flight-route-detail p{margin:5px 0 0;font-size:12px;color:#afc4cf;line-height:1.4}
+/* The editable stops are the nodes of the itinerary; the times between them
+   are its edges. Only the grip captures touch for dragging. */
+#vehiclePlaylistDialog{
+ --route-grip:28px;--route-node:26px;--route-gap:7px;--route-pad:8px;
+ --route-axis:calc(var(--route-pad) + var(--route-grip) + var(--route-gap) + var(--route-node)/2 + 1px);
+ width:min(720px,calc(100vw - 24px));max-height:calc(100dvh - 32px);overflow:auto;overscroll-behavior:contain;
+}
+#vehiclePlaylistDialog .dialog-header{padding:15px 20px}
+#vehiclePlaylistDialog .dialog-header h2{margin:0;font-size:22px}
+#vehiclePlaylistDialog .dialog-content{display:block;padding:14px 18px 18px}
+#vehiclePlaylistDialog .route-editor-head{display:grid;align-items:center;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;margin-bottom:10px}
+#vehiclePlaylistDialog .route-editor-head strong{font-size:14px;color:#d6e9f4}
+#vehiclePlaylistDialog .route-editor-head select,#vehiclePlaylistDialog #flightPlanLoop{
+ height:36px;min-height:36px;min-width:0;border:1px solid #3c566b;border-radius:6px;padding:4px 10px;background:#0d1e2e;color:#dcecf6;font-size:14px;
+}
+#vehiclePlaylistDialog .route-editor-head select{width:100%}
+#vehiclePlaylistDialog #flightPlanLoop{white-space:nowrap}
+#vehiclePlaylistDialog #flightPlanLoop[aria-pressed=true]{background:#1b3a4a;border-color:#73aecb;color:#e5f6ff}
+#flightPlanStops{list-style:none;margin:0;padding:0;min-width:0}
+#flightPlanStops>li{display:block;min-width:0;margin:0}
+#flightPlanStops .route-stop-card{
+ display:grid;grid-template-columns:var(--route-grip) var(--route-node) minmax(0,1fr) auto 32px;
+ grid-template-areas:"grip number name settings actions";align-items:center;gap:var(--route-gap);
+ padding:5px var(--route-pad);border:1px solid #334b5b;border-radius:8px;background:#0e1d2a;
+}
+#flightPlanStops [aria-current=step]>.route-stop-card{border-color:#77b3ca;background:#112b3b}
+#flightPlanStops .route-number{
+ grid-area:number;display:grid;place-items:center;width:var(--route-node);height:var(--route-node);border-radius:50%;
+ border:1px solid #54758b;background:#152a39;color:#c8dce9;font:600 12px/1 var(--font);font-variant-numeric:tabular-nums;
+}
+#flightPlanStops [aria-current=step] .route-number{background:#afe0f2;border-color:#afe0f2;color:#0f2938}
+#flightPlanStops .route-grip,#flightPlanStops .route-edit-actions button{
+ width:100%;height:36px;min-height:36px;min-width:0;border:0;border-radius:4px;padding:0;background:transparent;color:#a4bdcd;font-size:18px;
+}
+#flightPlanStops .route-grip{grid-area:grip;touch-action:none;cursor:grab;user-select:none}
+#flightPlanStops .dragging .route-grip{cursor:grabbing}
+#flightPlanStops .dragging{opacity:.65}
+#flightPlanStops .insert-before{box-shadow:0 -3px #a7e4ff}
+#flightPlanStops .insert-after{box-shadow:0 3px #a7e4ff}
+#flightPlanStops .route-edit-actions{grid-area:actions}
+#flightPlanStops .route-edit-actions button:hover{color:#ffd4d0;background:#38252a}
+#flightPlanStops .route-stop-name{
+ grid-area:name;position:relative;display:block;text-align:left;height:auto;min-width:0;min-height:36px;padding:4px 15px 4px 4px;
+ border:0;border-radius:4px;background:transparent;line-height:1.25;white-space:normal;overflow-wrap:anywhere;
+}
+#flightPlanStops .route-stop-name strong,#flightPlanStops .route-stop-name small{display:block}
+#flightPlanStops .route-stop-name strong{font-size:15px;color:#e7f3f9}
+#flightPlanStops .route-stop-name small{margin-top:2px;font-size:12px;color:#a1bbce}
+#flightPlanStops .route-stop-name::after,#vehiclePlaylistDialog .flight-route-leg::after{
+ content:"";width:6px;height:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg);color:#91b4c7;
+}
+#flightPlanStops .route-stop-name::after{position:absolute;right:3px;top:calc(50% - 5px)}
+#flightPlanStops .route-stop-name[aria-expanded=true]::after,#vehiclePlaylistDialog .flight-route-leg[aria-expanded=true]::after{transform:rotate(225deg)}
+#flightPlanStops .route-stop-name:is(:hover,[aria-expanded=true]),#flightPlanStops .route-grip:hover{background:#1b3344}
+#flightPlanStops .route-stop-fields{grid-area:settings;display:flex;flex-wrap:wrap;align-items:end;gap:4px 6px;min-width:0}
+#flightPlanStops .route-stop-fields:empty{display:none}
+#flightPlanStops label{display:block;min-width:0;max-width:100%;color:#aac2d2;font-size:12px;line-height:1.2}
+#flightPlanStops input{
+ display:block;width:4.2em;max-width:100%;min-height:28px;margin-top:3px;padding:2px 5px;
+ border:1px solid #39576b;border-radius:4px;background:#091721;color:#e0eef6;font:14px var(--font);font-variant-numeric:tabular-nums;
+}
+#flightPlanStops select[data-plan-port]{display:block;margin-top:3px;min-height:30px;padding:2px 6px;color:#e0eef6;background:#091721;border:1px solid #39576b;border-radius:4px;font:14px var(--font)}
+#flightPlanStops input[data-plan-radius]{width:9.1em}
+#flightPlanStops input[data-plan-heading]{width:5.3em}
+#flightPlanStops button[data-plan-closest]{height:28px;min-height:28px;min-width:0;padding:2px 6px;color:#b9d6e6;border:1px solid #38566b;border-radius:4px;background:#132837;font-size:12px}
+#flightPlanStops .flight-route-link{position:relative;min-width:0;margin-left:var(--route-axis);padding:2px 0 2px 13px;border-left:2px solid #4e767a}
+#flightPlanStops .flight-route-link::before{content:"";position:absolute;top:18px;left:0;width:10px;border-top:1px solid #4e767a}
+#vehiclePlaylistDialog .flight-route-leg{
+ display:inline-flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;gap:3px 8px;height:auto;min-height:31px;min-width:0;max-width:100%;
+ padding:4px 8px;border:0;border-radius:5px;background:transparent;color:#a9cfc5;line-height:1.25;text-align:left;white-space:normal;overflow-wrap:anywhere;font-size:13px;
+}
+#vehiclePlaylistDialog .flight-route-leg strong{color:#b6e3d8;font-variant-numeric:tabular-nums;font-weight:600}
+#vehiclePlaylistDialog .flight-route-leg::after{flex:none;color:#93bdb3}
+#vehiclePlaylistDialog .flight-route-leg:is(:hover,[aria-expanded=true]){background:#15312f}
+#vehiclePlaylistDialog .flight-route-detail{min-width:0;margin:4px 0 5px var(--route-axis);padding:9px 12px;border:1px solid #304b59;border-radius:6px;background:#101f29;color:#d8e9f3;overflow-wrap:anywhere}
+#vehiclePlaylistDialog .flight-route-link .flight-route-detail{margin:2px 0 4px}
+#vehiclePlaylistDialog .flight-route-detail[hidden]{display:none}
+#vehiclePlaylistDialog .flight-route-detail h4{margin:0 0 6px;font-size:14px;color:#d8e9f3}
+#vehiclePlaylistDialog .flight-route-detail dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(122px,100%),1fr));gap:8px 14px;margin:0}
+#vehiclePlaylistDialog .flight-route-detail dt{font-size:12px;color:#a5bece}
+#vehiclePlaylistDialog .flight-route-detail dd{margin:2px 0 0;font-size:14px;font-variant-numeric:tabular-nums}
+#vehiclePlaylistDialog .flight-route-detail p,#vehiclePlaylistDialog .flight-route-note,#vehiclePlaylistDialog .route-lap-help{margin:6px 0 0;color:#9fb8c8;font-size:12px;line-height:1.45}
+#flightPlanStops .route-empty{padding:14px;border:1px dashed #405d71;border-radius:8px;color:#bfd4e0;font-size:14px;line-height:1.45}
+#vehiclePlaylistDialog #flightPlanStatus.guidance-status{color:#bee1ee;background:#112633;border-color:#385c72}
+#vehiclePlaylistDialog #flightPlanStatus{position:static;margin:9px 0 0;padding:5px 8px;color:#ffdfdf;background:#38202b;border:1px solid #855866;border-radius:6px}
+#vehiclePlaylistDialog :is(button,input,select):focus-visible{outline:2px solid #b4e3ff;outline-offset:2px}
+@media(max-width:680px){
+ #flightPlanStops .route-stop-card{grid-template-columns:var(--route-grip) var(--route-node) minmax(0,1fr) 32px;grid-template-areas:"grip number name actions" ". settings settings settings";row-gap:0}
+ #flightPlanStops .route-stop-fields:not(:empty){margin:2px 0 4px}
+}
+@media(max-width:440px){
+ #vehiclePlaylistDialog{--route-gap:4px;--route-grip:28px;--route-node:23px;--route-pad:5px;width:calc(100vw - 12px);max-height:calc(100dvh - 12px)}
+ #vehiclePlaylistDialog .dialog-header{padding:10px 12px}
+ #vehiclePlaylistDialog .dialog-content{padding:10px}
+ #vehiclePlaylistDialog .route-editor-head{gap:5px}
+ #vehiclePlaylistDialog .route-editor-head select,#vehiclePlaylistDialog #flightPlanLoop{padding-inline:5px;font-size:14px}
+ #flightPlanStops .route-stop-fields{gap:5px}
+ #flightPlanStops .route-stop-fields input{font-size:16px;width:3.4em}
+ #flightPlanStops .route-stop-fields input[data-plan-radius]{width:7.3em}
+ #flightPlanStops .route-stop-fields input[data-plan-heading]{width:4.8em}
+ #flightPlanStops .flight-route-link{padding-left:8px}
+ #vehiclePlaylistDialog .flight-route-detail{margin-left:10px}
+}
+@media(pointer:coarse){
+ #flightPlanStops :is(.route-stop-name,.route-grip,.route-edit-actions button),#vehiclePlaylistDialog .flight-route-leg{min-height:42px}
+ #flightPlanStops .route-stop-fields input,#flightPlanStops button[data-plan-closest]{min-height:34px}
+}
 
 /* Object hierarchy: flight options and route inspection have their own views. */
 #orbitMapDialog .map-find{margin:0 0 10px;color:#bad5e7}
@@ -1159,3 +1201,215 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 
 #orbitMapDialog .map-level-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
 #orbitMapDialog #mapInspectSelection{min-width:0;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 9px;font-size:12px}
+/* Scene instruments share one left anchor. Numeric outputs stay in the DOM
+   when the rail is folded, so the simulation and display never diverge. */
+#sceneMetrics{
+ --ink:#eef5ff;--secondary:#c6d7e5;--label:#a9c1d2;--hair:rgba(160,194,216,.21);--alert:#ff9393;
+ position:absolute;z-index:5;left:max(14px,env(safe-area-inset-left));bottom:var(--overlay-bottom,84px);
+ width:min(290px,calc(100% - 78px));max-height:calc(100% - var(--overlay-bottom,84px) - 144px);
+ display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;border:1px solid var(--hair);border-radius:10px;
+ background:linear-gradient(110deg,rgba(9,21,33,.95),rgba(8,17,27,.91));box-shadow:0 3px 18px #0004;
+ color:var(--ink);font:500 13px/1.3 var(--font);font-variant-numeric:tabular-nums;
+}
+#sceneMetrics .instrument-toggle{
+ position:relative;flex:none;display:flex;align-items:center;gap:8px;justify-content:flex-start;width:100%;
+ min-height:30px;padding:5px 12px;border:0;background:none;color:#c7dfed;text-align:left;
+ font:650 10px/1.35 var(--font);letter-spacing:.14em;text-transform:uppercase;cursor:pointer;
+}
+#sceneMetrics .instrument-toggle::before{content:"";width:5px;height:5px;border-radius:50%;background:#9ed4ee}
+#sceneMetrics .instrument-toggle::after{content:"";margin-left:auto;width:6px;height:6px;border:solid #a6bfd0;border-width:0 1.5px 1.5px 0;transform:rotate(225deg) translate(-1px,-1px)}
+#sceneMetrics .instrument-toggle[aria-expanded=false]::after{transform:rotate(45deg) translate(-1px,-1px)}
+#sceneMetrics:has(.instrument-toggle[aria-expanded=false]){width:132px}
+#sceneMetrics .instrument-toggle:hover{background:#a6d4ff10}
+#sceneMetrics .instrument-toggle:focus-visible{outline:2px solid #a9d7ff;outline-offset:-3px}
+#instrumentBody{display:flex;flex-direction:column;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#526c82 transparent}
+#sceneMetrics [hidden]{display:none!important}
+#sceneMetrics .motion-stack,#sceneMetrics .scene-bottom,#sceneMetrics .tour-estimate,#sceneMetrics #pilotFlightReadout{
+ position:static;inset:auto;max-width:none;max-height:none;width:auto;min-width:0;transform:none;visibility:visible;text-align:left;text-shadow:none;pointer-events:auto;
+}
+#sceneMetrics .flight-trip-group,#sceneMetrics .motion-stack,#sceneMetrics .scene-bottom{padding:8px 12px;border-top:1px solid var(--hair)}
+#sceneMetrics .flight-trip-group{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:2px 10px}
+#sceneMetrics .flight-trip-group .pilot-destination{display:block;min-width:0;max-width:none;padding:0;border:0;height:auto;background:none;white-space:normal}
+#sceneMetrics #pilotDestination{display:block;max-width:none;white-space:normal;overflow-wrap:anywhere;color:var(--ink);font:650 14px/1.2 var(--font)}
+#sceneMetrics #pilotFlightReadout{display:contents}
+#sceneMetrics .pilot-flight-body,#sceneMetrics .pilot-flight-route{display:contents}
+#sceneMetrics .pilot-flight-metrics{display:block;grid-column:2;grid-row:1;margin:0}
+#sceneMetrics .pilot-flight-metrics>div,#sceneMetrics .pilot-flight-stage{display:flex;align-items:baseline;justify-content:start;border:0;background:none;padding:0;min-height:0;height:auto}
+#sceneMetrics .pilot-flight-metrics dt,#sceneMetrics .pilot-flight-metrics dd{padding:0;margin:0;font:600 11px/1.3 var(--font);color:var(--secondary)}
+#sceneMetrics .pilot-flight-metrics dt{font-size:9px;text-transform:uppercase;letter-spacing:.05em}
+#sceneMetrics #pilotFlightRemaining{font:inherit;color:var(--ink)}
+#sceneMetrics .pilot-flight-stage{grid-column:1/-1}
+#sceneMetrics #pilotFlightStage{color:#aacee1;font:500 11px/1.35 var(--font)}
+#sceneMetrics .flight-leg-progress{position:static;grid-column:1/-1;width:100%;height:2px;margin:4px 0 0}
+#sceneMetrics .motion-stack{display:flex;flex-flow:column;gap:8px}
+#sceneMetrics .tour-estimate{background:none;padding:0 0 6px;border:0;border-bottom:1px solid var(--hair)}
+#sceneMetrics .tour-estimate dl{display:flex;flex-wrap:wrap;gap:6px 18px}
+#sceneMetrics .tour-estimate dl>div{display:flex;align-items:baseline;gap:5px}
+#sceneMetrics .tour-estimate dd,#sceneMetrics .trip-caption{font:600 12px/1.3 var(--font);margin:0;color:var(--ink)}
+#sceneMetrics .trip-caption{font-size:11px;letter-spacing:0;margin:0 0 4px;color:var(--secondary)}
+#sceneMetrics .motion-hud{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:0 12px;padding:0;border:none;background:none;text-shadow:none;color:var(--ink)}
+#sceneMetrics .motion-speed-group,#sceneMetrics .motion-power{display:contents}
+#sceneMetrics .motion-speed-group>*{grid-column:1}
+#sceneMetrics .motion-power>*{grid-column:1/-1;order:0}
+#sceneMetrics .motion-speed-group>.eyebrow{grid-row:1}
+#sceneMetrics #motionPowerLabel{grid-column:2;grid-row:1}
+#sceneMetrics #pilotLegSpeed{grid-row:2}
+#sceneMetrics #pilotFlightAcceleration{grid-column:2;grid-row:2}
+#sceneMetrics .motion-log,#sceneMetrics .motion-log output{font:550 12px/1.4 var(--font);color:var(--secondary);max-width:100%}
+#sceneMetrics .motion-log{grid-row:3;grid-column:1/-1}
+#sceneMetrics .motion-log output{display:inline;vertical-align:baseline}
+#sceneMetrics .motion-hud #pilotLegSpeed,#sceneMetrics .motion-hud #pilotFlightAcceleration{
+ color:var(--ink);font:600 clamp(14px,1.1vw,17px)/1.4 var(--font);font-variant-numeric:tabular-nums;letter-spacing:-.02em;white-space:normal;overflow-wrap:anywhere
+}
+#sceneMetrics .eyebrow,#sceneMetrics .distance-readout>.eyebrow{display:block;margin:0;color:var(--label);font:650 10px/1.4 var(--font);letter-spacing:.09em;text-transform:uppercase}
+#sceneMetrics .shuttle-escape-note,#sceneMetrics .crew-alert{margin:2px 0 0;padding:0;font:650 12px/1.3 var(--font);color:var(--alert);text-shadow:none;max-width:none}
+#sceneMetrics .distant-horizon,#sceneMetrics .crew-alert:not(.metric-alert){color:var(--secondary)}
+#sceneMetrics .scene-bottom{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;gap:0 12px;white-space:normal}
+#sceneMetrics .distance-readout{text-align:left;display:block;grid-column:1/-1;max-width:none;min-width:0;white-space:normal}
+#sceneMetrics .distance-readout>div{display:flex;align-items:baseline;gap:0 4px;flex-wrap:wrap;margin:0;font:600 14px/1.4 var(--font);color:var(--ink)}
+#sceneMetrics #distance,#sceneMetrics #distanceUnit{font:inherit}
+#sceneMetrics .distance-readout small:not([hidden]){display:inline;min-width:0;max-width:100%;margin:0 0 0 3px;white-space:normal;overflow:visible;font:500 11px/1.35 var(--font);color:var(--secondary)}
+#sceneMetrics .pilot-telemetry{display:grid;grid-column:1/-1;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 12px;width:100%;max-width:100%;min-width:0;margin:6px 0 0;text-shadow:none}
+#sceneMetrics .pilot-telemetry:not(:has(>div:not([hidden]))){display:none}
+#sceneMetrics .pilot-telemetry>div:not([hidden]){display:grid;grid-template-columns:minmax(0,1fr);gap:0;text-align:left}
+#sceneMetrics .pilot-telemetry span{color:var(--label);font:650 10px/1.4 var(--font);letter-spacing:.07em;text-transform:uppercase}
+#sceneMetrics .pilot-telemetry output,#sceneMetrics #pilotDilation,#sceneMetrics #pilotDilationRate{display:block;width:auto;min-width:0;color:var(--ink);font:600 15px/1.4 var(--font);text-align:left;overflow-wrap:anywhere;white-space:normal}
+#sceneMetrics #pilotOnboardRow:not([hidden]){grid-column:1/-1;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:4px 8px}
+#sceneMetrics #pilotOnboard{color:var(--ink);font-variant-numeric:tabular-nums;font-size:clamp(12px,1.5vw,16px);text-align:right}
+#sceneMetrics .clock-factor[hidden]{display:none}
+
+#sceneMetrics :is(#pilotDilation,#pilotDilationRate).metric-alert,#sceneMetrics .motion-hud .metric-alert,#sceneMetrics .motion-log.metric-alert output,#sceneMetrics .pilot-telemetry output.metric-alert,#sceneMetrics #pilotFlightAcceleration.metric-alert,#sceneMetrics #pilotLegSpeed.metric-alert{color:var(--alert);font-weight:750}
+#sceneMetrics .render-pill{display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:none;padding:5px 12px;border:0;border-top:1px solid var(--hair);background:#0002;border-radius:0;color:#b1c4d3;font:550 9px/1.35 var(--font);letter-spacing:.04em;min-height:0;text-align:left}
+#sceneMetrics .render-pill>i{display:none}
+#sceneMetrics .render-pill span{display:inline;min-width:0;width:auto;letter-spacing:inherit;line-height:inherit;padding:0;border:0}
+#sceneMetrics .render-pill #fpsCorner{margin-left:auto}
+.scene.has-flight-controls.has-viewport-ui .scene-tools,.scene.has-station-instruments.has-viewport-ui .scene-tools{top:auto;bottom:var(--overlay-bottom);max-height:calc(100% - var(--overlay-bottom) - 76px)}
+.scene.viewport-panel-open #sceneMetrics,.scene.flight-preview-open #sceneMetrics,.scene.scene-awaiting-frame #sceneMetrics,.scene:has(#cpuFallbackPrompt:not([hidden])) #sceneMetrics,.scene:has(#renderError:not([hidden])) #sceneMetrics{visibility:hidden}
+@media(max-width:700px){
+ #sceneMetrics{left:max(8px,env(safe-area-inset-left));width:min(256px,calc(100% - 66px));max-height:calc(100% - var(--overlay-bottom,84px) - 122px)}
+ #sceneMetrics .instrument-toggle{min-height:32px;padding-inline:10px}
+ #sceneMetrics :is(.flight-trip-group,.motion-stack,.scene-bottom,.render-pill){padding-inline:10px}
+ #sceneMetrics .motion-hud{column-gap:8px}
+}
+@media(max-height:540px){
+ #sceneMetrics{max-height:calc(100% - var(--overlay-bottom,84px) - 64px);width:min(285px,calc(100% - 66px))}
+ #sceneMetrics .instrument-toggle{min-height:26px}
+ #sceneMetrics .flight-trip-group,#sceneMetrics .motion-stack,#sceneMetrics .scene-bottom{padding-block:5px}
+}
+
+/* The header identifies the camera subject even when the instruments are folded. */
+#sceneMetrics .instrument-toggle{letter-spacing:normal;text-transform:none;min-height:36px;gap:7px}
+#sceneMetrics .instrument-toggle::before,#sceneMetrics .instrument-toggle::after{flex:none}
+#sceneMetrics #instrumentSubject{color:var(--ink);font:650 14px/1.25 var(--font);white-space:normal;overflow-wrap:anywhere;min-width:0}
+#sceneMetrics #instrumentProfile{margin-left:auto;max-width:40%;color:var(--label);font:600 9px/1.25 var(--font);letter-spacing:.06em;text-transform:uppercase;text-align:right}
+#sceneMetrics .instrument-toggle::after{margin-left:2px}
+#sceneMetrics:has(.instrument-toggle[aria-expanded=false]){width:fit-content;max-width:min(290px,calc(100% - 78px))}
+#sceneMetrics .instrument-toggle[aria-expanded=false] #instrumentProfile{display:none}
+#sceneMetrics #bodyMeasurements{margin:0;padding:9px 12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;border-top:1px solid var(--hair)}
+#bodyMeasurements>div{min-width:0}
+#bodyMeasurements dt{margin:0 0 2px;color:var(--label);font:600 10px/1.3 var(--font);letter-spacing:.04em}
+#bodyMeasurements dd{margin:0;color:var(--ink);font:600 clamp(13px,1.1vw,15px)/1.3 var(--font);overflow-wrap:anywhere}
+#sceneMetrics[data-subject-type=enterprise] #motionPowerLabel{grid-column:1/-1;grid-row:4;margin-top:4px}
+#sceneMetrics[data-subject-type=enterprise] #pilotFlightAcceleration{grid-column:1/-1;grid-row:5}
+#sceneMetrics[data-subject-type=enterprise] #pilotLegSpeed{grid-column:1/-1}
+@media(max-width:700px){
+ #sceneMetrics #bodyMeasurements{padding:7px 10px;gap:6px 9px}
+ #sceneMetrics .instrument-toggle{min-height:38px}
+}
+@media(max-height:540px){
+ #sceneMetrics #bodyMeasurements{gap:4px 9px;padding-block:5px}
+ #sceneMetrics .instrument-toggle{min-height:30px}
+}
+
+/* Each primary reading leads its own stack; the DOM order is speed, then acceleration. */
+#sceneMetrics .motion-hud{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+#sceneMetrics .motion-speed-group,#sceneMetrics .motion-power{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0}
+#sceneMetrics .motion-hud #pilotLegSpeed,#sceneMetrics .motion-hud #pilotFlightAcceleration{font-size:clamp(21px,2vw,25px);line-height:1.15}
+#sceneMetrics #pilotFlightRemaining{font-size:clamp(22px,2.2vw,28px);line-height:1.1;font-weight:700;font-variant-numeric:tabular-nums}
+
+#sceneMetrics #pilotTelemetry{box-sizing:border-box;margin:0;padding:7px 12px;border-top:1px solid var(--hair)}
+@media(max-width:700px){#sceneMetrics #pilotTelemetry{padding-inline:10px}}
+
+/* One shared inset and type scale for details beneath a primary motion reading. */
+#sceneMetrics .motion-hud .motion-log,
+#sceneMetrics #pilotDilationRateRow .clock-factor{
+ margin-inline-start:1rem;max-width:calc(100% - 1rem);font:500 11px/1.45 var(--font)
+}
+#sceneMetrics .motion-hud .motion-log :is(span,output){font:inherit;color:inherit}
+
+#sceneMetrics #pilotDilationRateRow .clock-factor{display:block;color:var(--secondary);overflow-wrap:anywhere}
+
+#sceneMetrics #habitatMeasurements{margin:0;padding:7px 12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;border-top:1px solid var(--hair)}
+#sceneMetrics #habitatMeasurements[hidden]{display:none}
+#habitatMeasurements dt{color:var(--label);font:600 10px/1.3 var(--font)}
+#habitatMeasurements dd{margin:2px 0 0;color:var(--ink);font:600 13px/1.3 var(--font);font-variant-numeric:tabular-nums}
+@media(max-width:600px),(max-height:560px){#sceneMetrics #habitatMeasurements{padding:5px 9px}}
+
+.display-guides{display:flex;flex-wrap:wrap;gap:0 1.1rem;padding-bottom:4px}.display-guides .planned-path-toggle{min-height:32px;margin:0}.display-grid-settings{margin-bottom:8px}.display-grid-settings .planned-path-toggle{margin:0;min-height:34px}.display-grid-detail{margin:2px 0 8px;padding:8px 12px 9px;min-width:0;border:1px solid #2d4052;border-radius:6px}.display-grid-detail legend{padding:0 5px;color:#c0d5e5;font-size:12px;font-weight:600}.display-grid-sliders{display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:4px 16px}.display-grid-sliders>div{min-width:0}.display-grid-sliders .range-header{margin:0}.display-grid-sliders input{width:100%}.display-grid-detail p{margin:3px 0 0;color:#a3b5c5;font-size:11px}.display-grid-detail output{font-variant-numeric:tabular-nums}
+
+/* Keep the motion context beside the accelerometer without displacing the warnings. */
+#sceneMetrics .proper-reading{display:flex;align-items:baseline;gap:.65rem;flex-wrap:wrap}
+#sceneMetrics #pilotAccelMode{color:var(--secondary);font:500 11px/1.45 var(--font)}
+
+/* The docking desk is present only for a Meridian with an available habitat. */
+.docking-instruments{border-top:1px solid var(--hair);padding:6px 12px;display:grid;gap:5px;font:500 12px/1.35 var(--font);color:var(--ink)}
+.docking-instruments[hidden],.docking-instruments [hidden],#dockingDialog [hidden]{display:none}
+.docking-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.docking-head>div{min-width:0;display:grid}.docking-head small,.docking-instruments dt{font:650 10px/1.4 var(--font);text-transform:uppercase;letter-spacing:.06em;color:var(--label)}
+.docking-head strong{overflow-wrap:anywhere;font-size:14px}
+.docking-head button{color:#bee4fb;background:#102737;border:1px solid #426379;border-radius:5px;padding:5px 9px;min-height:32px;font:600 12px var(--font);cursor:pointer}
+.dock-progress{display:flex;align-items:baseline;justify-content:space-between;gap:3px 6px;flex-wrap:wrap;margin:0 0 5px}#dockStage{margin:0;color:#bdddec}#dockPropulsion{font:550 10px var(--font);color:#9ddace;white-space:nowrap}.docking-instruments dl{margin:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}.docking-instruments dd{margin:0;font-variant-numeric:tabular-nums}
+#dockingDialog{width:min(390px,calc(100vw - 24px));max-height:85dvh;padding:0;overflow:auto;border:1px solid #43657c;border-radius:10px;color:var(--ink);background:#0c1925}
+#dockingDialog .dialog-header{padding:14px 16px}.dock-dialog-body{padding:16px}.dock-selects{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:10px}.dock-selects label{display:grid;gap:5px;font:600 12px var(--font);color:#a9c5d7}
+.dock-selects select,.dock-actions button{width:100%;padding:8px;min-height:42px;font:500 14px var(--font);color:var(--ink);background:#102331;border:1px solid #375266;border-radius:5px}
+#dockInstructions,#dockError{font:400 14px/1.5 var(--font);margin:12px 0;color:#b7cbd8}
+#dockError{color:var(--alert)}.dock-actions button{cursor:pointer}.dock-actions .dock-primary{color:#0b1c29;background:#b9dff3;border-color:#b9dff3;font-weight:650}
+
+/* Keep calendar units together; give the running clock a stable digit width. */
+#sceneMetrics #pilotOnboardRow:not([hidden]){grid-template-columns:1fr;gap:1px;padding-bottom:6px;margin-bottom:2px;border-bottom:1px solid var(--hair)}
+#sceneMetrics #pilotOnboard{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .55em;text-align:left}
+#sceneMetrics #clockFace,#sceneMetrics #clockCalendar{font-variant-numeric:tabular-nums;white-space:nowrap;text-transform:none;letter-spacing:0}
+#sceneMetrics #clockFace{color:var(--ink);font-size:clamp(17px,2vw,21px);line-height:1.2;font-weight:650}
+#sceneMetrics #clockCalendar{font-size:13px;color:var(--label);font-weight:550}
+#sceneMetrics #clockCalendar[hidden]{display:none}
+#sceneMetrics #pilotDilationRow,#sceneMetrics #pilotDilationRateRow{align-content:start}
+
+/* The replay shade follows the completed frame, including on a paused worker.
+   Keep playback controls accessible while the benchmark returns to its start. */
+.scene-replay:not([hidden]){position:absolute;inset:0;display:grid;place-items:center;z-index:4;pointer-events:none;background:#000;color:#d7e4f1;font-size:12px;letter-spacing:.13em;text-transform:uppercase}
+.scene.has-flight-controls .scene-replay{bottom:var(--flight-strip)}
+.scene.scene-awaiting-frame .scene-replay,.scene.render-failed .scene-replay{display:none}
+
+.engineering-view:not([hidden]){pointer-events:auto;display:inline-flex;align-items:center;gap:.45rem;margin-top:.4rem;padding:0 .3rem 0 .6rem;border:1px solid #354859;border-radius:5px;background:rgba(9,19,28,.9);color:#b7c8d5;text-shadow:none}
+.engineering-view>span{font-size:.65rem;letter-spacing:.07em;text-transform:uppercase}
+.engineering-view select{font:inherit;font-size:.78rem;min-height:32px;max-width:100%;color:#edf5fb;background:transparent;border:0;cursor:pointer}
+.engineering-view select option{background:#101c28;color:#edf5fb}.engineering-view:focus-within{outline:2px solid #86bfee;outline-offset:2px}
+@media(max-width:560px){.engineering-view:not([hidden]){gap:.2rem;margin-top:.12rem}.engineering-view select{font-size:.72rem;min-height:30px}}
+
+#janusPropulsion{font:inherit;color:#c8e2f2;background:#102333;border:1px solid #426077;border-radius:4px;padding:1px 3px;max-width:100%;cursor:pointer}#janusPropulsion[hidden]{display:none}
+
+.janus-instruments{border-top:1px solid var(--hair);padding:7px 12px;display:grid;gap:3px}
+#janusDetail,.janus-intro,#janusRouteNote,#janusCoordinates small{color:var(--label);font-size:12px;line-height:1.5}
+#janusProgress{width:100%;height:4px;accent-color:#9cdaf2}
+#janusDialog{width:min(385px,calc(100vw - 24px));max-height:85dvh;padding:0;overflow:auto;border:1px solid #43657c;border-radius:10px;color:var(--ink);background:#0c1925}
+#janusDialog .dialog-header{padding:14px 16px}
+#janusDialog .dock-dialog-body{display:grid;gap:14px}
+#janusDialog p{margin:0}
+.janus-target{display:grid;gap:5px;font-weight:600;font-size:12px;color:var(--label)}
+.janus-target select{width:100%;padding:8px;min-height:42px;color:var(--ink);background:#102331;border:1px solid #375266;border-radius:5px}
+.janus-location{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:9px 0;border-block:1px solid var(--hair);font-size:12px}
+.janus-location strong{text-align:right}.janus-location span{color:var(--label)}
+#janusCoordinates{min-width:0;margin:0;padding:8px 10px 10px;border:1px solid #375266;border-radius:5px;font-size:12px}
+#janusCoordinates small{display:block;margin-top:6px}
+.janus-options{display:flex;gap:4px 15px;flex-wrap:wrap}.janus-options label{display:flex;align-items:center;gap:5px;min-height:36px;font-size:12px;cursor:pointer}
+#janusDialog .dock-actions{margin-top:0}#janusError{color:var(--alert)}
+
+/* Instrument children have their own visibility rules in the compact layouts.
+   Remove their entire box until the first matching frame has been presented. */
+#scene.scene-awaiting-frame #sceneMetrics,
+#scene.scene-awaiting-frame > .scene-bottom,
+#scene.scene-awaiting-frame > .motion-stack,
+#scene.scene-awaiting-frame > .pilot-flight-readout,
+#scene.render-failed #sceneMetrics {display:none}
+#scene.scene-awaiting-frame .scene-heading {display:block;visibility:visible;opacity:1}
+#scene.scene-awaiting-frame #sceneSubtitle {display:block}

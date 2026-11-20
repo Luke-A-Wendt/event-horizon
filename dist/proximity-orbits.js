@@ -13,7 +13,7 @@ export function proximityOrbits(r,craft,body){
  const elevation=Math.max(orbitClearance(r,craft,body.id)*RG,craft.parentId===body.id?craft.routeParkingHeightMeters||0:0);
  const horizon=(body.horizonRadius||body.radius)*RG,hull=r.objectRadius(craft)*RG;
  const disc=r.state.disk&&body.id==='primary'?r.configCache.diskOuter[0]*RG:0;
- const key=[body.id,mu,elevation,horizon,hull,disc].join(':');
+ const key=[body.id,mu,elevation,horizon,hull,disc,r.state.spin,r.sceneId].join(':');
  const saved=cache.get(r);if(saved?.key===key)return saved.radii;
  const floor=stopMinimumMeters(r,craft,body.id,elevation);
  // The playlist's radius is horizontal; the 1g field and horizon gap
@@ -22,13 +22,13 @@ export function proximityOrbits(r,craft,body){
  // Keep the full rendered shuttle outside the horizon at the authored stop.
  // The interactive clock comparison still permits a closer reference point.
  const nearHorizon=Math.max(floor,Math.ceil(1000*compactCircleMinimum(horizon,hull,elevation))/1000);
- const radii={outer,inner:closestReturnOrbit(mu,outer,floor),disc,horizon:nearHorizon};
+ const radii={outer,stable:r.sceneId==='nasa-shuttle'?floor:null,inner:closestReturnOrbit(mu,outer,floor),disc,horizon:nearHorizon};
  cache.set(r,{key,radii});return radii;
 }
 
 export function edgeOrbitName(r,craft,targetId,radius,radii){
  const ref=targetId==='primary'?proximityOrbits(r,craft,r.getFocusFrame?.(targetId)):null;
- if(ref)for(const [key,name]of [['outer','Field orbit'],['inner','Return benchmark'],['disc','Disc edge'],['horizon','Horizon approach']]){
+ if(ref)for(const [key,name]of [['outer','Field orbit'],['inner','Return benchmark'],['disc','Disc edge'],['stable','Innermost stable stop'],['horizon','Horizon approach']]){
   const expected=ref[key];if(expected>0&&Math.abs(radius-expected)<=Math.max(.001,Number.EPSILON*expected*8))return name;
  }
  const ordered=[...new Set(radii)].sort((a,b)=>b-a);

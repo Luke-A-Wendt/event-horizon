@@ -20,14 +20,14 @@ const last=f.uniforms.get('uWarpGridOffset').args,motion=Math.hypot(...last.map(
 assert(motion>.05&&motion<2,'Cloud phase follows actual, smoothly signed grid displacement during Play');
 assert.equal(f.uniforms.get('uNebulaVolume').args[0],1);
 assert.equal(f.uniforms.get('uNebulaMulticolor').args[0],0);
-r.loadScene('planet');r.fillObjects();const body=r.getFocusFrame(r.objects[0].id),toward=body.waterCap.direction;
+r.loadScene('planet');r.fillObjects();const body=r.getFocusFrame(r.objects[0].id),delta=body.position.map((x,i)=>r.holeData[i]-x),toward=delta.map(v=>v/Math.hypot(...delta));
 assert(Math.abs(body.tidalBasis[0].reduce((s,v,i)=>s+v*toward[i],0)-1)<1e-10,'Water material +X follows the tide as the planet orbits');
 r.dispose();
 const source=createFragment({warp:true,warpOnly:true,warpLocal:true,craftMask:8,nebulaVolume:true});
 assert(source.includes('vec2 phase=mod(uWarpGridOffset+vec2(2048.0),4096.0)-vec2(2048.0)'));
 assert(source.includes('nebulaVolumeSegment(uWarpCenter+previous*uWarpRadius,uWarpCenter+q*uWarpRadius'));
 assert(!source.includes('float cloudStop=hit?'),'Isolated warp must not clip its mist at the bubble front');
-assert(source.includes('float phase=point.x*38.0-uTime*.35'));
+assert(!source.includes('float pelagiaDepth('),'The ocean material has no cost in unrelated warp scenes');
 const off=createFragment({warp:true,warpOnly:true,warpLocal:true,craftMask:8});
 assert(!off.includes('cloudDistance'),'Disabled volume has no local integration overhead');
 console.log('PASS: denser finite-cloud presets, single magenta warp palette, actual Play/grid phase, foreground warped cloud path, tide-aligned water frame, and unchanged disabled-volume budget.');

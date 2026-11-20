@@ -1,4 +1,4 @@
-const SHUTTLE_COCKPIT_EYE=[0,.28,.65];
+const SHUTTLE_COCKPIT_EYE=[.115,.025,.758];
 // Procedural asset contracts and an optional exact-GLSL image fixture.
 // Native rendering via v6_shader_check.py checks actual primitive intersections;
 // the recording renderer here checks local camera frames, not browser speed.
@@ -27,7 +27,7 @@ if(process.argv[2]==='--dump'){
  vec3 sky=vec3(.012,.023,.035)+vec3(.04,.05,.08)*max(rd.y,0.0);
  sky+=vec3(.25)*step(.998,hash(floor(gl_FragCoord.xy/2.0)));
  vec3 color=sky;
- ${onboard?'vec4 cabin=shuttleCockpit(ro,rd,sky);color=mix(sky,cabin.rgb,cabin.a);':`CraftSurface s=craftHit(ro,rd,100.0,${type.toFixed(1)});if(s.t<100.0){vec3 hit=ro+rd*s.t;color=shadeCraft(s,hit,rd,normalize(vec3(-.5,1,1)),vec3(.20,.28,.35));}`}
+ ${onboard?'vec4 cabin=shuttleCockpit(ro,rd,sky);color=mix(sky,cabin.rgb,cabin.a);':`CraftSurface s=craftHit(ro,rd,100.0,${type.toFixed(1)},0.0);if(s.t<100.0){vec3 hit=ro+rd*s.t;color=shadeCraft(s,hit,rd,normalize(vec3(-.5,1,1)),vec3(.20,.28,.35));}`}
  color=pow(max(vec3(0),color/(color+vec3(1.0))),vec3(.454545));
  gl_FragColor=vec4(color,1);
  }`;
@@ -44,14 +44,14 @@ for(const [type,extent,length] of [['iss',1.64,109],['shuttle',1.72,37.24],['ast
 assert.equal(createCraftGLSL(),CRAFT_GLSL);
 for(let mask=0;mask<16;mask++){
  const source=createCraftGLSL({mask});
- for(const [bit,anchor] of [[1,'// ISS: x extent'],[2,'// Shuttle: nose-to-engine'],[4,'// EMU-inspired articulated pressure suit.'],[8,'// TOS studio-model silhouette.']])assert.equal(source.includes(anchor),Boolean(mask&bit));
+ for(const [bit,anchor] of [[1,'// ISS: x extent'],[2,'// NASA Meridian: pressure decks'],[4,'// EMU-inspired articulated pressure suit.'],[8,'// NASA twin-ring warp surveyor.']])assert.equal(source.includes(anchor),Boolean(mask&bit));
  assert.equal((source.match(/{/g)||[]).length,(source.match(/}/g)||[]).length);
 }
 assert(CRAFT_GLSL.includes('dummy main-engine bells'));
 assert(CRAFT_GLSL.includes('no operational OMS/RCS'));
 assert(CRAFT_GLSL.includes('nasaLetters')&&CRAFT_GLSL.includes('nasaPatch'));
 assert(CRAFT_GLSL.includes('vec3 conductor=vec3(1.0,.71,.25)'));
-assert(CRAFT_GLSL.includes('if(uDetail>=1.0)')&&CRAFT_GLSL.includes('if(uDetail>=2.0)'));
+assert(CRAFT_GLSL.includes('if(detail>=1.0)')&&CRAFT_GLSL.includes('if(detail>=2.0)'));
 assert(!/https?:|sampler2D|texture2D/.test(CRAFT_GLSL+COCKPIT_GLSL),'The procedural assets require no remote or raster assets');
 const [x,y,z]=LEGACY_COCKPIT_EYE;
 assert((x/.133)**2+((y-.075)/.072)**2+((z-.46)/.205)**2<1,'Pilot eye must be within raised cabin');
@@ -62,7 +62,7 @@ assert(Math.abs(x)<.112&&y>-.055&&y<.133&&z>.315&&z<.620);
  const f=fixture(),r=new BlackHoleRenderer(f.canvas);
  const shuttle=r.addObject('shuttle',16,.7,1);assert(shuttle);
  r.focusObject(shuttle.id,'onboard');r.render();
- assert.equal(f.uniforms.get('uCockpitMode').args[0],0);
+ assert.equal(f.uniforms.get('uCockpitMode').args[0],1);
  const before=f.uniforms.get('uInspectCamera').args[0];
  assert.deepEqual(before,SHUTTLE_COCKPIT_EYE);
  const worldBefore=[...f.uniforms.get('uForward').args[0]];

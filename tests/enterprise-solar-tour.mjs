@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {BlackHoleRenderer} from '../dist/renderer.js';
+import {SCENE_PRESETS,SCENE_PROGRESSIONS} from '../dist/config.js';
 import {fixture} from './render-fixture.mjs';
 import {speedForWarp} from '../dist/flight-dynamics.js';
 import {sampleTransfer} from '../dist/travel-math.js';
@@ -17,6 +18,9 @@ const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
 
 const shuttle=open('solar-system'),enterprise=open('enterprise-solar-tour');
 try{
+ const preset=SCENE_PRESETS.find(scene=>scene.id===enterprise.sceneId);
+ assert.equal(preset.title,'Warping around the solar system');assert(SCENE_PROGRESSIONS['Warp drive'].includes(preset.id));
+ assert.equal(enterprise.state.grid,false);assert.equal(enterprise.state.warpGridOnly,true);
  const original=manifest(shuttle,'shuttle'),{craft,q,names}=manifest(enterprise,'enterprise');
  assert.deepEqual(names,original.names);
  assert.equal(names.length,12);assert.equal(craft.parentId,q.nodes[0].targetId);
@@ -27,7 +31,13 @@ try{
   assert.equal(arc.targetId,departure.targetId);assert.equal(arc.destinationId,destination.targetId);
   assert(arc.sweepRadians>0&&arc.wallSeconds>0,'A visible parking arc connects the incoming and outgoing tangent');
   near(arc.transferSeconds,300);
-  for(let i=0;i<100&&!enterprise.transfer;i++)enterprise.advanceChartStages(.1);
+  // The cinematic arc covers its true swept length in the clock, even when
+  // those hours or days of orbit fit into only a few seconds of screen time.
+  const onboardAtStop=craft.clock.properSeconds,arcSeconds=arc.sweepRadians*departure.radiusMeters/arc.speedMetersPerSecond;
+  near(arc.durationSeconds,arcSeconds);
+  for(let i=0;i<450&&!enterprise.transfer;i++)enterprise.advanceChartStages(Math.min(.1,Math.max(1e-9,q.waitSeconds)));
+  near(craft.clock.properSeconds-onboardAtStop,arcSeconds);
+  const onboardAtLaunch=craft.clock.properSeconds;
   const t=enterprise.transfer;assert(t?.active,q.error||'Transfer should have started');
   assert.equal(t.targetId,destination.targetId);assert.equal(t.plan.type,'enterprise');
   near(t.properSeconds,300);near(t.coordinateSeconds,300);near(t.initialSpeed,arc.speedMetersPerSecond);
@@ -39,6 +49,9 @@ try{
   let max=0,lastTime=-1,mid=0,late=0;
   for(let i=1;i<=100;i++){
    enterprise.advanceChartStages(t.wallSeconds/100);
+   near(craft.clock.properSeconds-onboardAtLaunch,t.properElapsedSeconds);
+   assert.equal(craft.clock.coordinateSeconds,craft.clock.properSeconds);
+   assert.equal(craft.clock.lagSeconds,0);
    if(i<100){
     assert(t.properElapsedSeconds>lastTime);lastTime=t.properElapsedSeconds;
     near(speedForWarp(enterprise.state.warpFactor),craft.flight.speed,1e-5);

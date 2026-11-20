@@ -50,6 +50,14 @@ $('mapBreadcrumbs').querySelector('[data-map-center="space"]').click();assert.eq
 map.close();r.loadScene('test-shuttle-bridge');const bridgeCraft=r.objects.find(o=>o.type==='shuttle');r.selectedId=r.focusId=bridgeCraft.id;ui.sceneChanged();ui.openMap();tab('flight').click();
 $('mapDestination').value='bridge-throat';$('mapDestination').dispatch('change');assert.equal($('mapTravelHeadingRow').hidden,false);$('mapTravelHeading').value='45';$('mapTravelHeading').dispatch('input');$('mapTravelQueue').click();
 assert.equal(r.getFlightSequence(bridgeCraft.id).nodes.at(-1).heading,45);assert(map.open);
+// A Garden Station is a docking stop, including when the viewer is tracking the habitat.
+map.close();r.loadScene('earth-mars-station-ferry');const ferry=r.objects.find(o=>o.type==='shuttle'),berth=r.objects.find(o=>o.name==='Earth Station');
+r.focusId=berth.id;ui.sceneChanged();ui.openMap(berth.id);tab('flight').click();
+assert.equal($('mapTravelMode').textContent,'HUB DOCKING');assert.equal($('mapTravelQueue').textContent,'Add docking stop');
+const before=r.getFlightSequence(ferry.id).nodes.length;$('mapTravelQueue').click();
+assert.equal(r.getFlightSequence(ferry.id).nodes.length,before+1);
+assert.deepEqual(r.getFlightSequence(ferry.id).nodes.at(-1),{targetId:berth.id,kind:'dock',port:'south'});
+assert.equal(r.focusId,berth.id);
 await new Promise(resolve=>setImmediate(resolve));ui.dispose();r.dispose();
 }
 console.log('PASS: desktop and phone map tool switching, flight availability and map return');

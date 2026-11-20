@@ -27,7 +27,7 @@ for(const scene of ['bridge','bridge-nebulae'])for(const adjusted of [false,true
   }
   let view=hullView(r,ship());const eye=unit(view[0]);
   if(!adjusted){
-   if(scene==='bridge')assert(eye[2]<-.9999,'centred astern');
+   if(scene==='bridge')assert(eye[2]<-.96&&eye[1]>.18&&Math.abs(eye[0])<.001,'slightly elevated stern view clears the ignition point');
    else assert(Math.abs(eye[0])>.9999,'broadside');
   }else{assert(Math.abs(eye[1])>.1,'orbit input changed the view');assert(Math.abs(dot(eye,view[1]))<.999,'look input changed the aim');}
   const base=r.configCache.primaryBasis[2],b=r.configCache.bridgeRadius,gate=base.map(x=>x*b*.5);
@@ -55,7 +55,7 @@ for(const scene of ['bridge','bridge-nebulae'])for(const adjusted of [false,true
    if((radius-b*.5)*(lastRadius-b*.5)<0||radius===b*.5&&lastRadius!==radius)crossings++;
    if(!adjusted&&scene==='bridge'&&Math.abs(radius-lastRadius)>b*1e-10&&(radius-b*.5)*(radius-lastRadius)<0){
     const toward=sub(gate,f.observer);
-    assert(dot(unit(toward),f.forward)>.999,scene+' throat missed at '+clock+' ms; projection '+dot(unit(toward),f.forward)+'; chart radius '+radius/b+'; dR '+(radius-lastRadius)/b+'; nose '+dot(nose,base));
+    assert(dot(unit(toward),f.forward)>Math.cos(.21),scene+' throat outside elevated stern view at '+clock+' ms; projection '+dot(unit(toward),f.forward)+'; chart radius '+radius/b+'; dR '+(radius-lastRadius)/b+'; nose '+dot(nose,base));
     passSamples[Number(radius<b*.5)]++;
    }
    lastRadius=radius;lastNose=[...nose];
@@ -69,4 +69,4 @@ for(const scene of ['bridge','bridge-nebulae'])for(const adjusted of [false,true
   if(!adjusted&&scene==='bridge')assert(passSamples.every(n=>n>40),'both approach directions covered');
  }finally{r.dispose();}
 }
-console.log('PASS: side/rear views, centred rear bridge approaches, ship-relative orbit/look/zoom, stationary eased turns, pause, and both crossing directions.');
+console.log('PASS: side/rear views, unobstructed elevated rear approaches, ship-relative orbit/look/zoom, stationary eased turns, pause, and both crossing directions.');

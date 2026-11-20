@@ -13,7 +13,7 @@ export const SHUTTLE_THRUST_MAX_G=1;
 export const ENTERPRISE_THRUST_MAX_G=1000;
 export const SHUTTLE_THRUST_STEP_G=.1;
 export function shuttleThrustSetting(value){return impulseThrustSetting(value);}
-export function impulseThrustSetting(value,maxG=SHUTTLE_THRUST_MAX_G){const step=maxG>SHUTTLE_THRUST_MAX_G?1:SHUTTLE_THRUST_STEP_G;return Number((Math.round(clamp(Number(value)||0,0,maxG)/step)*step).toFixed(1));}
+export function impulseThrustSetting(value,maxG=SHUTTLE_THRUST_MAX_G){const step=maxG<1?.01:maxG>=10?1:SHUTTLE_THRUST_STEP_G;return Number((Math.round(clamp(Number(value)||0,0,maxG)/step)*step).toFixed(2));}
 const WARP_NINE_SPEED=9**(10/3),WARP_SPEED_CAP=199516;
 // Below nine this is the familiar TNG reference convention. The finite
 // interpolation above nine is a display choice, never a canonical speed law
@@ -34,6 +34,17 @@ export function warpStarVisuals(beta=0){
  return {warp:w,rate:value(0),elongation:value(1),trailRadians:value(2),whiteness:value(3)};
 }
 export function warpStarRate(beta=0){return warpStarVisuals(beta).rate;}
+// The optical exposure clock is measured in screen seconds in both Auto and Drive.
+export function advanceWarpOptics(flight,dt){
+ if(!(dt>0))return flight;
+ // Smooth visual warp, not the enormous SI speed range: a jump to warp ten
+ // must visibly pass through the lower milestones instead of leaping to nine.
+ const previousBeta=Math.max(0,flight.starBeta||0),beta=flight.speed/FLIGHT_LIGHT_SPEED;
+ const previousWarp=warpForSpeed(previousBeta*FLIGHT_LIGHT_SPEED),targetWarp=warpForSpeed(beta*FLIGHT_LIGHT_SPEED);
+ flight.starBeta=speedForWarp(previousWarp+(targetWarp-previousWarp)*(1-Math.exp(-4*dt)))/FLIGHT_LIGHT_SPEED;
+ flight.starPhase=((flight.starPhase||0)+(warpStarRate(previousBeta)+warpStarRate(flight.starBeta))*.5*dt)%1024;
+ flight.gridPhase=((flight.gridPhase||0)+.12*Math.log1p(flight.starBeta)*dt)%4096;return flight;
+}
 export function flightControlRates(flight,options={}){
  const warp=options.warp===true,v=Math.max(0,Number(flight.speed)||0),scale=Math.max(v,warp?FLIGHT_LIGHT_SPEED:60);
  const factor=warpForSpeed(v),dw=FLIGHT_WARP_RATE;
@@ -100,7 +111,7 @@ export function setPlanarHeading(flight,radians){
  const heading=Number.isFinite(flight.headingAngle)?flight.headingAngle:0;
  flight.jetStart=heading;flight.headingAngle=heading;flight.headingTarget=heading+Math.atan2(Math.sin(radians-heading),Math.cos(radians-heading));flight.brakeTurn=false;return true;
 }
-function planarTurn(flight,dt,input,controlled){
+function planarTurn(flight,dt,input,controlled,poweredYaw=false){
  if(!controlled&&!Number.isFinite(flight.headingTarget)){
   if(flight.brakeTurn){const w=flight.angularVelocity||0;flight.angularVelocity=Math.sign(w)*Math.max(0,Math.abs(w)-.24*dt);if(!flight.angularVelocity)flight.brakeTurn=false;}
   else flight.angularVelocity=clamp((flight.angularVelocity||0)+(input.curvature||0)*.16*dt,-.65,.65);
@@ -115,7 +126,12 @@ function planarTurn(flight,dt,input,controlled){
  }
  const error=Math.atan2(Math.sin(target-heading),Math.cos(target-heading)),desired=clamp(error*4,-.65,.65),previous=flight.angularVelocity||0;
  target=heading+error;
- let angle=(previous+(desired-previous)*(1-Math.exp(-8*dt)))*dt;
+ // In warp Drive the bow jets supply the signed angular impulse. Cap the
+ // requested rate change to the installed angular acceleration, and do not
+ // keep applying torque merely because the hull already has angular velocity.
+ const demand=(desired-previous)*(-Math.expm1(-8*dt))/dt;
+ const rate=previous+(poweredYaw?warpYawCommand(demand)*WARP_YAW_ALPHA:demand)*dt;
+ let angle=rate*dt;
  if(Math.sign(angle)===Math.sign(error)&&Math.abs(angle)>Math.abs(error)||Math.abs(error)<1e-6)angle=error;
  const span=target-(flight.jetStart??heading),progress=span?(heading+angle/2-(flight.jetStart??heading))/span:1;
  flight.visualJet=Math.abs(error)>1e-4&&progress>=0&&progress<1?Math.sign(span)*(progress<.5?1:-1)*Math.min(1,Math.abs(span)*7):0;
@@ -123,32 +139,55 @@ function planarTurn(flight,dt,input,controlled){
  return flight.angularVelocity;
 }
 
+// A fictional regulated cruise drive moves the hull slowly inside the bubble.
+// Guidance specifies one total coordinate velocity; the local impulse component
+// is part of that total, never added to the route distance a second time.
+export const WARP_LOCAL_CRUISE_MPS=12;
+export function warpCruiseSplit(speed){
+ const total=Math.max(0,Number(speed)||0),local=Math.min(WARP_LOCAL_CRUISE_MPS,total);
+ return {local,shift:total-local};
+}
+// A positive right-handed torque about body +Y pushes the nose toward +X.
+// The deadband only suppresses roundoff while coasting at a steady yaw rate.
+const WARP_YAW_ALPHA=2; // rad/s² at full nose-jet duty in the Drive model
+export function warpYawCommand(alpha){
+ const magnitude=Math.abs(alpha);return magnitude>1e-7?Math.sign(alpha)*Math.min(1,magnitude/WARP_YAW_ALPHA):0;
+}
+function warpBodyRates(f,sign){
+ const d=f.coastDirection||[0,0,1],v=f.speed*sign,{local}=warpCruiseSplit(f.speed);
+ // Carry a non-forward entry velocity through a manual takeover. The warp
+ // shift compensates its direction; the conventional nozzle stays hull-fixed.
+ return {local,shift:[d[0]*v,d[1]*v,d[2]*v-local]};
+}
 export function warpVelocity(f){
- const d=f.coastDirection||[0,0,1],v=f.speed*(f.travelDirection||1);
- return f.basis[2].map((_,i)=>v*(d[0]*f.basis[0][i]+d[1]*f.basis[1][i]+d[2]*f.basis[2][i]));
+ const {local,shift}=warpBodyRates(f,f.travelDirection||1),[right,up,nose]=f.basis;
+ return nose.map((n,i)=>shift[0]*right[i]+shift[1]*up[i]+shift[2]*n+local*n);
 }
 export function integratePlanar(flight,dt,input={},options={}){
  dt=clamp(Number(dt)||0,0,1);if(!dt)return flight;
  if(!options.warp)return integrateShuttlePlanar(flight,dt,input,options);
+ if(options.clockStep)options.clockStep.localSeconds=dt;
  advanceFlightClocks(flight,dt);
  if(input.speed)flight.brakeSpeed=false;if(input.curvature)flight.brakeTurn=false;
  if(flight.brakeSpeed){flight.speed=options.warp?speedForWarp(Math.max(0,warpForSpeed(flight.speed)-1.5*dt)):Math.max(0,(flight.speed||0)-Math.max(10,flight.brakeInitialSpeed/2)*dt);if(flight.speed<1e-6){flight.speed=0;flight.brakeSpeed=false;}}
- else if(options.warp){if(input.speed)flight.speed=speedForWarp(warpForSpeed(flight.speed)+input.speed*FLIGHT_WARP_RATE*dt);}
+ else if(options.warp){if(input.speed)flight.speed=Math.min(options.maxSpeed??Infinity,speedForWarp(warpForSpeed(flight.speed)+input.speed*FLIGHT_WARP_RATE*dt));}
  else flight.speed=clamp((flight.speed||0)+(input.speed||0)*flightControlRates(flight,options).speedRate*dt,0,options.maxSpeed||12000);
- planarTurn(flight,dt,input,options.controlled===true);
+ const priorRate=flight.angularVelocity||0;
+ planarTurn(flight,dt,input,options.controlled===true,true);
+ flight.visualJet=warpYawCommand((flight.angularVelocity-priorRate)/dt);
  flight.torsion=0;flight.curvature=flight.speed>0?flight.angularVelocity/flight.speed:0;
  const [N,B,T]=orthonormalFrame(flight.basis),w=flight.angularVelocity,a=w*dt;
  const forward=Math.abs(w)>1e-12?Math.sin(a)/w:dt,side=Math.abs(w)>1e-12?2*Math.sin(a*.5)**2/w:0;
- const d=flight.coastDirection||[0,0,1];
- flight.position=flight.position.map((x,i)=>x+flight.speed*(N[i]*(d[0]*forward+d[2]*side)+B[i]*d[1]*dt+T[i]*(d[2]*forward-d[0]*side)));
+ const {local,shift}=warpBodyRates(flight,1);
+ // Integrate each displacement in the same turning body frame. For an
+ // ordinary straight run these reduce to v_local*dt and v_shift*dt.
+ flight.position=flight.position.map((x,i)=>{
+  const impulse=local*(N[i]*side+T[i]*forward);
+  const transport=N[i]*(shift[0]*forward+shift[2]*side)+B[i]*shift[1]*dt+T[i]*(shift[2]*forward-shift[0]*side);
+  return x+(transport+impulse);
+ });
  flight.basis=[rotate(N,B,a),B,rotate(T,B,a)];flight.velocity=warpVelocity(flight);flight.travelCompression=1;
- // Smooth visual warp, not the enormous SI speed range: a jump to warp ten
- // must visibly pass through the lower milestones instead of leaping to nine.
- const previousBeta=Math.max(0,flight.starBeta||0),beta=flight.speed/FLIGHT_LIGHT_SPEED;
- const previousWarp=warpForSpeed(previousBeta*FLIGHT_LIGHT_SPEED),targetWarp=warpForSpeed(beta*FLIGHT_LIGHT_SPEED);
- flight.starBeta=speedForWarp(previousWarp+(targetWarp-previousWarp)*(1-Math.exp(-4*dt)))/FLIGHT_LIGHT_SPEED;
- flight.starPhase=((flight.starPhase||0)+(warpStarRate(previousBeta)+warpStarRate(flight.starBeta))*.5*dt)%1024;
- flight.gridPhase=((flight.gridPhase||0)+.12*Math.log1p(flight.starBeta)*dt)%4096;return flight;
+ return advanceWarpOptics(flight,dt);
 }
 
 // Inertial translation and body attitude are independent: turning rotates the
@@ -174,7 +213,9 @@ export function integrateShuttlePlanar(flight,dt,input={},options={}){
  const restDisplacement=T.map((v,i)=>acceleration*dt*dt*(v*along+N[i]*side)),correction=coordinateAcceleration(vm,restDisplacement);
  let displacement=velocity.map((v,i)=>v*dt+correction[i]);const distance=Math.hypot(...displacement),maximum=SUBLUMINAL_SPEED*dt;if(distance>maximum)displacement=displacement.map(v=>v/distance*maximum);
  flight.position=flight.position.map((v,i)=>v+displacement[i]);
- advanceFlightClocks(flight,dt,options.clockExempt?0:dt*(clockLagRate(velocity)+4*clockLagRate(vm)+clockLagRate(nextVelocity))/6);
+ const stepLag=options.clockExempt?0:dt*(clockLagRate(velocity)+4*clockLagRate(vm)+clockLagRate(nextVelocity))/6;
+ advanceFlightClocks(flight,dt,stepLag);
+ if(options.clockStep){options.clockStep.localSeconds=dt;options.clockStep.kinematicLag=stepLag;}
  flight.velocity=nextVelocity;flight.speed=Math.hypot(...nextVelocity);flight.torsion=0;flight.curvature=flight.speed>0?w/flight.speed:0;
  flight.basis=[rotate(N,B,x),B,rotate(T,B,x)];flight.travelCompression=1;return flight;
 }

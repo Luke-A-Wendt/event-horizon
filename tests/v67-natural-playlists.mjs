@@ -13,10 +13,11 @@ for(const id of ['warp-orbit','solar-system','shuttle-earth-mars-loop','shuttle-
  if(!id.endsWith('loop')&&id!=='test-shuttle-bridge')continue;
  const sign=q.orbitWait.direction;assert.equal(sign,-1);const initial=q.orbitWait.startPhase,sweep=q.orbitWait.sweepRadians;r.state.paused=false;
  assert(sweep>=0 && sweep<2*Math.PI);
- for(let i=0;i<40;i++)advanceAutopilot(r,.1);
- const almost=r.getFlightSequence(craft.id).orbitWait;assert(Math.abs((initial-almost.lastPhase)/sweep-arcPlaybackFraction(4/SEQUENCE_ORBIT_SECONDS))<1e-8);assert(!r.transfer);
- for(let i=0;i<10;i++)advanceAutopilot(r,.1);
- assert(r.transfer?.active,id);assert.equal(r.transfer.wallSeconds,10);r.advanceTravel(10);assert(!r.transfer);assert.equal(r.bridgeParking?.[craft.id]?.targetId||craft.parentId,q.nodes.at(id==='test-shuttle-bridge'?2:1).targetId);
+ const seconds=q.orbitWait.wallSeconds;assert(seconds>=4&&seconds<=SEQUENCE_ORBIT_SECONDS);
+ const steps=Math.floor(seconds*5);for(let i=0;i<steps;i++)advanceAutopilot(r,.1);
+ const almost=r.getFlightSequence(craft.id).orbitWait;assert(Math.abs((initial-almost.lastPhase)/sweep-arcPlaybackFraction(steps*.1/seconds))<1e-8);assert(!r.transfer);
+ for(let i=0;!r.transfer&&i<300;i++)advanceAutopilot(r,.1);
+ assert(r.transfer?.active,id);assert(r.transfer.wallSeconds>10);r.advanceTravel(r.transfer.wallSeconds);assert(!r.transfer);assert.equal(r.bridgeParking?.[craft.id]?.targetId||craft.parentId,q.nodes.at(id==='test-shuttle-bridge'?2:1).targetId);
 
 }
-r.dispose();console.log('PASS: orbit presets enter Auto with their parked body, traverse a partial prograde arc in five seconds, then transfer in ten seconds.');
+r.dispose();console.log('PASS: orbit presets enter Auto with their parked body, traverse a partial prograde arc at a bounded angular rate, then complete their distance-paced transfer.');

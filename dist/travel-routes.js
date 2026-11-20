@@ -1,12 +1,17 @@
-import {cameraRelative} from './camera-framing.js';
+import {warpStudyId} from './warp-studies.js';
+import {sceneCruiseWarp} from './config.js';
+import {contactPlaybackClock,contactPlaybackProgress} from './contact-playback.js';
+import {warpYawCommand,advanceWarpOptics} from './flight-dynamics.js';
+import {kerrRadiusPlan,edgeKerrMetric} from './kerr-transfer.js';
+import {cameraRelative,warpSideFraming} from './camera-framing.js';
 import {SCENE_ORIGIN} from './scene-origin.js';
-import {HALF_TURN_SECONDS} from './travel-math.js';
+import {blendAttitude,attitudeAngle,turnDuration,TURN_SECONDS} from './flight-attitude.js';
 import {clockHullMeters,stopMinimumMeters,orbitClearance,oneGravityRadius} from './orbit-clearance.js';
 import {parkedOrbitGeometry,parkedCameraFraming,limbForward,AUTO_EYE_ELEVATION} from './orbit-path.js';
 // Guided travel is a bounded cinematic transfer, not an N-body rendezvous solver.
-// Physical trip clocks advance through an analytic profile independently of the ten-second presentation clock.
-import {REFERENCE_RG_METERS,OBJECT_CLASS} from './objects.js';
-import {clockRate,compactExteriorRadius} from './object-clocks.js';
+// Physical trip clocks advance through an analytic profile independently of the display clock used to resolve orbital contact.
+import {hullType,REFERENCE_RG_METERS,OBJECT_CLASS} from './objects.js';
+import {clockRate,compactExteriorRadius,PROTECTED_CLOCK_RATE,tickAtClockRate} from './object-clocks.js';
 import {circularRadiusPlan,sampleCircularRadius,estimateTransfer,minimumTransferDistance,sampleTransfer,sampleTransferAtDistance,transferPlayback,TRANSFER_WALL_SECONDS,transferEase,transferCurvePoint,transferCurveDerivative,transferCurveFraction} from './travel-math.js';
 import {orthonormalFrame,warpVelocity,warpForSpeed} from './flight-dynamics.js';
 const add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,s)=>a.map(v=>v*s),dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],unit=a=>mul(a,1/(Math.hypot(...a)||1));
@@ -14,15 +19,16 @@ const smooth=x=>{const t=Math.max(0,Math.min(1,x));return t*t*(3-2*t);};
 // Anchor at the nearer endpoint: blending two interstellar coordinates adds
 // another round of world-scale quantization to a shuttle-sized displacement.
 const mix=(a,b,t)=>t<=.5?a.map((v,i)=>v+(b[i]-v)*t):b.map((v,i)=>v+(a[i]-v)*(1-t));
-function directionMix(a,b,t){const d=Math.max(-1,Math.min(1,dot(a,b)));if(d>.999)return unit(mix(a,b,t));const angle=Math.acos(d),n=d<-.999?unit(cross(a,Math.abs(a[1])<.8?[0,1,0]:[1,0,0])):unit(sub(b,mul(a,d)));return add(mul(a,Math.cos(angle*t)),mul(n,Math.sin(angle*t)));}
+function directionMix(a,b,t){if(t<=0)return a;if(t>=1)return b;const d=Math.max(-1,Math.min(1,dot(a,b))),v=sub(b,mul(a,d)),m=Math.hypot(...v);if(d>.999)return unit(mix(a,b,t));const angle=Math.atan2(m,d),n=m<1e-12?unit(cross(a,Math.abs(a[1])<.8?[0,1,0]:[1,0,0])):mul(v,1/m);return add(mul(a,Math.cos(angle*t)),mul(n,Math.sin(angle*t)));}
 const physical=f=>(f.physicalRadius||f.radius||0)*REFERENCE_RG_METERS;
 export function travelCraft(r,options={}){const eligible=id=>r.objects.find(o=>o.id===id&&['shuttle','enterprise'].includes(o.type));return options.craftId!==undefined?eligible(options.craftId):eligible(r.transfer?.craftId)||eligible(r.selectedId)||eligible(r.focusId)||eligible(r.driveId);}
 export function travelTargets(r,options={}){
  const craft=travelCraft(r,options);if(!craft||r.state.bridge)return [];
  const key=[craft.id,r.geometryRevision,r.objects.length].join(':');if(r.travelTargetCache?.key===key)return r.travelTargetCache.items;
  const nodes=r.getObjectTree(),byId=new Map(nodes.map(n=>[n.id,n])),objects=new Map(r.objects.map(o=>[o.id,o])),mass=id=>id==='primary'?r.state.mass*1e6:id==='secondary'?r.state.mass*1e6*r.state.binaryRatio:id==='planet'?r.state.planetMass*3e-6:id==='tidalStar'?1:r.objectMassSolar(objects.get(id)||{}),descendants=new Set([craft.id]),queue=[craft.id];while(queue.length){const node=byId.get(queue.pop());for(const id of node?.children||[]){descendants.add(id);queue.push(id);}}
- const candidates=nodes.filter(n=>n.id!=='space'&&!descendants.has(n.id)&&n.canAdd&&OBJECT_CLASS[n.type]>=OBJECT_CLASS[craft.type]&&mass(n.id)>0);
+ const candidates=nodes.filter(n=>n.type!=='habitat'&&n.id!=='space'&&!descendants.has(n.id)&&n.canAdd&&OBJECT_CLASS[n.type]>=OBJECT_CLASS[craft.type]&&mass(n.id)>0);
  const items=candidates.filter(n=>OBJECT_CLASS[n.type]>OBJECT_CLASS[craft.type]||r.canParentObject(craft.type,n.id,craft.id).ok).map(n=>({id:n.id,name:n.label,label:n.label,type:n.type}));
+ if(hullType(craft)==='shuttle')for(const n of nodes)if(n.type==='habitat'&&!descendants.has(n.id))items.push({id:n.id,name:n.label,label:n.label,type:n.type,dockable:true});
  for(const n of nodes)if(n.type==='waypoint')items.push({id:n.id,name:n.label,label:n.label,type:n.type,waypoint:true});
  items.push(SCENE_ORIGIN);r.travelTargetCache={key,items};return items;
 }
@@ -107,8 +113,8 @@ function circularRadiusObstacle(leg,o){
  }
  return hit(sample(0),sample(1),0,1,0);
 }
-function circularRadiusLeg(center,ra,rb,mu,normal,radial,height){
- const plan=circularRadiusPlan(ra,rb,mu,height);if(plan.error)return plan;
+function circularRadiusLeg(center,ra,rb,mu,normal,radial,height,metric){
+ const plan=metric?kerrRadiusPlan(ra,rb,metric):circularRadiusPlan(ra,rb,mu,height);if(plan.error)return plan;
  const departureTangent=unit(cross(normal,radial)),leg={radiusTransfer:true,radiusChange:true,concentric:true,normal,radial,departureTangent,orbitCenter:center,radiusPlan:plan};
  const last=circularRadiusPose(leg,sampleCircularRadius(plan,1));
  return {...leg,start:add(center,mul(radial,ra)),end:last.p,arrivalRadial:last.radial,tangent:departureTangent,arrivalTangent:last.forward,length:plan.distanceMeters};
@@ -136,7 +142,7 @@ export function orbitalTangentLeg(r,id,options={},restStart=null){
   return {...leg,capture:cap};
  }
  const queue=r.flightSequences?.[craft.id]?.nodes;
- const H=rejoin?(waypoint?dot(center,up):sequencePlaneHeight(r,craft,queue?.length?[id,...queue.map(node=>node.targetId)]:[id])):options.planeHeightMeters!==undefined?options.planeHeightMeters:parked?sequencePlaneHeight(r,craft,[parked.parentId,id]):dot(from,up);
+ const H=rejoin?(waypoint?dot(center,up):sequencePlaneHeight(r,craft,queue?.length?[id,...queue.filter(node=>node.kind!=='dock').map(node=>node.targetId)]:[id])):options.planeHeightMeters!==undefined?options.planeHeightMeters:parked?sequencePlaneHeight(r,craft,[parked.parentId,id]):dot(from,up);
  if(!Number.isFinite(H))return {error:planeError};
  const hA=H-dot(from,up),hB=H-dot(center,up),tol=planeTolerance(H,Math.max(Math.hypot(...from),Math.hypot(...center)));
  const radius=waypoint?0:remember>0?Math.max(remember,stopMinimumMeters(r,craft,id,hB)):Math.max(oneGravityRadius(craft.type,target.massSolar),craft.type==='shuttle'&&initialSpeed>0?Math.max(floor,Math.min(ceiling,mu/(initialSpeed*initialSpeed))):floor);
@@ -161,7 +167,7 @@ export function orbitalTangentLeg(r,id,options={},restStart=null){
   }
  }
  const destinationDelta=sub(center,from),pointDistance=Math.hypot(...destinationDelta);
- const line=rejoin&&waypoint?{start:from,end:center,length:pointDistance,radial:plane[0],tangent:pointDistance?mul(destinationDelta,1/pointDistance):[...craft.flight.basis[2]]}:concentric&&craft.type==='shuttle'?circularRadiusLeg(A,ra,radius,mu,up,parked.radial,hA):concentric?concentricChord(A,ra,radius,up,mul(parked.radial,-1)):directedExternalTangent(A,ra,B,radius,up);
+ const line=rejoin&&waypoint?{start:from,end:center,length:pointDistance,radial:plane[0],tangent:pointDistance?mul(destinationDelta,1/pointDistance):[...craft.flight.basis[2]]}:concentric&&craft.type==='shuttle'?circularRadiusLeg(A,ra,radius,mu,up,parked.radial,hA,Math.abs(hA)<.002?edgeKerrMetric(r,craft,id):null):concentric?concentricChord(A,ra,radius,up,mul(parked.radial,-1)):directedExternalTangent(A,ra,B,radius,up);
  // An unparked vehicle has a velocity independent of its nose. An arbitrary
  // destination cannot be reached by instantly redirecting that vector. First
  // brake along the actual velocity; from the stop there is a true tangent.
@@ -178,7 +184,7 @@ export function orbitalTangentLeg(r,id,options={},restStart=null){
   }
  }
  if(line.error)return line;
- const phase=Math.atan2(dot(line.radial,plane[2]),dot(line.radial,plane[0])),finalSpeed=waypoint?0:Math.sqrt(mu/radius);
+ const phase=Math.atan2(dot(line.radial,plane[2]),dot(line.radial,plane[0])),finalSpeed=waypoint?0:line.radiusPlan?.finalSpeed??Math.sqrt(mu/radius);
  if(!concentric&&craft.type==='shuttle'&&line.length+1e-4<minimumTransferDistance(initialSpeed,finalSpeed))return {error:'This tangent is too short for the Shuttle to match parking speed at 1g.'};
  const arrivalPhase=line.arrivalRadial?Math.atan2(dot(line.arrivalRadial,plane[2]),dot(line.arrivalRadial,plane[0])):phase;
  return {...line,waypoint,sourceId:parked?.parentId||fromPoint||null,targetId:id,departurePhase:phase,arrivalPhase,departureRadius:ra,arrivalRadius:radius,planeHeightMeters:H,departureHeightMeters:hA,arrivalHeightMeters:hB,initialSpeed,finalSpeed,center};
@@ -204,15 +210,81 @@ export function levelTurn(from,to,up,t){
  const angle=Math.atan2(dot(cross(from,to),up),dot(from,to))*transferEase(t);
  return unit(add(mul(from,Math.cos(angle)),mul(cross(up,from),Math.sin(angle))));
 }
-function guidedSample(t,progress,up){
+// Signed nose angle from CCW prograde toward radial-out, measured in the
+// orbital plane. The first/last nonzero force of a quintic radial ramp is
+// radial; take those one-sided limits when the motor is off at a contact.
+function edgeBurnYaw(plan,u,sample){
+ if(u<=0||u>=1)return Math.sign(plan.rb-plan.ra)*(u<=0?1:-1)*Math.PI/2;
+ return Math.atan2(sample.radialThrust,sample.tangentialThrust);
+}
+export function edgeParkingYaw(r,craft,derivative=false){
+ const q=r.flightSequences?.[craft.id],w=q?.orbitWait,leg=w?.leg||q?.readyLeg;
+ const last=r.lastTransfer;
+ const inbound=last?.craftId===craft.id&&last?.targetId===craft.parentId?last.arrivalHullYaw||0:0;
+ if(!w)return derivative?null:leg?.radiusPlan?edgeBurnYaw(leg.radiusPlan,0):inbound;
+ // Slew while coasting around the circle, so the nozzle can follow the
+ // actual acceleration vector from ignition until cutoff without any bank.
+ const u=w.progress||0,exit=leg?.radiusPlan?edgeBurnYaw(leg.radiusPlan,0):0;
+ if(derivative){
+  const part=u<.2?[-inbound,u/.2]:u>.8?[exit,(u-.8)/.2]:null;
+  return part&&part[0]&&part[1]>0&&part[1]<1?-part[0]*6*(1-2*part[1])/(.2*w.wallSeconds)**2:null;
+ }
+ return inbound*(1-smooth(u/.2))+exit*smooth((u-.8)/.2);
+}
+// A 1g migration between tight Kerr orbits can wind thousands of times.
+// Display representative turns only. The omitted azimuth spans
+// whole turns, so the display agrees exactly at both contacts.
+// The integrator's unwrapped angle, velocity, acceleration and clocks stay intact.
+function radiusChartSample(plan,u,physical=sampleCircularRadius(plan,u)){
+ return plan.viewAzimuth===undefined?physical:{...physical,angle:plan.viewAzimuth*u};
+}
+// Add screen time where the actual torque vector swings. The azimuth can be
+// quiet while the nozzles change from pointing radially to tangentially.
+const radiusHeadingClocks=new Map();
+function radiusHeadingClock(plan,endpointClock,leg,up,edge){
+ // Repeated route previews and the HUD ask for the same time law. Azimuthal
+ // symmetry makes this budget independent of the starting longitude.
+ const key=[edge,plan.ra,plan.rb,plan.height,plan.mu,plan.kerr?.spin,plan.coordinateSeconds,endpointClock.wallSeconds].join('/');
+ if(radiusHeadingClocks.has(key))return radiusHeadingClocks.get(key);
+ const rows=[[0,0]],route={plan,endpointClock,tangentLeg:leg,radiusTransfer:true};
+ let previous=null,seconds=0;const N=192;
+ for(let i=0;i<=N;i++){
+  const u=i/N,shot=guidedSample(route,u,up,edge),nose=shot.facing;
+  if(previous){
+   const angle=Math.atan2(Math.hypot(...cross(nose,previous)),dot(nose,previous));
+   seconds+=endpointClock.wallSeconds/N+angle/.92;rows.push([seconds,u]);
+  }
+  previous=nose;
+ }
+ const clock={seconds,rows};if(radiusHeadingClocks.size>=24)radiusHeadingClocks.delete(radiusHeadingClocks.keys().next().value);radiusHeadingClocks.set(key,clock);return clock;
+}
+function radiusPlaybackProgress(clock,u){
+ if(!clock||u<=0||u>=1)return u;
+ const t=u*clock.seconds,rows=clock.rows;let l=0,h=rows.length-1;
+ while(h-l>1){const m=(l+h)>>1;if(rows[m][0]<t)l=m;else h=m;}
+ return rows[l][1]+(rows[h][1]-rows[l][1])*(t-rows[l][0])/(rows[h][0]-rows[l][0]);
+}
+function guidedSample(t,progress,up,edgeShuttle){
  if(t.radiusTransfer){
-  const sample=sampleCircularRadius(t.plan,progress),pose=circularRadiusPose(t.tangentLeg,sample);
+  // Slow the presentation clock near ignition and cutoff to resolve the
+  // brief radial-to-tangential yaw. The underlying physical clock and orbit
+  // are sampled together, without changing the applied thrust.
+  progress=radiusPlaybackProgress(t.headingClock,progress);
+  const {ra,rb,logRatio}=t.plan;
+  const physicalProgress=transferEase;
+  const radialFraction=u=>ra*Math.expm1(logRatio*transferEase(physicalProgress(u)))/(rb-ra);
+  progress=physicalProgress(contactPlaybackProgress(t.endpointClock,progress,radialFraction));
+  const sample=sampleCircularRadius(t.plan,progress),pose=circularRadiusPose(t.tangentLeg,radiusChartSample(t.plan,progress,sample));
   t.orbitRadial=pose.radial;t.orbitRadius=sample.radius;
   const drive=add(add(mul(pose.radial,sample.radialThrust),mul(pose.tangent,sample.tangentialThrust)),mul(up,sample.normalThrust));
   // Blend the parking attitude into the finite-vector burn for viewing. Drive
   // handoff always inherits the path velocity, independent of nose direction.
   const acquire=transferEase(Math.min(progress,1-progress)/.07);
   const facing=Math.hypot(...drive)>1e-12?directionMix(pose.tangent,unit(drive),acquire):pose.tangent;
+  if(edgeShuttle){
+   const yaw=edgeBurnYaw(t.plan,progress,sample);
+   return {sample,playback:sample,...pose,facing:add(mul(pose.tangent,Math.cos(yaw)),mul(pose.radial,Math.sin(yaw))),fraction:progress};
+  }
   return {sample,playback:sample,...pose,facing,fraction:progress};
  }
  // At the non-tangent departure from an outer circle, let the pilot see
@@ -220,20 +292,21 @@ function guidedSample(t,progress,up){
  // no simulated path length or onboard travel time elapses during it.
  const prep=(t.prepSeconds||0)/t.wallSeconds;
  if(prep>0&&progress<prep){
-  const v=progress/prep,facing=levelTurn(t.initialBasis[2],t.tangent,up,v);
-  return {playback:{phase:'Aligning for descent',phaseIndex:0,turnAngle:0,commandedThrustG:0},sample:sampleTransfer(t.plan,0),fraction:0,p:[...t.points[0]],forward:t.tangent,facing};
+  const v=progress/prep,attitude=blendAttitude(t.initialBasis,t.departureBasis||orthonormalFrame([t.initialBasis[0],up,t.tangent]),transferEase(v)),facing=attitude[2];
+  return {playback:{phase:'Aligning for departure',phaseIndex:0,turnAngle:0,commandedThrustG:0},sample:sampleTransfer(t.plan,0),fraction:0,p:[...t.points[0]],forward:t.tangent,facing,attitude};
  }
  if(prep>0)progress=(progress-prep)/(1-prep);
  const c=t.capture,captureViewFraction=captureFraction(t);
  if(!c||progress>=captureViewFraction){
-  const u=c?(progress-captureViewFraction)/(1-captureViewFraction):progress,playback=transferPlayback(t,u),sample=playback.sample??sampleTransferAtDistance(t.plan,playback.distanceFraction),x=sample.distanceFraction;
+  const u=c?(progress-captureViewFraction)/(1-captureViewFraction):progress,playback=transferPlayback(t,u),sample=playback.sample??sampleTransferAtDistance(t.plan,playback.distanceFraction,playback.remainingFraction),x=sample.distanceFraction;
   if(c){sample.properSeconds+=c.properSeconds;sample.coordinateSeconds+=c.coordinateSeconds;sample.dilationSeconds+=c.dilationSeconds;}
-  return {playback,sample,fraction:x,p:mix(t.points[0],t.points[1],x),forward:t.tangent};
+  const p=x>.5&&playback.remainingFraction!=null?add(t.points[1],mul(sub(t.points[0],t.points[1]),playback.remainingFraction)):mix(t.points[0],t.points[1],x);
+  return {playback,sample,fraction:x,p,forward:t.tangent};
  }
  const u=progress/captureViewFraction,coastEnd=c.turnSeconds/c.viewSeconds,brakeEnd=(c.turnSeconds+(c.brakeViewSeconds||1.5))/c.viewSeconds;
- let facing,forward=c.direction,sample,x,phase,thrust=0;
+ let facing,attitude,forward=c.direction,sample,x,phase,thrust=0;
  if(u<coastEnd){
-  const v=u/coastEnd;x=c.coast*v;facing=levelTurn(t.initialBasis[2],c.retro,up,v);phase='Turning to brake';sample={...sampleTransfer(c.brake,0),coordinateSeconds:c.coastT*v,properSeconds:c.coastTau*v,dilationSeconds:c.coastLag*v};
+  const v=u/coastEnd;x=c.coast*v;attitude=blendAttitude(t.initialBasis,orthonormalFrame([t.initialBasis[0],up,c.retro]),transferEase(v));facing=attitude[2];phase='Turning to brake';sample={...sampleTransfer(c.brake,0),coordinateSeconds:c.coastT*v,properSeconds:c.coastTau*v,dilationSeconds:c.coastLag*v};
  }else if(u<brakeEnd){
   const v=transferEase((u-coastEnd)/(brakeEnd-coastEnd));sample=sampleTransfer(c.brake,v);x=c.coast+sample.distanceMeters;facing=c.retro;phase=t.craftType==='enterprise'?'Reducing warp':'Braking to rest';thrust=t.craftType==='shuttle'?1:0;
   sample.coordinateSeconds+=c.coastT;sample.properSeconds+=c.coastTau;sample.dilationSeconds+=c.coastLag;
@@ -241,7 +314,7 @@ function guidedSample(t,progress,up){
   const v=(u-brakeEnd)/(1-brakeEnd);forward=levelTurn(c.direction,t.tangent,up,v);facing=levelTurn(c.retro,t.tangent,up,v);phase='Aligning at rest';x=c.length;
   sample={...sampleTransfer(c.brake,1),coordinateSeconds:c.coordinateSeconds-c.alignT*(1-v),properSeconds:c.properSeconds-c.alignT*(1-v),dilationSeconds:c.dilationSeconds,speedMetersPerSecond:0,rapidity:0};
  }
- return {playback:{phase,phaseIndex:3,commandedThrustG:thrust,turnAngle:0},sample,fraction:0,captureDistance:x,p:add(c.start,mul(c.direction,x)),forward,facing};
+ return {playback:{phase,phaseIndex:3,commandedThrustG:thrust,turnAngle:0},sample,fraction:0,captureDistance:x,p:add(c.start,mul(c.direction,x)),forward,facing,attitude};
 }
 function gravityTimelineAt(rows,time){
  let lo=0,hi=rows.length-1;
@@ -250,7 +323,8 @@ function gravityTimelineAt(rows,time){
  return g0+u*(g1-g0);
 }
 function planRoute(r,id,options={}){
- const craft=travelCraft(r,options),item=targetInfo(r,id,options);if(!item||!craft)return {error:'Select a Shuttle or Enterprise, then choose an orbitable destination.'};
+ const craft=travelCraft(r,options),item=targetInfo(r,id,options);if(!item||!craft)return {error:'Select a Shuttle or NASA Warp Explorer, then choose an orbitable destination.'};
+ if(item.dockable)return {error:'Choose Dock in the flight playlist for a station rendezvous.'};
  r.fillHoles();r.fillObjects();const leg=options.tangentLeg||orbitalTangentLeg(r,id,options);if(leg.error)return leg;
  const ship=r.getFocusFrame(craft.id),shipRadius=physical(ship),manual=r.driveId===craft.id&&!craft.flight?.orbitHold,{start,end,length,initialSpeed,finalSpeed,center,tangent}=leg;
  const initialBasis=(manual?craft.flight.basis:ship.frame).map(v=>[...v]),capture=leg.capture,initialVelocity=capture?.velocity||(manual?(craft.type==='enterprise'?warpVelocity(craft.flight):[...craft.flight.velocity]):mul(tangent,initialSpeed)),points=[start,end],arc=[0,length];
@@ -294,9 +368,9 @@ function planRoute(r,id,options={}){
   }
   return {error:'The straight tangent would intersect '+obstacle.name+'. Choose another stop or parking radius.'};
  }
- const plan=leg.radiusPlan?{...leg.radiusPlan}:estimateTransfer(length,craft.type,options.warpFactor??1,{initialSpeed,finalSpeed,flipCoast:craft.type==='shuttle',rejoin:!!options.rejoin,transferProperSeconds:options.transferProperSeconds});if(plan.error)return plan;
+ const plan=leg.radiusPlan?{...leg.radiusPlan}:estimateTransfer(length,craft.type,options.warpFactor??sceneCruiseWarp(r.sceneId)??1,{cruiseWarpLimit:sceneCruiseWarp(r.sceneId),initialSpeed,finalSpeed,flipCoast:craft.type==='shuttle',rejoin:!!options.rejoin,transferProperSeconds:options.transferProperSeconds});if(plan.error)return plan;
  let gravityLag=0;
- if(craft.type==='shuttle'){
+ if(craft.type==='shuttle'&&!plan.kerr){
   const sources=r.clockSources(),gravity=positionMeters=>Math.max(0,clockRate({id:craft.id,positionMeters,bodyRadiusMeters:shipRadius,sources}).gravityExcess||0);
   const integrate=(profile,from,to,n)=>{let previous=0;for(let i=1;i<=n;i++){const next=sampleTransfer(profile,i/n),mid=sampleTransfer(profile,(i-.5)/n);gravityLag+=(next.coordinateSeconds-previous)*gravity(mix(from,to,mid.distanceFraction));previous=next.coordinateSeconds;}};
   if(capture){const brakeStart=add(capture.start,mul(capture.direction,capture.coast));gravityLag+=capture.coastT*gravity(mix(capture.start,brakeStart,.5))+capture.alignT*gravity(capture.stop);integrate(capture.brake,brakeStart,capture.stop,8);}
@@ -324,10 +398,20 @@ function planRoute(r,id,options={}){
    }
   }else integrate(plan,start,end,16);
  }
- const pathParameters=Array.from({length:25},(_,i)=>i/24),pathFractions=pathParameters,pathBasePoints=pathParameters.map(u=>leg.radiusTransfer?circularRadiusPose(leg,sampleCircularRadius(plan,u)).p:mix(start,end,u));
- if(capture){capture.turnSeconds=HALF_TURN_SECONDS*Math.abs(capture.angle)/Math.PI;capture.brakeViewSeconds=craft.type==='enterprise'?3:1.5;capture.viewSeconds=capture.turnSeconds+capture.brakeViewSeconds+HALF_TURN_SECONDS*Math.acos(Math.max(-1,Math.min(1,dot(capture.retro,tangent))))/Math.PI;}
- const prepSeconds=leg.concentric&&!leg.radiusTransfer?HALF_TURN_SECONDS*Math.acos(Math.min(1,Math.max(-1,dot(leg.departureTangent,tangent))))/Math.PI:0;
- return {radiusTransfer:!!leg.radiusTransfer,radiusChange:!!leg.radiusTransfer,straight:!leg.radiusTransfer,straightLeg:!leg.radiusTransfer,rejoinOptions:leg.rejoinStage?{usedClearanceStage:!!leg.clearanceStage||!!options.usedClearanceStage,craftId:craft.id,rejoin:true,fromSequence:true,sequenceManaged:true,orbitRadii:options.orbitRadii,warpFactor:options.warpFactor}:null,prepSeconds,capture,waypoint:leg.waypoint,tangentLeg:leg,departureOrbitRadius:leg.departureRadius,initialBasis,initialVelocity,initialSpeed:capture?.speed??initialSpeed,finalSpeed,craftId:craft.id,craftType:craft.type,type:craft.type,warpFactor:plan.warpFactor,wallSeconds:TRANSFER_WALL_SECONDS+prepSeconds+(capture?.viewSeconds||0),targetId:id,targetName:item.name,targetMassSolar:r.getFocusFrame(id).massSolar||0,mode:craft.type==='shuttle'?'1g':'Warp '+Number(plan.warpFactor.toFixed(2)),coordinateSeconds:plan.coordinateSeconds+gravityLag+(capture?.coordinateSeconds||0),properSeconds:plan.properSeconds+(capture?.properSeconds||0),distanceMeters:length+(capture?.length||0),orbitRadiusMeters:leg.arrivalRadius,dilationSeconds:plan.dilationSeconds+gravityLag+(capture?.dilationSeconds||0),estimatedDilationSeconds:plan.dilationSeconds+gravityLag+(capture?.dilationSeconds||0),pathPoints:capture?[capture.start,...pathBasePoints]:pathBasePoints,pathParameters,pathBasePoints,pathFractions,plan,points,arc,center,offset:sub(end,center),phase:leg.arrivalPhase,tangent};
+ if(leg.radiusTransfer){
+  const sweep=sampleCircularRadius(plan,1).angle,whole=Math.floor(sweep/(2*Math.PI));
+  if(whole>=3)plan.viewAzimuth=sweep-(whole-1)*2*Math.PI;
+ }
+ const pathParameters=Array.from({length:25},(_,i)=>i/24),pathFractions=pathParameters,pathBasePoints=pathParameters.map(u=>leg.radiusTransfer?circularRadiusPose(leg,radiusChartSample(plan,u)).p:mix(start,end,u));
+ if(capture){capture.turnSeconds=turnDuration(attitudeAngle(initialBasis,orthonormalFrame([initialBasis[0],r.configCache.primaryBasis[1],capture.retro])));capture.brakeViewSeconds=craft.type==='enterprise'?3:1.5;capture.viewSeconds=capture.turnSeconds+capture.brakeViewSeconds+turnDuration(angleBetween(capture.retro,tangent));}
+ const reverseStart=!leg.radiusTransfer&&craft.type==='shuttle'&&!plan.coast&&plan.upRapidity<1e-13&&plan.downRapidity>plan.upRapidity;
+ const departureBasis=orthonormalFrame([initialBasis[0],r.configCache.primaryBasis[1],reverseStart?mul(tangent,-1):tangent]);
+ const prepSeconds=!leg.radiusTransfer&&!capture?turnDuration(attitudeAngle(initialBasis,departureBasis)):0;
+ // Spend screen time on the last few planetary radii, wherever this leg is
+ // flown. Use radial travel for a spiral rather than counting its many laps.
+ const endpointClock=contactPlaybackClock(leg.radiusTransfer?Math.abs(plan.rb-plan.ra):length,leg.departureRadius,leg.arrivalRadius,TRANSFER_WALL_SECONDS);
+ const headingClock=leg.radiusTransfer?radiusHeadingClock(plan,endpointClock,leg,r.configCache.primaryBasis[1],r.sceneId==='nasa-shuttle'&&craft.type==='shuttle'):null;
+ return {headingClock,endpointClock,radiusTransfer:!!leg.radiusTransfer,radiusChange:!!leg.radiusTransfer,straight:!leg.radiusTransfer,straightLeg:!leg.radiusTransfer,rejoinOptions:leg.rejoinStage?{usedClearanceStage:!!leg.clearanceStage||!!options.usedClearanceStage,craftId:craft.id,rejoin:true,fromSequence:true,sequenceManaged:true,orbitRadii:options.orbitRadii,warpFactor:options.warpFactor}:null,departureBasis,prepSeconds,capture,waypoint:leg.waypoint,tangentLeg:leg,departureOrbitRadius:leg.departureRadius,initialBasis,initialVelocity,initialSpeed:capture?.speed??initialSpeed,finalSpeed,craftId:craft.id,craftType:craft.type,type:craft.type,warpFactor:plan.warpFactor,wallSeconds:(headingClock?.seconds??endpointClock.wallSeconds)+prepSeconds+(capture?.viewSeconds||0),targetId:id,targetName:item.name,targetMassSolar:r.getFocusFrame(id).massSolar||0,mode:craft.type==='shuttle'?'1g':'Warp '+Number(plan.warpFactor.toFixed(2)),coordinateSeconds:plan.coordinateSeconds+gravityLag+(capture?.coordinateSeconds||0),properSeconds:plan.properSeconds+(capture?.properSeconds||0),distanceMeters:length+(capture?.length||0),orbitRadiusMeters:leg.arrivalRadius,dilationSeconds:plan.dilationSeconds+gravityLag+(capture?.dilationSeconds||0),estimatedDilationSeconds:plan.dilationSeconds+gravityLag+(capture?.dilationSeconds||0),pathPoints:capture?[capture.start,...pathBasePoints]:pathBasePoints,pathParameters,pathBasePoints,pathFractions,plan,points,arc,center,offset:sub(end,center),phase:leg.arrivalPhase,tangent};
 }
 // A numerical forecast for the itinerary inspector. Skip visual path sampling,
 // and retain the modelled clock deficit even when the two totals round alike.
@@ -346,26 +430,35 @@ export function summarizePlannedRoute(r,id,options){
  }
  return {properSeconds,coordinateSeconds,dilationSeconds,distanceMeters,peakSpeed,
   arrivalRadial:route.tangentLeg.arrivalRadial||route.tangentLeg.radial,
-  description:plan.radiusTransfer?'Powered circular radius change.':route.craftType==='enterprise'?'Warp transfer with a protected onboard clock.':'1g transfer with a flip and braking burn.'};
+  description:plan.viewAzimuth!==undefined?'Powered circular radius change; representative turns are shown.':plan.radiusTransfer?'Powered circular radius change.':route.craftType==='enterprise'?'Warp transfer with a protected onboard clock.':'1g transfer with a flip and braking burn.'};
 }
 // Global orbit context plus magnified samples around the ship. A physical-size
 // Shuttle is only tens of metres across while transfers span AU: global samples
 // alone produce a chord that can miss the visible vehicle by kilometres.
 export function routePathSamples(route,r){
  if(route.radiusTransfer){
-  const leg=route.tangentLeg,plan=route.plan,u=route.curveParameter||0,here=sampleCircularRadius(plan,u),origin=circularRadiusPose(leg,here);
+  const leg=route.tangentLeg,plan=route.plan,u=route.curveParameter||0,here=radiusChartSample(plan,u),origin=circularRadiusPose(leg,here);
   const span=physical(r.getFocusFrame(route.craftId)||{})*(r.camera?.focusDistance||6);
   // Limit a multi-revolution spiral to the adjacent turns rather than drawing
   // enormous chords through its centre. Add precision samples around the ship.
-  const angleAt=x=>sampleCircularRadius(plan,x).angle;
+  const angleAt=x=>radiusChartSample(plan,x).angle;
   const bound=target=>{let a=0,b=1;for(let j=0;j<36;j++){const x=(a+b)/2;if(angleAt(x)<target)a=x;else b=x;}return (a+b)/2;};
-  const limit=2*Math.PI,lo=here.angle>limit?bound(here.angle-limit):0,hi=angleAt(1)>here.angle+limit?bound(here.angle+limit):1;
+  const limit=Math.PI,lo=here.angle>limit?bound(here.angle-limit):0,hi=angleAt(1)>here.angle+limit?bound(here.angle+limit):1;
   const samples=new Set([lo,u,hi]);for(let i=1;i<128;i++)samples.add(lo+(hi-lo)*i/128);
-  const eps=1e-6,v=sampleCircularRadius(plan,Math.min(1,u+eps)),w=sampleCircularRadius(plan,Math.max(0,u-eps)),du=Math.min(1,u+eps)-Math.max(0,u-eps);
+  const eps=1e-6,v=radiusChartSample(plan,Math.min(1,u+eps)),w=radiusChartSample(plan,Math.max(0,u-eps)),du=Math.min(1,u+eps)-Math.max(0,u-eps);
   const localLength=Math.hypot(v.radius-w.radius,here.radius*(v.angle-w.angle))/du;
   for(let d=Math.max(1,span*.02)/Math.max(1,localLength),j=0;j<48&&d<hi-lo;j++,d*=1.65)for(const x of [u-d,u+d])if(x>lo&&x<hi)samples.add(x);
-  const sorted=[...samples].sort((a,b)=>a-b);
-  route.pathOffsets=sorted.map(x=>{const s=sampleCircularRadius(plan,x),d=s.angle-here.angle;return add(mul(origin.radial,(s.radius-here.radius)-2*s.radius*Math.sin(d/2)**2),mul(origin.tangent,s.radius*Math.sin(d)));});
+  // Preserve unwrapped azimuth through optical decimation. Connecting sparse
+  // projected samples of a tight spiral otherwise invents a chord through it.
+  const knots=[...samples].sort((a,b)=>a-b).map(x=>({x,s:radiusChartSample(plan,x)}));
+  let budget=64;
+  for(let i=1;i<knots.length&&budget>0;i++){
+   const a=knots[i-1],b=knots[i];if(b.s.angle-a.s.angle<=.12)continue;
+   const x=(a.x+b.x)/2;if(x===a.x||x===b.x)continue;
+   knots.splice(i,0,{x,s:radiusChartSample(plan,x)});budget--;i--;
+  }
+  route.pathAngles=knots.map(k=>k.s.angle-here.angle);
+  route.pathOffsets=knots.map(({s},i)=>{const d=route.pathAngles[i];return add(mul(origin.radial,(s.radius-here.radius)-2*s.radius*Math.sin(d/2)**2),mul(origin.tangent,s.radius*Math.sin(d)));});
   return route.pathOffsets.map(o=>add(origin.p,o));
  }
  if(route.straightLeg){
@@ -421,7 +514,7 @@ export function beginRoute(r,id,options={}){
  const orbit=parkedOrbitGeometry(r,options.craftId||r.selectedId),departureEye=orbit?parkedCameraFraming(r,orbit).eye:null,departureCameraAdjusted=!!r.parkedCamera?.released;
  const departureGuide=r.parkedCamera;
  const route=planRoute(r,id,options);if(route.error){r.lastTravelError=route.error;return false;}r.lastTravelError='';if(r.transfer?.active)cancelRoute(r);const craft=r.objects.find(o=>o.id===route.craftId),autonomous=r.driveId!==craft.id;
- const excursion=r.sceneId==='warp-excursion'&&!!r.excursionFrame?.(r.getFocusFrame(craft.id)),sideGuide=r.cameraGuide,sideDistance=r.camera.focusDistance,sideTarget=r.target.focusDistance;
+ const excursion=warpStudyId(r.sceneId)==='warp-excursion'&&!!r.excursionFrame?.(r.getFocusFrame(craft.id)),sideGuide=r.cameraGuide,sideDistance=r.camera.focusDistance,sideTarget=r.target.focusDistance;
  if(autonomous&&!r.setFreeDrive(craft.id,true,{guidance:true}))return false;
  if(excursion){r.cameraGuide=sideGuide;r.camera.focusDistance=sideDistance;r.target.focusDistance=sideTarget;}
  // Drive can hold its analytic orbit at zero throttle. Guidance takes over only
@@ -432,12 +525,16 @@ export function beginRoute(r,id,options={}){
  if(r.focusId!==craft.id||r.focusMode!=='track')r.focusTarget(craft.id,'track');
  r.updateCameraFrame();const ship=r.getFocusFrame(craft.id),reference=r.focusReferenceFrame?.id===craft.id?r.focusReferenceFrame.basis:ship.frame,eye=unit(mul(cameraRelative(ship.position,r.cameraFrame),-1));
  if(!excursion)r.cameraGuide=null;r.focusReferenceFrame={id:craft.id,basis:reference.map(v=>[...v])};
- r.transfer={...route,departureEye,cameraAdjusted:departureCameraAdjusted,curveParameter:0,currentPosition:[...departure],currentDistanceFraction:0,targetDrift:[0,0,0],active:true,autonomous,craftId:craft.id,elapsed:0,wallSeconds:route.wallSeconds,progress:0,initialSpeed:route.initialSpeed,parkingSpeed:route.finalSpeed,initialBasis:craft.flight.basis.map(v=>[...v]),cameraBasis:reference.map(v=>[...v]),cameraEye:eye,cameraInitialUp:[...r.cameraFrame.up],cameraAngles:[r.target.yaw,r.target.pitch,r.target.lookYaw,r.target.lookPitch,r.target.focusDistance],sample:sampleTransfer(route.capture?.brake||route.plan,0),gravityLag:0,coordinateElapsedSeconds:0,properElapsedSeconds:0,phaseName:route.capture?(route.capture.turnSeconds?'Turning to brake':craft.type==='shuttle'?'Braking to rest':'Slowing down'):route.radiusTransfer?sampleCircularRadius(route.plan,0).phase:'Leaving orbit',commandedThrustG:route.radiusTransfer?sampleCircularRadius(route.plan,0).commandedThrustG:route.capture?(route.capture.turnSeconds||craft.type!=='shuttle'?0:1):undefined};
+ // Synchronize the actual engine and the HUD at handover, before a frame
+ // can sample stale manual throttle or label an engine-off alignment as 1g.
+ const ignition=guidedSample(route,0,r.configCache.primaryBasis[1],r.sceneId==='nasa-shuttle'&&craft.type==='shuttle');
+ craft.flight.thrust=craft.type==='shuttle'?ignition.playback.commandedThrustG:0;
+ r.transfer={...route,departureEye,cameraAdjusted:departureCameraAdjusted,curveParameter:0,currentPosition:[...departure],currentDistanceFraction:0,targetDrift:[0,0,0],active:true,autonomous,craftId:craft.id,elapsed:0,wallSeconds:route.wallSeconds,progress:0,initialSpeed:route.initialSpeed,parkingSpeed:route.finalSpeed,initialBasis:craft.flight.basis.map(v=>[...v]),cameraBasis:reference.map(v=>[...v]),cameraEye:eye,cameraInitialUp:[...r.cameraFrame.up],cameraAngles:[r.target.yaw,r.target.pitch,r.target.lookYaw,r.target.lookPitch,r.target.focusDistance],sample:ignition.sample,gravityLag:0,coordinateElapsedSeconds:0,properElapsedSeconds:0,phaseName:route.capture?(route.capture.turnSeconds?'Turning to brake':craft.type==='shuttle'?'Braking to rest':'Slowing down'):route.radiusTransfer?sampleCircularRadius(route.plan,0).phase:'Leaving orbit',commandedThrustG:craft.flight.thrust};
  // Keep the circular camera's local orientation and manual offsets across the change of motion authority.
  if(route.radiusTransfer&&departureGuide?.craftId===craft.id)r.parkedCamera=departureGuide;
  if(route.radiusTransfer){r.transfer.orbitRadial=route.tangentLeg.radial;r.transfer.orbitRadius=route.departureOrbitRadius;}
  r.transfer.pathPoints=routePathSamples(r.transfer,r);r.transfer.cameraTarget=mul(route.center,1/REFERENCE_RG_METERS);r.transfer.cameraAimOffset=[0,0,0];r.transfer.cameraPathUp=[...r.cameraFrame.up];r.transfer.cameraGuideBlend=0;r.lastTransfer=null;r.flightInput={speed:0,curvature:0,torsion:0};craft.flight.brakeSpeed=false;craft.flight.brakeTurn=false;r.state.paused=false;
- if(craft.type==='enterprise'){r.state.warp=true;r.warpObjectId=craft.id;r.state.warpScenario=r.sceneId==='warp-excursion'&&route.waypoint?'excursion':'orbit';r.state.warpFactor=warpForSpeed(craft.flight.speed);craft.flight.warpSetting=r.state.warpFactor;for(const o of r.objects)o.warpEnabled=o.id===craft.id;r.refreshConfiguration();}
+ if(craft.type==='enterprise'){r.state.warp=true;r.warpObjectId=craft.id;r.state.warpScenario=warpStudyId(r.sceneId)==='warp-excursion'&&route.waypoint?'excursion':'orbit';r.state.warpFactor=warpForSpeed(craft.flight.speed);craft.flight.warpSetting=r.state.warpFactor;for(const o of r.objects)o.warpEnabled=o.id===craft.id;r.refreshConfiguration();}
  return true;
 }
 // Camera stays in the craft's normal orbit controls. Its default eye follows
@@ -445,7 +542,7 @@ export function beginRoute(r,id,options={}){
 export function guideRouteCamera(r,t,craft,position,pathBasis){
  if(r.bridgeHullCamera?.(craft.id))return; // Orbit/look offsets already live in the hull frame.
  if(t.radiusTransfer)return; // The ordinary orbit camera continues through the burn and hull flip.
- if(r.sceneId==='warp-excursion'&&r.excursionFrame?.(r.getFocusFrame(craft.id)))return;
+ if(warpStudyId(r.sceneId)==='warp-excursion'&&r.excursionFrame?.(r.getFocusFrame(craft.id)))return;
 
  // Follow the instantaneous trajectory tangent, including during a nose flip.
  // Keep the vanishing point just above center on straight legs.
@@ -465,6 +562,18 @@ export function guideRouteCamera(r,t,craft,position,pathBasis){
   const duration=t.wallSeconds||10,blend=transferEase(Math.min(1,t.elapsed/(duration*.14))),endBlend=transferEase(Math.max(0,(t.elapsed/duration-.86)/.14));
   const raised=toWorld(path,[0,-Math.sin(AUTO_EYE_ELEVATION),Math.cos(AUTO_EYE_ELEVATION)]);
   let aim=directionMix(toWorld(path,t.cameraDepartureDirection),raised,blend),weight=blend;
+  // Keep the departure and approach looking along the trajectory. Across
+  // interstellar space the side view reveals the field and the passing stars.
+  if(craft.type==='enterprise'&&t.distanceMeters>9.46073e13&&!t.waypoint&&t.cameraAngles){ // beyond 0.01 light-year
+   const u=t.elapsed/duration,side=smooth((u-.23)/.19)*smooth((.67-u)/.13);
+   const rect=r.canvas.getBoundingClientRect(),cssWidth=window.innerWidth||rect.width,cssHeight=window.innerHeight||rect.height,key=[rect.width,rect.height,cssWidth,cssHeight].join('/');
+   if(key!==t.cruiseFitKey){
+    t.cruiseFitKey=key;
+    t.cruiseFitDistance=warpSideFraming(rect.width,rect.height,t.warpFactor,{driving:true,cssWidth,cssHeight}).distance;
+   }
+   t.cruiseZoom=1+side*(Math.max(1,(t.cruiseFitDistance||0)/Math.max(1,t.cameraAngles[4]))-1);
+   aim=directionMix(aim,path[0],side);weight*=1-side;
+  }
   if(endBlend>0&&!t.waypoint){
    if(!t.cameraArrivalDirection){
     if(t.bridgeRoute&&t.orbitRadiusMeters>0&&t.endPose){
@@ -487,7 +596,7 @@ export function guideRouteCamera(r,t,craft,position,pathBasis){
 
 function releaseGuidedAim(r,t){
  if(r.bridgeHullCamera?.(t.craftId))return;
- if(r.sceneId==='warp-excursion'&&r.excursionFrame?.(r.getFocusFrame(t.craftId)))return;
+ if(warpStudyId(r.sceneId)==='warp-excursion'&&r.excursionFrame?.(r.getFocusFrame(t.craftId)))return;
  if(r.focusId!==t.craftId||r.focusMode!=='track'||r.focusReferenceFrame?.id!==t.craftId||!r.cameraFrame)return;
  // Bake the complete guided pose into ordinary orbit/look controls. Solving
  // only the forward vector preserved heading but could jump in camera roll.
@@ -500,12 +609,12 @@ function releaseGuidedAim(r,t){
 
 export function releaseRouteCamera(r){const guide=r.parkedCamera||r.transfer||r.lastTransfer;if(guide)releaseGuidedAim(r,guide);r.parkedCamera=null;}
 export function cancelRoute(r){if(!r.transfer?.active)return false;releaseRouteCamera(r);r.lastTransfer={...routeState(r),active:false,autopilot:false,phase:'Cancelled',stage:'Cancelled'};r.transfer=null;return true;}
-export function routeState(r){const t=r.transfer;if(!t?.active)return r.lastTransfer||{active:false};return {active:true,radiusChange:!!t.radiusTransfer,radiusTransfer:!!t.radiusTransfer,departureArcSeconds:t.departureArcSeconds||0,autopilot:true,phaseIndex:t.phaseIndex||0,commandedThrustG:t.commandedThrustG??(t.craftType==='shuttle'?1:0),turningSign:t.turningSign||0,headingDegrees:t.headingDegrees||0,autonomous:t.autonomous,craftId:t.craftId,craftType:t.craftType,type:t.craftType,warpFactor:t.warpFactor,wallSeconds:t.wallSeconds,wallElapsedSeconds:t.elapsed,targetId:t.targetId,targetName:t.targetName,mode:t.mode,progress:t.progress,phase:t.phaseName,stage:t.phaseName,progressPercent:t.progress*100,remainingProperSeconds:Math.max(0,t.properSeconds-t.properElapsedSeconds),coordinateElapsedSeconds:t.coordinateElapsedSeconds,properElapsedSeconds:t.properElapsedSeconds,coordinateSeconds:t.coordinateSeconds,properSeconds:t.properSeconds,estimatedDilationSeconds:t.estimatedDilationSeconds,dilationSeconds:t.sample.dilationSeconds+t.gravityLag,orbitRadiusMeters:t.orbitRadiusMeters,pathPoints:t.pathPoints,pathOffsets:t.pathOffsets,pathLengthMeters:t.distanceMeters,cameraAdjusted:!!t.cameraAdjusted,cameraTarget:t.cameraTarget,cameraAimOffset:t.cameraAimOffset,cameraPathUp:t.cameraPathUp,cameraGuideBlend:t.cameraGuideBlend};}
+export function routeState(r){const t=r.transfer;if(!t?.active)return r.lastTransfer||{active:false};return {active:true,radiusChange:!!t.radiusTransfer,radiusTransfer:!!t.radiusTransfer,physicalTurns:t.plan?.viewAzimuth===undefined?null:(t.sample?.angle||0)/(2*Math.PI),departureArcSeconds:t.departureArcSeconds||0,autopilot:true,phaseIndex:t.phaseIndex||0,commandedThrustG:t.commandedThrustG??(t.craftType==='shuttle'?1:0),turningSign:t.turningSign||0,headingDegrees:t.headingDegrees||0,autonomous:t.autonomous,craftId:t.craftId,craftType:t.craftType,type:t.craftType,warpFactor:t.warpFactor,wallSeconds:t.wallSeconds,wallElapsedSeconds:t.elapsed,targetId:t.targetId,targetName:t.targetName,mode:t.mode,progress:t.progress,phase:t.phaseName,stage:t.phaseName,progressPercent:t.progress*100,remainingProperSeconds:Math.max(0,t.properSeconds-t.properElapsedSeconds),coordinateElapsedSeconds:t.coordinateElapsedSeconds,properElapsedSeconds:t.properElapsedSeconds,coordinateSeconds:t.coordinateSeconds,properSeconds:t.properSeconds,estimatedDilationSeconds:t.estimatedDilationSeconds,dilationSeconds:t.sample.dilationSeconds+t.gravityLag,orbitRadiusMeters:t.orbitRadiusMeters,pathPoints:t.pathPoints,pathOffsets:t.pathOffsets,pathAngles:t.pathAngles,pathLengthMeters:t.distanceMeters,cameraAdjusted:!!t.cameraAdjusted,cameraTarget:t.cameraTarget,cameraAimOffset:t.cameraAimOffset,cameraPathUp:t.cameraPathUp,cameraGuideBlend:t.cameraGuideBlend};}
 function addClock(clock,key,comp,delta){const y=delta-(clock[comp]||0),old=clock[key]||0,n=Math.min(1e300,old+y);clock[comp]=(n-old)-y;clock[key]=n;}
 export function advanceRoute(r,dt){
  const t=r.transfer;if(!t?.active)return false;if(t.geometryTime!==r.time){r.fillHoles();r.fillObjects();t.geometryTime=r.time;}const craft=r.objects.find(o=>o.id===t.craftId),f=craft?.flight,target=r.getFocusFrame(t.targetId);if(!f||r.driveId!==t.craftId||!target){cancelRoute(r);return false;}
  r.transferClockObjectId=craft.id;
- t.elapsed=Math.min(t.wallSeconds,t.elapsed+Math.max(0,dt));if(t.elapsed>t.wallSeconds-1e-9)t.elapsed=t.wallSeconds;const progress=t.elapsed/t.wallSeconds,shot=guidedSample(t,progress,r.configCache.primaryBasis[1]),{playback,sample,p,forward,fraction}=shot,old=t.sample;
+ t.elapsed=Math.min(t.wallSeconds,t.elapsed+Math.max(0,dt));if(t.elapsed>t.wallSeconds-1e-9)t.elapsed=t.wallSeconds;const progress=t.elapsed/t.wallSeconds,shot=guidedSample(t,progress,r.configCache.primaryBasis[1],r.sceneId==='nasa-shuttle'&&craft.type==='shuttle'),{playback,sample,p,forward,fraction}=shot,old=t.sample;
  const curve={parameter:fraction},targetDrift=[0,0,0];r.lastGeometryTime=null;
  t.cameraTarget=[...target.position];t.curveParameter=curve.parameter;t.currentPosition=p;t.captureDistance=shot.captureDistance;t.currentDistanceFraction=sample.distanceFraction;t.targetDrift=targetDrift;t.progress=progress;t.pathPoints=routePathSamples(t,r);
  // Aircraft and camera share a level flight plane. A direction-only
@@ -515,15 +624,38 @@ export function advanceRoute(r,dt){
  // Observer alignment yields to manual orbit/zoom; look offsets stay live.
  guideRouteCamera(r,t,craft,p,pathBasis);
 
- const acquire=t.capture||t.prepSeconds?1:transferEase(progress/.08),desiredAttitude=acquire>=1?basis:orthonormalFrame([directionMix(t.initialBasis[0],basis[0],acquire),directionMix(t.initialBasis[1],basis[1],acquire),directionMix(t.initialBasis[2],basis[2],acquire)]),attitude=shot.facing?orthonormalFrame([pathBasis[0],normal,shot.facing]):desiredAttitude,oldForward=f.basis[2],angle=Math.atan2(dot(cross(oldForward,attitude[2]),attitude[1]),Math.max(-1,Math.min(1,dot(oldForward,attitude[2]))));
+ const acquire=t.capture||t.prepSeconds?1:transferEase(t.elapsed/TURN_SECONDS);
+ let attitude;
+ if(shot.attitude)attitude=shot.attitude;
+ else if(r.sceneId==='nasa-shuttle'&&craft.type==='shuttle'){
+  // A half-turn around the orbit normal has no arbitrary 3-D interpolation
+  // axis, even if Auto is acquiring the opposite heading from manual Drive.
+  const flat=v=>unit(sub(v,mul(normal,dot(v,normal))));
+  const nose=shot.facing?flat(shot.facing):acquire>=1?flat(basis[2]):levelTurn(flat(t.initialBasis[2]),flat(basis[2]),normal,t.elapsed/TURN_SECONDS);
+  attitude=[unit(cross(normal,nose)),normal,nose];
+ }else if(shot.facing)attitude=orthonormalFrame([pathBasis[0],normal,shot.facing]);
+ else attitude=acquire>=1?basis:blendAttitude(t.initialBasis,basis,acquire);
+ // Measure hull yaw relative to the path tangent, removing the turn of the orbit itself.
+ const yaw=Math.atan2(dot(attitude[2],right),dot(attitude[2],forward)),previous=t.yawHistory;
+ if(dt>1e-6&&craft.type==='shuttle'){
+  const rate=previous?Math.atan2(Math.sin(yaw-previous.yaw),Math.cos(yaw-previous.yaw))/dt:null;
+  t.slewAlpha=rate!==null&&Math.abs(rate)>1e-7&&previous.rate!==null?(rate-previous.rate)/((dt+previous.dt)/2):null;
+  t.yawHistory={yaw,rate,dt};
+ }
+ const oldForward=f.basis[2],angle=Math.atan2(dot(cross(oldForward,attitude[2]),attitude[1]),Math.max(-1,Math.min(1,dot(oldForward,attitude[2]))));
+
  const priorOmega=f.angularVelocity||0;f.position=p;f.basis=attitude;f.speed=Math.min(craft.type==='shuttle'?299792458*(1-8*Number.EPSILON):Infinity,sample.speedMetersPerSecond);f.velocity=mul(forward,f.speed);f.angularVelocity=dt>0?angle/dt:0;f.headingAngle=(f.headingAngle||0)+angle;f.headingTarget=f.headingAngle;f.curvature=f.speed>0?f.angularVelocity/f.speed:0;f.torsion=0;f.thrust=craft.type==='shuttle'?playback.commandedThrustG:0;f.brakeSpeed=false;f.travelCompression=1;craft.drivePosition=mul(p,1/REFERENCE_RG_METERS);craft.driveBasis=f.basis.map(v=>[...v]);
- if(craft.type==='enterprise'){r.state.warpFactor=warpForSpeed(f.speed);f.warpSetting=r.state.warpFactor;f.gridPhase=((f.gridPhase||0)+dt*.12*Math.log1p(f.speed/299792458))%4096;}
- f.visualJet=playback.phaseIndex===2&&Number.isFinite(playback.phaseProgress)?(playback.phaseProgress<.5?1:-1):Math.max(-1,Math.min(1,(f.angularVelocity-priorOmega)/Math.max(.001,dt)));
- t.progress=progress;t.phaseName=playback.phase;t.phaseIndex=playback.phaseIndex;t.commandedThrustG=f.thrust;t.turningSign=Math.abs(f.angularVelocity)>.003?Math.sign(f.angularVelocity):0;t.headingDegrees=-Math.atan2(Math.sin(f.headingAngle),Math.cos(f.headingAngle))*180/Math.PI;
- if(craft.clock){
+ if(craft.type==='enterprise'){r.state.warpFactor=warpForSpeed(f.speed);f.warpSetting=r.state.warpFactor;advanceWarpOptics(f,dt*r.effectivePlaybackSpeed());}
+ f.visualJet=craft.type==='enterprise'?warpYawCommand(dt>0?(f.angularVelocity-priorOmega)/dt:0):playback.phaseIndex===2&&Number.isFinite(playback.phaseProgress)?(playback.phaseProgress<.5?1:-1):Math.max(-1,Math.min(1,(f.angularVelocity-priorOmega)/Math.max(.001,dt)));
+ t.progress=progress;t.phaseName=t.plan.viewAzimuth!==undefined?playback.phase+' · representative turns':playback.phase;t.phaseIndex=playback.phaseIndex;t.commandedThrustG=f.thrust;t.turningSign=Math.abs(f.angularVelocity)>.003?Math.sign(f.angularVelocity):0;t.headingDegrees=-Math.atan2(Math.sin(f.headingAngle),Math.cos(f.headingAngle))*180/Math.PI;
+ // For a protected cabin the simulated chart interval is also the onboard interval.
+ // Never feed the bubble's coordinate speed into a passenger Lorentz factor.
+ if(craft.clock&&craft.type==='enterprise'){
+  tickAtClockRate(craft.clock,sample.coordinateSeconds-old.coordinateSeconds,PROTECTED_CLOCK_RATE);
+ }else if(craft.clock){
   const rendered=r.getFocusFrame(craft.id);if(rendered)rendered.position=[...craft.drivePosition];
   if(t.plan.gravityTimeline)sample.guidedGravityLag=gravityTimelineAt(t.plan.gravityTimeline,sample.coordinateSeconds);
-  const extra=Number.isFinite(sample.guidedGravityLag)?0:Math.max(0,r.clockRateForObject(craft).gravityExcess||0),distant=Math.max(0,sample.coordinateSeconds-old.coordinateSeconds),proper=Math.max(0,sample.properSeconds-old.properSeconds),lag=Math.max(0,sample.dilationSeconds-old.dilationSeconds),gravityLag=Number.isFinite(sample.guidedGravityLag)?Math.max(0,sample.guidedGravityLag-(old.guidedGravityLag||0)):extra*distant;
+  const extra=t.plan.kerr||Number.isFinite(sample.guidedGravityLag)?0:Math.max(0,r.clockRateForObject(craft).gravityExcess||0),distant=Math.max(0,sample.coordinateSeconds-old.coordinateSeconds),proper=Math.max(0,sample.properSeconds-old.properSeconds),lag=Math.max(0,sample.dilationSeconds-old.dilationSeconds),gravityLag=Number.isFinite(sample.guidedGravityLag)?Math.max(0,sample.guidedGravityLag-(old.guidedGravityLag||0)):extra*distant;
   addClock(craft.clock,'coordinateSeconds','coordinateCompensation',distant+gravityLag);addClock(craft.clock,'properSeconds','properCompensation',proper);addClock(craft.clock,'lagSeconds','lagCompensation',lag+gravityLag);craft.clock.rapidityVector=mul(forward,sample.rapidity);t.gravityLag+=gravityLag;
   const required=r.advanceCrewExposure?.(craft,proper,sample);
   // Use the same locally corrected force demand for the engine and the HUD.
@@ -540,7 +672,8 @@ export function advanceRoute(r,dt){
    const q=r.flightSequences?.[craft.id];if(q){q.active=false;q.inFlight=false;q.error=r.lastTravelError;}return false;
   }
   if(!t.waypoint&&!r.canParentObject(craft.type,t.targetId,craft.id).ok){cancelRoute(r);return false;}
-  const completed={...routeState(r),active:false,autopilot:false,phase:'Arrived',stage:'Arrived',commandedThrustG:0,turningSign:0};r.transfer=null;craft.completedTransfer=true;
+  const completed={...routeState(r),active:false,autopilot:false,phase:'Arrived',stage:'Arrived',commandedThrustG:0,turningSign:0};if(r.sceneId==='nasa-shuttle'&&craft.type==='shuttle'&&t.radiusTransfer)completed.arrivalHullYaw=edgeBurnYaw(t.plan,1);
+  r.transfer=null;craft.completedTransfer=true;
   if(t.waypoint){
    // Detach from the old gravitational parent. Local coordinates are metres
    // relative to the origin; the marker is not a massive orbital parent.
@@ -557,8 +690,8 @@ export function advanceRoute(r,dt){
    craft.parentId=t.targetId;craft.referenceId=null;craft.placement='orbit';craft.motion='orbit';craft.orbitMeters=t.orbitRadiusMeters;craft.radius=t.orbitRadiusMeters/(r.massScale*REFERENCE_RG_METERS);craft.routeParkingHeightMeters=t.tangentLeg.arrivalHeightMeters;craft.heightMeters=craft.routeParkingHeightMeters;craft.height=craft.heightMeters/(r.massScale*REFERENCE_RG_METERS);craft.orbitInclination=0;craft.orbitNode=0;craft.argumentPeriapsis=0;craft.orbitReferenceFrame='ecliptic';craft.eccentricity=0;craft.phase=t.phase;craft.epoch=r.time;
   }
   delete craft.orbitBarycenter;delete craft.barycentric;delete craft.orbitalPeriodSeconds;delete craft.driveRestore;
-  if(craft.type==='enterprise'){const parkingWarp=t.plan.cruiseSpeed!==undefined&&!t.waypoint?warpForSpeed(t.finalSpeed):0;const shield=parkingWarp>0||r.state.blackHole||r.objectFrames.some(body=>body.collapsed);craft.warpEnabled=shield;r.state.warp=shield;r.state.warpFactor=parkingWarp;r.warpObjectId=shield?craft.id:null;r.state.warpScenario=r.sceneId==='warp-excursion'&&t.waypoint?'excursion':'orbit';}
-  r.refreshConfiguration();r.fillObjects();r.setFreeDrive(craft.id,false);if(craft.driveReturn){if(!t.radiusTransfer&&(craft.type==='shuttle'||t.tangentLeg?.concentric)&&!t.waypoint)craft.driveReturn.attitudeOnly=true;else delete craft.driveReturn;}r.lastTransfer=completed;r.selectedId=craft.id;r.focusId=craft.id;r.updateCameraFrame();
+  if(craft.type==='enterprise'){const parkingWarp=t.plan.cruiseSpeed!==undefined&&!t.waypoint?warpForSpeed(t.finalSpeed):0;const shield=parkingWarp>0||r.state.blackHole||r.objectFrames.some(body=>body.collapsed);craft.warpEnabled=shield;r.state.warp=shield;r.state.warpFactor=parkingWarp;r.warpObjectId=shield?craft.id:null;r.state.warpScenario=warpStudyId(r.sceneId)==='warp-excursion'&&t.waypoint?'excursion':'orbit';}
+  r.refreshConfiguration();r.fillObjects();r.setFreeDrive(craft.id,false);if(craft.driveReturn){if(!t.radiusTransfer&&!t.waypoint)craft.driveReturn.attitudeOnly=true;else delete craft.driveReturn;}r.lastTransfer=completed;if(completed.arrivalHullYaw!==undefined)r.lastGeometryTime=null;r.selectedId=craft.id;r.focusId=craft.id;r.updateCameraFrame();
  }
  return true;
 }

@@ -1,4 +1,4 @@
-const SHUTTLE_COCKPIT_EYE=[0,.28,.65];
+const SHUTTLE_COCKPIT_EYE=[.115,.025,.758];
 import assert from 'node:assert/strict';
 import { CRAFT_GLSL } from '../dist/craft-glsl.js';
 import { COCKPIT_GLSL, SHUTTLE_COCKPIT_EYE as LEGACY_COCKPIT_EYE } from '../dist/cockpit-glsl.js';

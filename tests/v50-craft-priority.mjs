@@ -21,7 +21,7 @@ const float PI=3.141592653589793;
 vec3 unit(vec3 v){return v/max(length(v),1e-20);}
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);}
 ${craft}
-void main(){vec3 ro=vec3(0,0,3),rd=vec3(0,0,-1);CraftSurface s=craftHit(ro,rd,10.0,uType);gl_FragColor=vec4(shadeCraft(s,ro+rd*s.t,rd,unit(vec3(1,1,1)),vec3(.1)),1);}`;
+void main(){vec3 ro=vec3(0,0,3),rd=vec3(0,0,-1);CraftSurface s=craftHit(ro,rd,10.0,uType,0.0);gl_FragColor=vec4(shadeCraft(s,ro+rd*s.t,rd,unit(vec3(1,1,1)),vec3(.1)),1);}`;
  const result=spawnSync('python3',[fileURLToPath(new URL('./native-glsl.py',import.meta.url))],{input:JSON.stringify([{name:'focused-craft/WebGL1',vertex:VERTEX,fragment}]),encoding:'utf8',timeout:30000,maxBuffer:1024*1024});
  if(result.stdout)process.stdout.write(result.stdout);if(result.stderr)process.stderr.write(result.stderr);
  assert(!result.error,result.error?.message);assert([0,77].includes(result.status));

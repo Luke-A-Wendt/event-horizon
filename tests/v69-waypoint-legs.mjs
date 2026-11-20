@@ -21,9 +21,10 @@ for(const type of ['shuttle','enterprise']){
   const preview=r.previewTravel(target,{craftId:craft.id});assert(!preview.error,preview.error);const leg=preview.tangentLeg;
   assert.equal(leg.sourceId,source);if(fromSpeed!=null)assert.equal(leg.initialSpeed,fromSpeed);if(toSpeed!=null)assert.equal(leg.finalSpeed,toSpeed);
   assert(r.startTravel(target,{craftId:craft.id,fromSequence:true,tangentLeg:leg}));
-  r.advanceTravel(5);const mid=r.getTravelState();assert.equal(mid.wallElapsedSeconds,5);
+  const legSeconds=r.transfer.wallSeconds,align=r.transfer.prepSeconds||0,midpoint=align+(legSeconds-align)*.5;
+  r.advanceTravel(midpoint);const mid=r.getTravelState();assert.equal(mid.wallElapsedSeconds,midpoint);
   if(fromSpeed===0&&toSpeed===0){close(craft.flight.position,mul(add(leg.start,leg.end),.5),.02);assert(craft.flight.speed>0);if(type==='shuttle')assert.equal(craft.flight.thrust,0);}
-  r.advanceTravel(5);assert(!r.transfer);r.fillObjects();close(pos(craft.id),leg.end,.05);return leg;
+  r.advanceTravel(legSeconds-midpoint);assert(!r.transfer);r.fillObjects();close(pos(craft.id),leg.end,.05);return leg;
  };
  const ab=go(B,A,0,0);
  assert.equal(ab.arrivalRadius,0);assert.equal(craft.placement,'local');assert.equal(craft.waypointHoldId,B);assert.equal(craft.flight.speed,0);assert.equal(craft.flight.thrust,0);close(craft.flight.velocity,origin);

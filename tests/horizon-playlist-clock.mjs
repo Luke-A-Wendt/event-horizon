@@ -5,8 +5,7 @@ import { REFERENCE_RG_METERS as RG } from '../dist/objects.js';
 import { fixture } from './render-fixture.mjs';
 import { orbitClearance } from '../dist/orbit-clearance.js';
 
-// The prescribed horizon track leaves clearance for the whole hull. The
-// separate reference-point comparison can still be edited to a 1 m gap.
+// The physical edge route ends at a stable circular equatorial geodesic.
 const r=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false,deferProgram:true});
 try {
  r.loadScene('nasa-shuttle');r.sceneLoad=null;
@@ -14,23 +13,13 @@ try {
  const final=r.getFlightSequence(id).nodes.at(-1);
  r.stopFlightSequence(id);
  assert(r.setOrbitRadiusMeters(id,final.radiusMeters).ok);
- const actual=r.getObjectClock(id),hull=r.objectRadius(ship)*RG;
- assert(actual.horizonGapMeters>=2*hull-.001&&actual.horizonGapMeters<=2*hull+.002,
-  'Authored horizon track clears the full hull and uses the same center as the clock');
- const level=Math.max(ship.routeParkingHeightMeters||0,orbitClearance(r,ship,'primary')*RG);
- const requested=r.getFocusFrame('primary').horizonRadius*RG+1;
- const circle=Math.sqrt((requested-level)*(requested+level));
- assert(r.setOrbitRadiusMeters(id,circle).ok);
- const frame=r.getFocusFrame(id),hole=r.getFocusFrame('primary'),delta=frame.position.map((v,i)=>(v-hole.position[i])*RG);
- const R=Math.hypot(...delta),h=hole.horizonRadius*RG,gap=R-h,clock=r.getObjectClock(id);
- assert(gap>0&&gap<.00001*h,'Real position, including disc clearance, must be close to the horizon: '+gap);
- assert(Math.abs(gap-clock.horizonGapMeters)<.01,'Clock reference is the rendered shuttle center');
- const s=r.state.spin,M=h/(1+Math.sqrt(1-s*s)),a=s*M,rMinus=M*(1-Math.sqrt(1-s*s));
- const cos=delta.reduce((sum,v,i)=>sum+v*r.configCache.primaryAxis[i],0)/R;
- const D=gap*(R-rMinus),S=R*R+a*a*cos*cos,A=(R*R+a*a)**2-a*a*D*(1-cos*cos);
- const lapse=Math.sqrt(S*D/A),speed=Math.sqrt(MU*r.parentMassSolar(ship)/ship.orbitMeters);
- const expected=1/(lapse*Math.sqrt(1-(speed/C)**2));
- assert(Number.isFinite(expected)&&expected>100,'The finite exterior clock should be strongly dilated');
- assert(Math.abs(clock.rateFactor/expected-1)<1e-5,'Actual '+clock.rateFactor+' vs Kerr lapse and local speed '+expected);
- console.log('PASS: edited near-horizon orbit, visible clearance '+gap.toFixed(2)+' m, finite distant/onboard rate '+clock.rateFactor.toPrecision(6)+'×.');
+ const metricRadius=r.massScale*RG,x=1.01*r.configCache.isco[0],spin=r.state.spin;
+ const clock=r.getObjectClock(id);
+ assert(Math.abs(clock.horizonGapMeters-(final.radiusMeters-r.getFocusFrame('primary').horizonRadius*RG))<.01);
+ const expected=(1+spin/x**1.5)/Math.sqrt(1-3/x+2*spin/x**1.5);
+ assert(Math.abs(expected-clock.rateFactor)<1e-9);
+ const editing=r.setOrbitRadiusMeters(id,r.getFocusFrame('primary').horizonRadius*RG+1);
+ assert(Math.abs(editing.radiusMeters-metricRadius*x)<.01,'Manually requesting an impossible circular stop respects the stable floor');
+ assert.equal(clock.crewLoadG,0);
+ console.log('PASS: prograde stable orbit floor, Kerr circular clock, and proper acceleration.');
 } finally {r.dispose();}

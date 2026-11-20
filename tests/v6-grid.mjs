@@ -29,7 +29,7 @@ assert(Math.abs(gridInfallVelocity(8))>.5,'Near-field infall should remain visib
 const f=fixture(),r=new BlackHoleRenderer(f.canvas);
 const flags=enabled=>{
  r.render();assert.equal(r.state.grid,enabled);assert.equal(r.state.warpGrid,enabled);
- assert.equal(f.uniforms.get('uFlags').args[0],Number(enabled));assert.equal(f.uniforms.get('uWarpFlags').args[2],Number(enabled));
+ assert.equal(f.uniforms.get('uFlags').args[0],Number(enabled));assert.equal(f.uniforms.get('uWarpFlags').args[2],Number(enabled||r.state.warpGridOnly));
 };
 assert.equal(DEFAULTS.grid,false);assert.equal(DEFAULTS.warpGrid,false);flags(false);
 for(const scene of SCENE_PRESETS){
@@ -60,7 +60,7 @@ for(const features of [{},{craft:true},{warp:true},{ultra:true,warp:true}]){
  assert(!/uFlags\.x[^;\n{}]*!localWarp\b|!localWarp\b[^;\n{}]*uFlags\.x/.test(main),'Inspecting a local warp field must retain the black-hole grid behind it');
  if(features.warp){
   assert(shader.includes('warpPatchWeight(length(hit.xz))'),'The local warp guide must be bounded when combined with the global black-hole guide');
-  assert(main.includes('else if(uWarpFlags.w<.5&&uObjectCount<=1&&uWarpGridLocalPatch<.5)miss=true;'),'A local warp view may skip the scene only if no surrounding bodies or grid remain');
+  assert(main.includes('else if(uWarpFlags.w<.5&&uObjectCount<=1&&(uFlags.x<.5||uWarpGridLocalPatch<.5))miss=true;'),'A local warp view may skip the scene only if no surrounding bodies or grid remain');
  }
 }
 const shaderSource=readFileSync(new URL('../dist/shaders.js',import.meta.url),'utf8');

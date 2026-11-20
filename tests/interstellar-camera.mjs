@@ -42,3 +42,20 @@ assert.equal(f.uniforms.get('uSpectrum').args[0],0,'visible-light ship and stars
 assert(f.uniforms.get('uFlags2').args[0]===1&&f.uniforms.get('uInspectIndex').args[0]>=0,'star field and tracked ship are active');
 r.dispose();
 console.log('PASS: galactic-baseline tracking preserves the ship-scale camera offset in CPU and GPU frames.');
+
+// Orbit/transfer handoffs keep the guided camera's actual optical range.
+// Manual warp-envelope fitting would zoom more than 3× on the arrival frame.
+const w=new BlackHoleRenderer(fixture({width:1000,height:700}).canvas,{autoStart:false,bindControls:false,deferProgram:true});
+let now=1000;w.now=()=>now;w.loadScene('earth-vulcan');w.sceneLoad=null;w.state.paused=false;w.lastTime=now;
+let prior=null,joins=0;
+for(let i=0;i<2400&&joins<2;i++){
+ w.advanceSimulation(now+=1000/30);w.fillObjects();w.updateCameraFrame();
+ const state={transfer:!!w.transfer,range:w.cameraFrame.subjectRange};
+ if(prior&&state.transfer!==prior.transfer){
+  assert(Math.abs(Math.log(state.range/prior.range))<.04,'No automated camera dolly cut when handing off between a warp transfer and orbit');
+  joins++;
+ }
+ prior=state;
+}
+assert.equal(joins,2,'Exercise departure and arrival in an interstellar warp route');w.dispose();
+console.log('PASS: guided warp departures and arrivals preserve the tracked ship’s optical range.');

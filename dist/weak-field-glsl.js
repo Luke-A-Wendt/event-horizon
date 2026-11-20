@@ -2,7 +2,7 @@
 // Keep the same analytic surfaces and local inspection precision, but trace
 // only visible intersections. The nearest transparent layer is composited over the nearest opaque hit.
 // This keeps rings and cutaways without repeating the spacecraft union.
-export function weakFieldMain({photo=false,stellar=false,craft=false,probe=false,nebulaVolume=false,atmosphere=false,objectSlots=12}={}){return `
+export function weakFieldMain({photo=false,stellar=false,craft=false,warpJets=false,probe=false,nebulaVolume=false,atmosphere=false,objectSlots=12,fleetWarp=false,fleetView=false}={}){return `
 vec3 weakFieldBackgroundRay(vec3 origin,vec3 direction){
  if(uFlags.z<.5)return direction;
  vec3 bend=vec3(0);
@@ -28,7 +28,10 @@ void main(){
  vec3 camera=uObserver,p=camera,color=vec3(0);
  float pixelAngle=fov/uResolution.y,trans=1.0,transparentMask=0.0,travelled=0.0;
  bool solid=false;${photo&&atmosphere?'vec3 airBend=vec3(0);':''}
- ${nebulaVolume?'float nebulaDistance=0.0,nebulaSample=-1.0;vec4 nebulaCached=vec4(0);':''}
+ ${nebulaVolume?'float nebulaDistance=0.0,nebulaSample=-1.0;vec4 nebulaCached=vec4(0);':''}${fleetWarp?`
+ vec3 cameraRay=original,exitRay,emission;float transmission;bool hullHit;
+ warpLocalTrace(cameraRay,exitRay,emission,transmission,hullHit);
+ original=exitRay;color=emission;trans=transmission;solid=hullHit;`:''}
  if(!solid){
   float extent=max(1e-8,length(camera)+uBounds*2.1);
   {
@@ -39,7 +42,15 @@ void main(){
    if(uFlags.x>.5){vec4 grid=coordinateGridSegment(p,end,travelled,pixelAngle);color+=trans*grid.rgb;trans*=1.0-grid.a;}
    ${stellar?'color+=trans*stellarEmissionSegment(p,end);':''}
    ${atmosphere?(photo?'photoAtmosphere(p,end,color,trans,airBend);':'color+=trans*planetAtmosphereSegment(p,end);'):''}
-   ${craft?'color+=trans*thrusterSegment(p,end);':''}
+   ${craft?'color+=trans*thrusterSegment(p,end);':''}${fleetView&&craft?`
+   // The analytic pass just measured the visible surface. Clip inspection
+   // exhaust to that same depth without retracing the entire fleet.
+   if(uDriveIndex>=0&&uDriveIndex==uInspectIndex&&uFlightMetrics.w>.5){
+    float radius=0.0,kind=4.0;
+    for(int j=0;j<${objectSlots};j++){if(j==uDriveIndex){radius=uObjects[j].w;kind=uColors[j].a;}}
+    if(radius>0.0)color+=trans*thrusterRay(uInspectCamera,rayFromFrame(uInspectForward,uInspectRight,uInspectUp,uv,fov),length(end-p)/radius,kind>15.5);
+   }`:''}
+   ${warpJets?'color+=trans*warpJetSegment(p,end,true);':''}
    ${probe?'color+=trans*probeEmissionSegment(p,end);':''}
    color+=trans*hit.rgb*hit.a;trans*=1.0-hit.a;
    travelled+=length(end-p);
@@ -49,11 +60,11 @@ void main(){
   if(!solid){
    ${nebulaVolume?'vec3 cloudRay=weakFieldBackgroundRay(camera,original);nebulaVolumeSegment(p,p+cloudRay*max(0.0,nebulaVolumeRange()-nebulaDistance),false,nebulaDistance,nebulaSample,nebulaCached,color,trans);':''}
    if(uFlags.x>.5){vec4 grid=coordinateGridEscape(p,original,travelled,pixelAngle);color+=trans*grid.rgb;trans*=1.0-grid.a;}
-   color+=trans*sky(${photo&&atmosphere?'unit(weakFieldBackgroundRay(camera,original)+airBend)':'weakFieldBackgroundRay(camera,original)'});
+   ${fleetWarp?'color+=trans*skyForWarpTravel(original,cameraRay);':`color+=trans*sky(${photo&&atmosphere?'unit(weakFieldBackgroundRay(camera,original)+airBend)':'weakFieldBackgroundRay(camera,original)'});`}
   }
  }
  ${stellar?'color+=stellarInspectorEmission(uv,fov);':''}
- ${craft?'color+=thrusterInspectorEmission(uv,fov);':''}
+ ${craft&&!fleetView?'color+=thrusterInspectorEmission(uv,fov);':''}
  ${probe?'color+=probeInspectorEmission(uv,fov);':''}
  color=pow(vec3(1)-exp(-max(color*uExposure,vec3(0))),vec3(.92));
  color*=1.0-.22*smoothstep(.35,1.3,length(uv));gl_FragColor=vec4(color,1);
@@ -65,27 +76,31 @@ void main(){
 // and the nearest translucent layer in the same scan. A second transparent
 // planet/ring behind the first is deliberately not recursively re-traced in
 // this weak-field preview; all opaque bodies remain eligible and selectable.
-export function weakFieldHitGLSL(source){
+export function weakFieldHitGLSL(source,dockingPair=false,skipWarpCraft=false){
  const start=source.indexOf('vec4 objectHit(');if(start<0)throw new Error('Missing body intersection shader');
  const open=source.indexOf('{',start);let depth=1,end=open+1;
  for(;depth&&end<source.length;end++){if(source[end]==='{')depth++;else if(source[end]==='}')depth--;}
  let hit=source.slice(start,end).replace('vec4 objectHit(','vec4 weakFieldHit(');
- hit=hit.replace(/if\(j==uHideObjectIndex[^\n]*continue;/,'if(j==uHideObjectIndex)continue;');
+ hit=hit.replace(/if\(j==uHideObjectIndex[^\n]*continue;/,skipWarpCraft?'if(j==uHideObjectIndex||j==uWarpObjectIndex)continue;':'if(j==uHideObjectIndex)continue;');
  hit=hit.replace('fraction=1.0;','fraction=1.0;\n float layerDistance=segmentLength,layerAlpha=0.0;vec3 layerColor=vec3(0);');
- // The scene may list hundreds of craft, but only the nearest bounding-sphere
- // candidate on a pixel's ray needs its detailed union. Keep that union outside
- // the constant-bounded uniform loop: mobile drivers otherwise clone it once
- // per slot during compilation, even for entirely invisible spacecraft.
+ // Gather candidates before the detailed model trace; inlining the hull union
+ // inside the full catalog loop overwhelms some mobile shader compilers.
+ // The hollow habitat bounds enclose an entire visiting ship. Keep the
+ // station and craft in separate slots, then compare their actual surfaces.
+ const record=key=>`bool ${key}Found=false,${key}Driven=false,${key}Inspected=false;float ${key}Distance=segmentLength,${key}Opacity=1.0;vec2 ${key}Iris=vec2(0);vec4 ${key}Body=vec4(0),${key}Tint=vec4(0);vec2 ${key}Heading=vec2(1,0);`;
+ const gather=key=>`if(entryDistance<${key}Distance){${key}Distance=entryDistance;${key}Found=true;${key}Body=obj;${key}Tint=uColors[j];${key}Heading=uHeadings[j];${key}Iris=uBodyParams[j].xy;${key}Opacity=alpha;${key}Driven=j==uDriveIndex;${key}Inspected=j==uInspectIndex;}`;
+ const stationToCraft=['Found','Driven','Inspected','Distance','Opacity','Iris','Body','Tint','Heading'].map(field=>'craft'+field+'=station'+field+';').join('');
  const craftStart=hit.indexOf('if(type>2.5){'),craftOpen=hit.indexOf('{',craftStart);let craftEnd=craftOpen+1,craftDepth=1;
  for(;craftDepth&&craftEnd<hit.length;craftEnd++){if(hit[craftEnd]==='{')craftDepth++;else if(hit[craftEnd]==='}')craftDepth--;}
  if(craftStart<0||craftDepth)throw new Error('Missing craft intersection boundary');
  hit=hit.slice(0,craftStart)+`if(type>2.5){
    float entryDistance=max(0.0,enter)*obj.w;
-   if(entryDistance<craftDistance){craftDistance=entryDistance;craftFound=true;craftBody=obj;craftTint=uColors[j];craftHeading=uHeadings[j];craftOpacity=alpha;craftDriven=j==uDriveIndex;craftInspected=j==uInspectIndex;}
+   ${dockingPair?'if(type>13.5&&type<14.5){'+gather('station')+'}else ':''}${gather('craft')}
    continue;
   }`+hit.slice(craftEnd);
- hit=hit.replace('float layerDistance=', 'bool craftFound=false,craftDriven=false,craftInspected=false;float craftDistance=segmentLength,craftOpacity=1.0;vec4 craftBody=vec4(0),craftTint=vec4(0);vec2 craftHeading=vec2(1,0);\n float layerDistance=');
+ hit=hit.replace('float layerDistance=',record('craft')+(dockingPair?record('station'):'')+'\n float layerDistance=');
  hit=hit.replace(' if(found){', `
+ ${dockingPair?'for(int dockCandidate=0;dockCandidate<2;dockCandidate++){if(dockCandidate==1){'+stationToCraft+'}':''}
  if(craftFound&&craftDistance<nearest){
   vec4 obj=craftBody;vec3 ro=(previous-obj.xyz)/obj.w,offAxis=cross(ro,rd);
   float b=dot(ro,rd),root=sqrt(max(0.0,1.0-dot(offAxis,offAxis)));
@@ -100,7 +115,7 @@ export function weakFieldHitGLSL(source){
    advance=localShift-localB;localOrigin=cross(localDirection,localOffAxis)+localDirection*localShift;
   }
   float localMaximum=min(maximum-advance,2.1);
-  CraftSurface surface=craftHit(localOrigin,localDirection,localMaximum,craftTint.a);
+  CraftSurface surface=craftHit(localOrigin,localDirection,localMaximum,craftTint.a,craftIris.x,craftIris.y);
   float normalSize=dot(surface.normal,surface.normal);
   if(surface.t>=0.0&&surface.t<=localMaximum&&normalSize>.5&&normalSize<1.5){
    float t=surface.t+advance;vec3 lightWorld=bodyLight(obj.xyz);
@@ -112,6 +127,7 @@ export function weakFieldHitGLSL(source){
    if(craftOpacity<.999){if(t*obj.w<layerDistance){layerDistance=t*obj.w;layerColor=color;layerAlpha=craftOpacity;}}else{nearest=t*obj.w;closestColor=color;closestAlpha=1.0;found=true;}
   }
  }
+ ${dockingPair?'}':''}
  if(found){`);
  hit=hit.replace('nearest=t*obj.w;closestColor=color;closestAlpha=alpha;closestIndex=j;found=true;',
   'if(alpha<.999){if(t*obj.w<layerDistance){layerDistance=t*obj.w;layerColor=color;layerAlpha=alpha;}}else{nearest=t*obj.w;closestColor=color;closestAlpha=alpha;closestIndex=j;found=true;}');

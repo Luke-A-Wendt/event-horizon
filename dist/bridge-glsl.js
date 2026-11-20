@@ -1,3 +1,4 @@
+import {BRIDGE_GATE_GLSL} from './bridge-gate-glsl.js';
 import {warpGridSurface} from './warp-glsl.js';
 // An Ellis wormhole optical chart, compiled only for the bridge experiment.
 // The vacuum Einstein–Rosen bridge cannot be traversed; the UI and math guide
@@ -6,18 +7,18 @@ import {warpGridSurface} from './warp-glsl.js';
 // asymptotically flat chart. Inversion sends the far sphere to an exact sphere
 // in the shared isotropic chart: no sky decal or arbitrary portal clipping.
 export const BRIDGE_WORLD_LAYOUT=Object.freeze({distance:15,radius:3});
-export function bridgeWorldSphere(other=false,throat=1,axis=[0,0,1]){
- const {distance,radius}=BRIDGE_WORLD_LAYOUT,scale=other?1/(4*(distance*distance-radius*radius)):1;
+export function bridgeWorldSphere(other=false,throat=1,axis=[0,0,1],layout=BRIDGE_WORLD_LAYOUT){
+ const {distance,radius}=layout,scale=other?1/(4*(distance*distance-radius*radius)):1;
  return {center:axis.map(v=>v*distance*scale*throat),radius:radius*scale*throat,other};
 }
 // A closed arrival gate is flat in its inverted chart. This apparent sphere
 // lets the cheap CPU projection use that chart without changing the traveler.
-export function bridgeFlatWorldSphere(observer,throat=1,axis=[0,0,1]){
+export function bridgeFlatWorldSphere(observer,throat=1,axis=[0,0,1],layout=BRIDGE_WORLD_LAYOUT){
  const r2=Math.max(1e-30,observer.reduce((sum,x)=>sum+x*x,0)),scale=throat*throat/(4*r2),length=Math.sqrt(r2),n=observer.map(x=>x/length);
- const farObserver=observer.map(x=>x*scale),delta=axis.map((x,i)=>x*BRIDGE_WORLD_LAYOUT.distance*throat-farObserver[i]),along=delta.reduce((sum,x,i)=>sum+x*n[i],0);
- return {center:observer.map((x,i)=>x+(delta[i]-2*n[i]*along)/scale),radius:BRIDGE_WORLD_LAYOUT.radius*throat/scale,other:true};
+ const farObserver=observer.map(x=>x*scale),delta=axis.map((x,i)=>x*layout.distance*throat-farObserver[i]),along=delta.reduce((sum,x,i)=>sum+x*n[i],0);
+ return {center:observer.map((x,i)=>x+(delta[i]-2*n[i]*along)/scale),radius:layout.radius*throat/scale,other:true};
 }
-export function bridgeGLSL({grid=true,ultra=false,photo=false,photoSteps=3072,probe=false,attachments=false,bodyGravity=false,nebulaVolume=false}={}) {
+export function bridgeGLSL({planetary=false,hardware=false,grid=true,warpJets=false,ultra=false,photo=false,photoSteps=3072,probe=false,attachments=false,bodyGravity=false,nebulaVolume=false}={}) {
  return `
 float bridgeMetricScale(){float radius=max(uBridgeStage.x,.0001);return uBridgeStage.y>.5?1.0/radius:radius;}
 float bridgeConformalAt(vec3 p){float throat=bridgeMetricScale();return 1.0+.25*throat*throat/max(dot(p,p),1e-12);}
@@ -45,9 +46,11 @@ vec4 bridgeGridAtAxis(vec3 p,vec3 ray,float travelled,float pixelAngle,vec3 axis
  float radius=max(length(chart.xz),1e-6),throatRadius=bridgeMetricScale(),l=radius-.25*throatRadius*throatRadius/radius;
  float angle=atan(chart.z,chart.x),incidence=abs(dot(ray,axis));
  float footprint=max(.002,travelled*pixelAngle*bridgeConformalAt(p)/max(incidence,.08));
- float spacing=.5*exp2(floor(max(0.0,log2(footprint*14.0/.5))));
+ float baseSpacing=.5/uGridDensity.x;
+ float spacing=baseSpacing*exp2(floor(max(0.0,log2(footprint*max(5.0,14.0/uGridDensity.x)/baseSpacing))));
  float radial=abs(fract(l/spacing+.5)-.5)*spacing;
- float angular=abs(fract(angle/(PI/16.0)+.5)-.5)*(PI/16.0)*sqrt(l*l+throatRadius*throatRadius);
+ float angularStep=2.0*PI/max(4.0,floor(32.0*uGridDensity.x+.5));
+ float angular=abs(fract(angle/angularStep+.5)-.5)*angularStep*sqrt(l*l+throatRadius*throatRadius);
  float line=max(1.0-smoothstep(footprint*.35,footprint,radial),1.0-smoothstep(footprint*.35,footprint,angular));
  float throat=1.0-smoothstep(footprint*.4,footprint*1.6,abs(l));
  float resolved=1.0-smoothstep(.025,.09,footprint/max(throatRadius,sqrt(l*l+throatRadius*throatRadius)));
@@ -105,13 +108,24 @@ vec3 bridgeMouthAxis(){
  vec3 helper=abs(uPrimaryAxis.z)<.9?vec3(0,0,1):vec3(1,0,0);
  return cross(unit(cross(uPrimaryAxis,helper)),uPrimaryAxis);
 }
-vec3 bridgeDepartureCenter(){return bridgeMouthAxis()*${BRIDGE_WORLD_LAYOUT.distance.toFixed(1)};}
-// A thin mechanical annulus in the same optical chart as the traveler.
-// Segment intersections reuse the curved ray: no screen-space portal decal,
-// sphere tracing, shadow rays, texture fetches, or new shader variants.
+vec2 bridgeBodySize(int index){
+ if(uBridge.w>1.5){
+  if(index==2)return uBridgeMoon;
+  return index==1?uBridgeWorldLayout.zw:uBridgeWorldLayout.xy;
+ }
+ return vec2(${BRIDGE_WORLD_LAYOUT.distance.toFixed(1)},${BRIDGE_WORLD_LAYOUT.radius.toFixed(1)});
+}
+${hardware?BRIDGE_GATE_GLSL:''}
 
 
-vec3 bridgeWorldMaterial(vec3 normal,vec3 ray,bool other){
+vec3 bridgeWorldMaterial(vec3 normal,vec3 ray,bool other,bool moon){
+ ${planetary?`if(uBridge.w>1.5){
+  vec3 illumination=unit(-bridgeMouthAxis()+uPrimaryAxis*.65);
+  if(other)return bodySurface(normal,ray,vec3(1.0,.47,.32),2.0,vec4(2,.73,0,.023),illumination);
+  vec3 localNormal=localPoint(normal,uPrimaryAxis);
+  float profile=moon?2.0:1.0;
+  return namedPlanetSurface(localNormal,normal,ray,moon?vec3(.55):vec3(.07,.26,.48),vec4(0),vec4(profile,0,0,0),illumination);
+ }`:''}
  // Reuse the same rocky material and tint as the Proxima b catalog scene.
  // Its geography is unknown; it must not inherit Arakas's dune texture.
  if(other&&uBridge.w>.5)return bodySurface(normal,ray,vec3(.62353,.50588,.44706),0.0,vec4(0,0,0,.08),unit(-bridgeMouthAxis()+uPrimaryAxis*.65));
@@ -147,11 +161,13 @@ vec3 bridgeWorldMaterial(vec3 normal,vec3 ray,bool other){
 vec4 bridgeDepartureHit(vec3 a,vec3 b,out float fraction){
  fraction=1.0;if(uBridge.z<.5)return vec4(0);
  vec3 delta=b-a;float span=length(delta);if(span<1e-12)return vec4(0);
- vec3 ray=delta/span,worldCenter=bridgeDepartureCenter();
- float worldRadius=${BRIDGE_WORLD_LAYOUT.radius.toFixed(1)},inversion=1.0/(4.0*(dot(worldCenter,worldCenter)-worldRadius*worldRadius));
- vec4 nearest=vec4(0);
- for(int end=0;end<2;end++){
-  bool other=end==1;if(uBridgeStage.z>.5&&uBridgeStage.x<.001&&other!=(uBridgeStage.y>.5))continue;
+ vec3 ray=delta/span;
+ vec3 bestNormal=vec3(0),bestRay=ray;int best=-1;
+ for(int end=0;end<3;end++){
+  if(end==2&&uBridge.w<1.5)break;
+  vec2 size=bridgeBodySize(end);vec3 worldCenter=bridgeMouthAxis()*size.x;
+  float worldRadius=size.y,inversion=1.0/(4.0*(size.x*size.x-worldRadius*worldRadius));
+  bool other=end==1;if((uBridge.w>1.5||mod(uBridgeStage.z,2.0)>.5)&&uBridgeStage.x<.001&&other!=(uBridgeStage.y>.5))continue;
   float gate=bridgeMetricScale(),nearScale=uBridgeStage.y>.5?gate*gate:1.0,farScale=uBridgeStage.y>.5?1.0:gate*gate,scale=other?inversion*farScale:nearScale;
   vec3 center=worldCenter*scale,offset=a-center;float radius=worldRadius*scale,along=dot(offset,ray);
   if(dot(offset,offset)>(span+radius)*(span+radius))continue;
@@ -160,11 +176,11 @@ vec4 bridgeDepartureHit(vec3 a,vec3 b,out float fraction){
   if(distance<0.0||distance>span||distance/span>=fraction)continue;
   fraction=distance/span;vec3 hit=a+ray*distance,point=other?hit*farScale/(4.0*dot(hit,hit)):hit/nearScale;
   vec3 radial=unit(hit),tangent=other?unit(ray-2.0*radial*dot(radial,ray)):ray;
-  vec3 normal=unit(point-worldCenter);
-  if(uSpectrum==5)nearest=vec4(vec3(.20+.55*max(0.0,dot(normal,-tangent))),1);
-  else nearest=vec4(bridgeWorldMaterial(normal,tangent,other),1);
+  best=end;bestNormal=unit(point-worldCenter);bestRay=tangent;
  }
- return nearest;
+ if(best<0)return vec4(0);
+ if(uSpectrum==5)return vec4(vec3(.20+.55*max(0.0,dot(bestNormal,-bestRay))),1);
+ return vec4(bridgeWorldMaterial(bestNormal,bestRay,best==1,best==2),1);
 }
 vec3 bridgeRegionSky(vec3 direction,bool other){
  if(uSpectrum==5)return vec3(0);
@@ -175,7 +191,7 @@ vec3 bridgeRegionSky(vec3 direction,bool other){
  vec3 hue=other?uBridgeSkyColor:uNebulaColor;
  parameters.z*=other?uBridgeOtherNebula:uFlags2.y;
  vec3 result=skyWithEnvironment(d,parameters,hue,other?uBridgeStars.y:uBridgeStars.x,other?uSkyParams.z:uSkyParams.x,other?uSkyParams.w:uSkyParams.y);
- if(other&&uBridge.w>.5){
+ if(other&&uBridge.w>.5&&uBridge.w<1.5){
   // Proxima's angular radius from b uses the catalog's .1542 R_sun/.04848 AU.
   // This red dwarf is part of the destination sky, not an orange desert world.
   vec3 starDirection=unit(-bridgeMouthAxis()+uPrimaryAxis*.65);float mu=dot(unit(direction),starDirection),size=.01479;
@@ -224,12 +240,27 @@ vec3 bridgeFlatTrace(vec3 camera,vec3 original,float pixelAngle){
   // At closure the arrival sky and finite world share one flat chart. A
   // straight ray in the compressed departure coordinates would shrink the
   // nearby destination incorrectly as the route gets shorter.
-  vec3 arrival=p/(4.0*max(dot(p,p),1e-12)),offset=arrival-bridgeDepartureCenter();
-  float along=dot(offset,skyDirection),radius=${BRIDGE_WORLD_LAYOUT.radius.toFixed(1)},discriminant=radius*radius-dot(cross(offset,skyDirection),cross(offset,skyDirection));
-  if(discriminant>=0.0){float distance=-along-sqrt(discriminant);if(distance>0.0){vec3 normal=unit(offset+skyDirection*distance);planet=vec4(uSpectrum==5?vec3(.20+.55*max(0.0,dot(normal,-skyDirection))):bridgeWorldMaterial(normal,skyDirection,true),1);}}
+  vec2 arrivalWorld=bridgeBodySize(1);vec3 arrival=p/(4.0*max(dot(p,p),1e-12)),offset=arrival-bridgeMouthAxis()*arrivalWorld.x;
+  float along=dot(offset,skyDirection),radius=arrivalWorld.y,discriminant=radius*radius-dot(cross(offset,skyDirection),cross(offset,skyDirection));
+  if(discriminant>=0.0){float distance=-along-sqrt(discriminant);if(distance>0.0){vec3 normal=unit(offset+skyDirection*distance);planet=vec4(uSpectrum==5?vec3(.20+.55*max(0.0,dot(normal,-skyDirection))):bridgeWorldMaterial(normal,skyDirection,true,false),1);}}
   if(body.a<=0.0){body=planet;${nebulaVolume?'if(planet.a>.5)flatCloudDistance=max(0.0,-along-sqrt(max(0.0,discriminant)))*throat;':''}}
  }else{planet=bridgeDepartureHit(p,p+v*span,planetFraction);if(planet.a>.5&&(body.a<=0.0||planetFraction<fraction))body=planet;}
+ ${hardware?`{
+  // With the throat completely closed use the resident physical chart. The
+  // inverse-chart tangent and local scale put the gate and the traveler in
+  // the same depth ordering even on the compressed destination side.
+  float scale=far?4.0*dot(p,p):1.0;
+  vec3 localOrigin=localPoint(far?p/(4.0*max(dot(p,p),1e-20)):p,uPrimaryAxis);
+  vec3 localRay=localPoint(skyDirection,uPrimaryAxis);
+  float gf;vec4 hardware=gateLocalSegment(localOrigin,localOrigin+localRay*50.0,far,gf);
+  float hitDistance=gf*50.0*scale;
+  if(hardware.a>.5&&(body.a<=0.0||hitDistance<span*min(fraction,planetFraction))){
+   body=hardware;fraction=min(1.0,hitDistance/span);planetFraction=fraction;
+   ${nebulaVolume?'flatCloudDistance=gf*50.0*throat;':''}
+  }
+}`:''}
  vec3 result=mix(bridgeRegionSky(skyDirection,far),body.rgb,body.a);
+ ${warpJets?'result+=warpJetSegment(p*throat,(p+v*span*min(fraction,planetFraction))*throat,sceneTransparent());':''}
  ${nebulaVolume?`float nebulaDistance=0.0,nebulaSample=-1.0,cloudTransmission=1.0;vec4 nebulaCached=vec4(0);vec3 foreground=vec3(0),cloudStart=bridgeNebulaChart(p,far);
  float cloudStop=body.a>.999?min(flatCloudDistance,length(bridgeNebulaChart(p+v*span*min(fraction,planetFraction),far)-cloudStart)):nebulaVolumeRange();
  nebulaVolumeSegment(cloudStart,cloudStart+skyDirection*min(cloudStop,nebulaVolumeRange()),far,nebulaDistance,nebulaSample,nebulaCached,foreground,cloudTransmission);
@@ -257,14 +288,14 @@ float bridgeSoftTanh(float x){return 2.0/(1.0+exp(-2.0*clamp(x,-12.0,12.0)))-1.0
 float bridgeBubbleShape(float r){float s=max(1.0,uWarpThickness);return (bridgeSoftTanh(s*(r+1.0))-bridgeSoftTanh(s*(r-1.0)))/(2.0*bridgeSoftTanh(s));}
 ${warpGridSurface('bridgeBubbleShape(radial)').replaceAll('warpGrid','bridgeWarpGrid').replaceAll('warpSheet','bridgeWarpSheet')}
 vec4 bridgeBubbleGrid(vec3 start,vec3 end,float travelled,float pixelAngle){
- if(uFlags.x<.5||uBridgeBubble.w<=0.0)return vec4(0);
+ if(uWarpFlags.z<.5||uBridgeBubble.w<=0.0||uWarpStrength<=0.0)return vec4(0);
  float scale=uBridge.y/uBridgeBubble.w;vec3 a=bridgeBubbleFrame((start*uBridge.y-uBridgeBubble.xyz)/uBridgeBubble.w),b=bridgeBubbleFrame((end*uBridge.y-uBridgeBubble.xyz)/uBridgeBubble.w);
- vec3 delta=b-a,middle=(a+b)*.5;if(length(middle)>4.1+length(delta)*.5)return vec4(0);
+ float skipped;if(!warpPatchClip(a,b,skipped))return vec4(0);vec3 delta=b-a;
  float ha=bridgeWarpSheet(a),hb=bridgeWarpSheet(b);if(ha*hb>0.0||abs(ha-hb)<1e-10)return vec4(0);
  float t=clamp(ha/(ha-hb),0.0,1.0),lo=0.0,hi=1.0;vec3 hit=mix(a,b,t);
  for(int j=0;j<3;j++){float h=bridgeWarpSheet(hit);if(abs(h)<.00001)break;if(ha*h<=0.0){hi=t;hb=h;}else{lo=t;ha=h;}t=mix(lo,hi,clamp(ha/(ha-hb),0.0,1.0));hit=mix(a,b,t);}
  float blend=warpPatchWeight(length(hit.xz));if(blend<=0.0)return vec4(0);warpPatchCoverage=max(warpPatchCoverage,blend);
- return blend*bridgeWarpGridAt(hit,a,unit(delta),travelled*scale+length(delta)*t);
+ return blend*bridgeWarpGridAt(hit,a,unit(delta),travelled*scale+skipped+length(delta)*t);
 }`:`vec4 bridgeBubbleGrid(vec3 a,vec3 b,float d,float p){return vec4(0);}`}
 vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
  if(uBridgeStage.x<.001)return bridgeFlatTrace(camera,original,pixelAngle);
@@ -273,8 +304,9 @@ vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
  bool otherSide=false,object=false;
  ${nebulaVolume?'float nebulaDistance=0.0,nebulaSample=-1.0;vec4 nebulaCached=vec4(0);':''}
  // Skip asymptotically empty space, exactly as in the black-hole integrator.
- if(length(p)>18.0){
-  float projection=dot(p,v),discriminant=projection*projection-dot(p,p)+324.0;
+ float traceBound=uBridge.w>1.5?max(uBridgeMoon.x+uBridgeMoon.y+2.0,18.0):18.0;
+ if(length(p)>traceBound){
+  float projection=dot(p,v),discriminant=projection*projection-dot(p,p)+traceBound*traceBound;
   if(discriminant<0.0||projection>=0.0){
    ${nebulaVolume?'nebulaVolumeSegment(camera,camera+v*nebulaVolumeRange(),false,nebulaDistance,nebulaSample,nebulaCached,color,transmission);return color+transmission*bridgeRegionSky(v,false);':'return bridgeRegionSky(v,false);'}
   }
@@ -291,7 +323,7 @@ vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
   float radius=max(length(p),1e-7);
   if(uSceneOptions.y>.5)radius=min(radius,max(length(p-bridgeSecondCenter()),1e-7));
   if(radius<(uBridge.z>.5?.008:.018)*min(gate,1.0)){otherSide=true;break;}
-  if(radius>18.05&&dot(p,v)>0.0)break;
+  if(radius>traceBound+.05&&dot(p,v)>0.0)break;
   // Scale steps in the isotropic chart: this remains smooth at r=b/2,
   // the nonsingular throat, and resolves the increasingly compressed end.
   float step=min(.13*radius,.035*gate+.10*abs(radius-.5*gate))*288.0/float(uSteps);
@@ -313,6 +345,7 @@ vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
   if(uObjectCount>0)body=objectHit(p*throat,previous*throat,v,fraction,transparentMask);
   float planetFraction=1.0;vec4 planet=bridgeDepartureHit(previous,p,planetFraction);
   if(planet.a>.5&&(body.a<=0.0||planetFraction<fraction)){body=planet;fraction=planetFraction;}
+  ${hardware?'{float gf;vec4 hardware=bridgeHardwareSegment(previous,p,gf);if(hardware.a>.5&&(body.a<=0.0||gf<fraction)){body=hardware;fraction=gf;}}':''}
   p=mix(previous,p,fraction);
   ${nebulaVolume?'bridgeNebulaSegment(previous,p,nebulaDistance,nebulaSample,nebulaCached,color,transmission);':''}
   metricColor=max(metricColor,transmission*diagnosticSegment(previous*throat,p*throat,travelled*throat,pixelAngle));
@@ -322,6 +355,7 @@ vec3 bridgeTrace(vec3 camera,vec3 original,float pixelAngle){
   ${bodyGravity&&grid?'vec4 bodyGuide=bridgeBodyGridSegment(previous*throat,p*throat,travelled*throat,pixelAngle);guide.rgb+=(1.0-guide.a)*bodyGuide.rgb;guide.a+=(1.0-guide.a)*bodyGuide.a;':''}
   color+=transmission*guide.rgb;transmission*=1.0-guide.a;travelled+=length(p-previous);
   ${probe?'color+=transmission*probeEmissionSegment(previous*throat,p*throat);':''}
+  ${warpJets?'color+=transmission*warpJetSegment(previous*throat,p*throat,sceneTransparent());':''}
   ${attachments?'vec4 attachment=attachmentEmissionSegment(previous*throat,p*throat,pixelAngle);color+=transmission*attachment.rgb;transmission*=1.0-attachment.a;':''}
   // Keep the same one-surface-per-body alpha rule as the ordinary ray tracer.
   // The mask belongs to the whole ray, including its transit toward the other

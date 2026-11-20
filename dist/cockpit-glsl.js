@@ -1,3 +1,4 @@
+import {MERIDIAN_ROOF_OPENING,MERIDIAN_DOCK_INNER} from './meridian-port.js';
 // Original procedural flight-deck study, with NASA's pilot/right-seat layout.
 // +z forward, +y overhead, -x to the pilot's right (right = forward × up).
 // Geometry shares the exterior
@@ -123,5 +124,43 @@ vec4 shuttleCockpit(vec3 localEye,vec3 localRay,vec3 environment){
  float illumination=.66+.34*abs(dot(s.normal,unit(vec3(.3,.7,.5))));color*=illumination;
  if(s.material==30.0&&p.y<0.0)color*=.40;
  return vec4(color,1.0);
+}
+`;
+
+// Ray traced from inside the Meridian's observation deck. The exterior shader
+// uses the same half-ellipsoid, garden shader, hoop radii and radial ribs.
+export const MERIDIAN_LOUNGE_GLSL=`
+vec4 meridianLounge(vec3 eye,vec3 ray,float closure){
+ vec3 size=vec3(.405,.405,.18),q=(eye-vec3(0,0,.68))/size,d=ray/size;
+ float b=dot(q,d),a=dot(d,d),disc=b*b-a*(dot(q,q)-1.0);
+ if(disc<=0.0||dot(q,q)>=1.0)return vec4(0); // eye clamped outside (e.g. at a horizon)
+ float glass=(-b+sqrt(disc))/a,deck=ray.z<-.000001?(.685-eye.z)/ray.z:1.e20;
+ if(deck>0.0&&deck<glass){
+  vec3 land=meridianGarden(eye,ray);
+  return vec4(surfaceSpectrum(land,.92,.16,.22),1.0);
+ }
+ vec4 command=meridianCommandView(eye,ray);
+ if(command.a>.55)return vec4(surfaceSpectrum(command.rgb,.92,.18,.24),1.0);
+ vec3 pt=eye+glass*ray;
+ float r=length(pt.xy),az=atan(pt.y,pt.x);
+ // The inboard face of the fixed hatch closes the roof cutout even in
+ // cruise, when the telescoping outer pairing ring is fully retracted.
+ if(r<${MERIDIAN_ROOF_OPENING}){
+  vec3 hardware=r<${MERIDIAN_DOCK_INNER}?vec3(.45,.47,.47):vec3(.31,.34,.35);
+  return vec4(surfaceSpectrum(hardware,.88,.19,.24),1.0);
+ }
+ float rib=r*abs(sin(8.0*az))*.125;
+ float hoop=min(abs(r-.237),abs(r-.352));
+ if(min(rib,hoop)>.0027){
+  if(closure>0.0){
+   vec4 leaf=meridianIrisHit(eye,ray,closure);
+   if(leaf.w>=0.0){
+    vec3 underside=meridianIrisPlate(eye+ray*leaf.w,closure)*vec3(.48,.46,.42);
+    return vec4(surfaceSpectrum(underside,.85,.18,.17),1.0);
+   }
+  }
+  return vec4(0); // clear glazing, render the actual sky
+ }
+ return vec4(surfaceSpectrum(vec3(.40,.46,.48),.88,.19,.24),1.0);
 }
 `;

@@ -25,7 +25,8 @@ vec3 planetAtmosphereSegment(vec3 first,vec3 last){
  for(int j=0;j<12;j++){
   if(j>=uObjectCount)break;if(uColors[j].a>.5||j==uHideObjectIndex)continue;
   vec4 profile=atmosphereProfile(uBodyParams[j].x);if(profile.w<=0.0)continue;
-  float radius=max(uObjects[j].w,1e-20),span=distance/radius;
+  float radius=max(uObjects[j].w,1e-20);if(uBodyParams[j].z>3.5)radius*=min(uBodyShape[j].x,min(uBodyShape[j].y,uBodyShape[j].z));
+  float span=distance/radius;
   vec3 start=(first-uObjects[j].xyz)/radius;
   float along=-dot(start,direction),impact=length(cross(start,direction)),height=profile.w;
   if(impact>1.0+height*6.0||along<-.5||along>span+.5)continue;
@@ -35,7 +36,15 @@ vec3 planetAtmosphereSegment(vec3 first,vec3 last){
   if(column<=0.0)continue;
   vec3 normal=unit(start+direction*clamp(along,0.0,span));
   float sunlight=smoothstep(-.12,.35,dot(normal,bodyLight(uObjects[j].xyz)));
-  vec3 hue=profile.rgb;if(uSpectrum==1)hue=vec3(.65,.20,.06)*max(hue.r,max(hue.g,hue.b))*.14;
+  vec3 hue=profile.rgb;if(abs(floor(uBodyParams[j].x/4.0)-1.0)<.1&&uSpectrum==0){
+   // Dense, pale lower limb fades through blue into the thinner upper air.
+   // The sunset belt follows the illuminator rather than the camera.
+   float h=max(0.0,impact-1.0)/height,mu=dot(normal,bodyLight(uObjects[j].xyz));
+   hue=mix(vec3(.105,.36,.98),vec3(1.03,1.48,1.88),exp(-h*1.85));
+   float dusk=exp(-pow((mu+.016)/.13,2.0));
+   hue=mix(hue,vec3(.78,.43,.47),dusk*.56*exp(-h*1.2));
+   sunlight=smoothstep(-.21,.32,mu);
+  }if(uSpectrum==1)hue=vec3(.65,.20,.06)*max(hue.r,max(hue.g,hue.b))*.14;
   sum+=hue*(1.0-exp(-column/max(.01,width)*1.25))*(.025+.975*sunlight)*bodyOpacity(j);
  }
  return sum;
@@ -51,7 +60,8 @@ void photoAtmosphere(vec3 first,vec3 last,inout vec3 color,inout float trans,ino
  for(int j=0;j<12;j++){
   if(j>=uObjectCount)break;if(uColors[j].a>.5||j==uHideObjectIndex)continue;
   vec4 air=atmosphereProfile(uBodyParams[j].x);if(air.w<=0.0)continue;
-  float radius=max(uObjects[j].w,1e-20),H=air.w;
+  float radius=max(uObjects[j].w,1e-20);if(uBodyParams[j].z>3.5)radius*=min(uBodyShape[j].x,min(uBodyShape[j].y,uBodyShape[j].z));
+  float H=air.w;
   vec3 start=(first-uObjects[j].xyz)/radius,impact=cross(dir,cross(start,dir));
   float outer=1.0+6.0*H,b2=dot(impact,impact);if(b2>=outer*outer)continue;
   float halfChord=sqrt(outer*outer-b2),z0=dot(start,dir);
@@ -73,6 +83,7 @@ void photoAtmosphere(vec3 first,vec3 last,inout vec3 color,inout float trans,ino
    float opticalDepth=column*.075/H*(uSpectrum==1?.18:1.0);
    float alpha=1.0-exp(-opticalDepth);
    vec3 radiance=(.78*rayleigh*tint+.11*aerosol*mix(tint,vec3(1),.72))*illumination;
+   if(abs(floor(uBodyParams[j].x/4.0)-1.0)<.1&&uSpectrum==0)radiance+=(.42+.32*rayleigh)*vec3(.90,1.04,1.17)*density*illumination;
    if(uSpectrum==1)radiance=vec3(.66,.24,.09)*dot(radiance,vec3(.33));
    color+=trans*sunlit*alpha*radiance;trans*=1.0-alpha;
    // Weak gradient-index optics: integral of grad_perp ln(n) along the ray.
@@ -113,6 +124,35 @@ float featureOval(vec3 n,float longitude,float latitude,vec2 spread){
  float dl=atan(sin(lon-longitude),cos(lon-longitude));
  return exp(-dot(vec2(dl,lat-latitude)/spread,vec2(dl,lat-latitude)/spread));
 }
+// Weather is synthesized on a sphere, independent of the fixed NASA map.
+// Midlatitude shear stretches fronts eastward. Vortices rotate only the
+// surrounding cloud coordinates; no repeating symbols or longitude seam.
+vec3 earthWeatherCurl(vec3 p,vec3 axis,float sense,float size){
+ vec3 tangent=p-axis*dot(p,axis);float strength=exp(-(1.0-dot(p,axis))*size);
+ float angle=sense*strength;return p+tangent*(cos(angle)-1.0)+cross(axis,p)*sin(angle);
+}
+vec2 earthWeather(vec3 n){
+ float season=sin(uTime*.00072),drift=.09*sin(uTime*.0016);
+ vec3 p=vec3(n.x*cos(drift)-n.z*sin(drift),n.y,n.x*sin(drift)+n.z*cos(drift));
+ p=earthWeatherCurl(p,vec3(-.671,.500,.548),1.45,62.0);
+ p=earthWeatherCurl(p,vec3(-.540,-.454,-.708),-1.32,76.0);
+ p=earthWeatherCurl(p,vec3(.603,.602,-.523),1.26,66.0);
+ p=earthWeatherCurl(p,vec3(.554,-.547,.627),-1.56,72.0);
+ float mid=smoothstep(.17,.65,abs(p.y));
+ float twist=(.12+.075*mid)*sin(4.35*p.y+.20*season)+.048*(noise(p*3.0)-.5);
+ vec3 q=vec3(cos(twist)*p.x-sin(twist)*p.z,p.y,sin(twist)*p.x+cos(twist)*p.z);
+ float banks=fbm(q*vec3(8.0,13.0,8.0)+vec3(4.2,.7,-2.1));
+ float ribs=fbm(q*vec3(21.0,39.0,21.0)+vec3(.8,1.2,0));
+ // Independent cells interrupt the sheared fronts instead of winding all
+ // frequencies around a storm center. Higher, translucent cirrus are sparse.
+ float cumulus=fbm(n*49.0+vec3(0,0,.80*drift));
+ float lace=noise(n*142.0+vec3(3.1,0,.6*drift));
+ float coverage=.46*banks+.22*ribs+.23*cumulus+.09*lace;
+ float deck=smoothstep(.495,.665,coverage);
+ float broken=smoothstep(.40,.67,cumulus+.095*(lace-.5));
+ float veil=(1.0-smoothstep(.013,.074,abs(banks-.565)))*smoothstep(.46,.66,ribs)*(.12+.88*mid)*(.3+.7*broken);
+ return vec2(clamp(deck+.19*veil,0.0,1.0),clamp(.29*ribs+.46*cumulus+.25*lace,0.0,1.0));
+}
 vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec4 profile,vec3 lightDirection){
  float id=profile.x,lat=asin(clamp(n.y,-1.0,1.0)),lon=atan(n.z,n.x);
  float light=max(dot(normal,lightDirection),0.0),terrain=fbm(n*8.0),fine=planetFine(n),limb=pow(1.0-max(dot(normal,-rd),0.0),3.0);
@@ -127,9 +167,10 @@ vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec
   else base=vec3(.44,.40,.36)*(.85+.25*terrain);
   if(id<1.5){
    ocean=smoothstep(.005,.06,base.b-base.r)*smoothstep(.0,.04,base.b-base.g);
-   float cloudShape=fbm(n*9.0+vec3(.15*sin(uTime*.001),0,.1*cos(uTime*.001)));
-   float clouds=smoothstep(.56,.76,cloudShape)*(.5+.5*noise(n*35.0));
-   base=mix(base,vec3(.93,.96,1),clouds*.82);ocean*=1.0-clouds;atmosphere=1.0;
+   // Lift dark, mapped forest and ocean tones without displacing coasts.
+   vec3 oceanDay=vec3(.022,.095,.185)+map*vec3(.50,.64,.82);
+   vec3 groundDay=pow(max(map,vec3(0)),vec3(.83))*(.93+.14*fine);
+   base=mix(groundDay,oceanDay,ocean);atmosphere=1.0;
   }else if(id>2.5&&id<3.5){atmosphere=.14;}
   else if(id>3.5&&id<4.5){atmosphere=.35;}
   else if(id>9.5&&id<11.5){base=mix(base,base*vec3(1.06,.94,.85),.25);}
@@ -138,8 +179,7 @@ vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec
   // Only the bundled map defines the actual continents.
   float land=smoothstep(.49,.54,fbm(n*3.7+vec3(1.1,0,2.4)));
   ocean=1.0-land;base=mix(vec3(.025,.12,.31),mix(vec3(.13,.22,.09),vec3(.38,.31,.17),terrain),land);
-  float clouds=smoothstep(.57,.73,fbm(n*9.0+vec3(.15*sin(uTime*.001),0,0)));
-  base=mix(base,vec3(.92,.96,1),clouds*.85);ocean*=1.0-clouds;atmosphere=1.0;
+  atmosphere=1.0;
  }else if(id>3.5&&id<5.5){
   // Gas-giant jets and vortices remain a procedural weather illustration.
   float flow=sin(lon*5.0+sin(lat*24.0)*1.4)+.35*sin(lon*13.0+lat*36.0);
@@ -171,6 +211,36 @@ vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec
   base=id<8.5?mix(vec3(.36,.66,.69),vec3(.61,.82,.82),bands*.25):mix(vec3(.13,.27,.56),vec3(.24,.47,.75),bands*.43);
   if(id>8.5)base=mix(base,vec3(.055,.14,.32),featureOval(n,1.0,-.32,vec2(.21,.085))*.6);
   atmosphere=.4;
+ }else if(abs(id-26.0)<.1){
+  // Meridional shear and two localized rotating weather systems bend the
+  // cloud deck. Longitude is wrapped to keep the anti-meridian seamless.
+  float jet=lat+.037*sin(lon*3.0+sin(lat*9.0))+.029*(terrain-.5);
+  vec2 storm=vec2(atan(sin(lon-.78),cos(lon-.78))/.32,(lat+.22)/.125);
+  vec2 storm2=vec2(atan(sin(lon+2.18),cos(lon+2.18))/.22,(lat-.38)/.095);
+  float v=exp(-dot(storm,storm)),v2=exp(-dot(storm2,storm2));
+  jet+=(storm.x*v-storm2.x*v2)*.20;
+  float current=.55+.29*sin(jet*17.0+1.55*sin(jet*5.0))+.14*sin(jet*48.0+1.3*terrain);
+  base=mix(vec3(.13,.17,.32),vec3(.20,.60,.55),smoothstep(.10,.65,current));
+  base=mix(base,vec3(.61,.86,.72),smoothstep(.54,.91,current)*.93);
+  float wisp=noise(vec3(n.x*12.0,jet*91.0,n.z*12.0))*smoothstep(.18,.78,current);
+  base*=.85+.24*wisp+.15*fine;
+  float eyeRing=(exp(-abs(length(storm)-.72)*5.0)+exp(-abs(length(storm2)-.65)*6.0))*.60;
+  base=mix(base,vec3(.87,.84,.64),min(1.,eyeRing));base=mix(base,vec3(.12,.22,.27),max(v*v*v,v2*v2*v2)*.84);
+  atmosphere=.54;
+ }else if(abs(id-25.0)<.1){
+  // Vulcan is fictional. A seamless, body-fixed mineral terrain: dark mesa
+  // country, rust slopes and pale dust deposited across sheltered basins.
+  float massif=.72*terrain+.28*noise(n*23.0+vec3(8.2,-3.1,1.4));
+  float basin=1.0-smoothstep(.33,.59,massif);
+  vec3 rock=mix(vec3(.32,.13,.085),vec3(.66,.31,.15),smoothstep(.36,.69,terrain));
+  vec3 sand=mix(vec3(.65,.34,.19),vec3(.89,.63,.36),smoothstep(.25,.69,fine));
+  base=mix(rock,sand,basin);
+  // Wind-scoured, broken ridges. Stretch noise along the prevailing wind;
+  // avoid repeating contours or long uninterrupted latitude bands.
+  vec3 drift=vec3(n.x+.38*n.z,n.y-.22*n.x,n.z-.38*n.x)*vec3(36.0,119.0,64.0);
+  float lee=noise(drift+vec3(2.1*terrain,4.0*massif,0.0));
+  base*=.79+.34*fine+.13*(lee-.5);
+  base=mix(base,vec3(.91,.69,.45),smoothstep(.55,.84,lee)*(.11+.19*basin));
  }else if(id>15.5&&id<16.5){
   base=mix(vec3(.48,.30,.10),vec3(.83,.62,.29),.45+.35*fbm(n*6.0));atmosphere=.95;
  }else{
@@ -180,10 +250,18 @@ vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec
   if(id>19.5&&id<20.5){base=vec3(.49,.45,.39)*(.65+.55*terrain);base*=1.0-.16*smoothstep(.6,.9,-n.y);}
   if(id>22.5&&id<23.5){base=mix(vec3(.49,.59,.61),vec3(.86,.89,.85),terrain);float cracks=pow(1.0-abs(noise(n*17.0)-.5)*2.0,28.0);base*=1.0-cracks*.27;}
  }
+ if(abs(id-1.0)<.1){
+  vec2 weather=earthWeather(n);
+  // The brightest cloud tops and thinner blue-gray cloud edges leave clear
+  // surface windows in every hemisphere.
+  vec3 cloud=mix(vec3(.49,.59,.68),vec3(1.06,1.085,1.12),smoothstep(.13,.91,weather.x)*.74+.26*weather.y);
+  base=mix(base*(1.0-.13*weather.x),cloud,weather.x);ocean*=1.0-weather.x;
+ }
  // The maps define geography. Only subtle material grain is added below a
  // map texel; it is not claimed as observed kilometre-scale relief.
  base*=tint*(.97+.06*fine);
  float diffuse=.028+light*.98;
+ if(abs(id-1.0)<.1)diffuse=.023+1.08*pow(light,.83)+.031*smoothstep(-.20,.22,dot(normal,lightDirection));
  vec3 shaded=base*diffuse;
  ${photo?`// Water's reflected energy depends on the incidence angle, not a painted spot.
  if(ocean>.01&&light>0.0&&uSpectrum==0){
@@ -195,6 +273,11 @@ vec3 namedPlanetSurface(vec3 n,vec3 normal,vec3 rd,vec3 tint,vec4 properties,vec
   shaded+=vec3(1.0,.97,.9)*nl*distribution*visibility*fresnel*ocean;
  }`:`if(ocean>.01){vec3 halfVector=unit(lightDirection-rd);shaded+=vec3(.8,.9,1)*pow(max(dot(normal,halfVector),0.0),80.0)*ocean*.45;}`}
  shaded+=vec3(.17,.37,.66)*limb*atmosphere*(.025+.16*light);
+ if(abs(id-1.0)<.1&&uSpectrum==0){
+  float slant=pow(1.0-clamp(dot(normal,-rd),0.,1.),2.35);
+  float day=smoothstep(-.20,.48,dot(normal,lightDirection));
+  shaded=mix(shaded,vec3(.31,.63,1.03),slant*(.016+.39*day));
+ }
  return surfaceSpectrum(shaded,light,.09+.11*terrain,id<1.5?.18:.03);
 }
 `;}

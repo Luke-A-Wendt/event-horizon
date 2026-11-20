@@ -27,7 +27,7 @@ for(const Cls of [BlackHoleRenderer,CpuRenderer]){
   // Surface-world fixtures start in a parking orbit with their orbital limb view.
   const initial=[...r.cameraFrame.inspectCamera];
   if(scene==='test-shuttle-bridge')assert(initial[0]<-3&&initial[1]>0&&initial[2]>0);
-  const expected=scene==='bridge'?[0,0,-5.4]:scene==='bridge-nebulae'?[-5,0,0]:initial;
+  const expected=scene==='bridge'?[0,5.4*Math.sin(.20),-5.4*Math.cos(.20)]:scene==='bridge-nebulae'?[-5,0,0]:initial;
   r.cameraFrame.inspectCamera.forEach((v,i)=>near(v,expected[i]));
   const eye=r.cameraFrame.inspectCamera,forward=r.cameraFrame.inspectForward;
   near(eye.reduce((sum,v,i)=>sum+v*forward[i],0),-Math.hypot(...expected));

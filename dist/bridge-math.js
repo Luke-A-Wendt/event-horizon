@@ -17,13 +17,21 @@ export function bridgeConformal(radius, throatRadius) {
 // Proper length along a straight isotropic-chart ray integrates
 // (1 + b²/(4r²)) ds. Invert monotonically without stepping through the
 // far-side coordinate pole, even when the stopping distance is very large.
-export function bridgeRayStep(start,direction,b,properLength){
- if(!(properLength>0))return 0;
+function bridgeRayIntegral(start,direction,b){
  const a=start.reduce((v,x,i)=>v+x*direction[i],0),impact=Math.hypot(...start.map((x,i)=>x-a*direction[i])),k=b*b*.25;
  const path=s=>impact>Math.max(1e-18,Math.abs(a)*1e-12)
   ?s+k/impact*Math.atan2(impact*s,impact*impact+a*(a+s))
   :a<0&&s>=-a?Infinity:s+k*s/(a*(a+s));
- let lo=0,hi=Math.min(properLength,a<0&&impact<=Math.abs(a)*1e-12?-a:Infinity);
+ return {path,pole:a<0&&impact<=Math.abs(a)*1e-12?-a:Infinity};
+}
+export function bridgeRayDistance(start,end,b){
+ const delta=end.map((x,i)=>x-start[i]),s=Math.hypot(...delta);
+ return s?bridgeRayIntegral(start,delta.map(x=>x/s),b).path(s):0;
+}
+export function bridgeRayStep(start,direction,b,properLength){
+ if(!(properLength>0))return 0;
+ const {path,pole}=bridgeRayIntegral(start,direction,b);
+ let lo=0,hi=Math.min(properLength,pole);
  for(let i=0;i<72;i++){const mid=(lo+hi)*.5;if(path(mid)<properLength)lo=mid;else hi=mid;}
  return (lo+hi)*.5;
 }
@@ -31,6 +39,17 @@ export function bridgeGradient(position, throatRadius) {
  const radius2=Math.max(1e-30,position.reduce((n,x)=>n+x*x,0)),b2=throatRadius*throatRadius;
  const scale=-2*b2/(radius2*(4*radius2+b2));
  return position.map(x=>x*scale);
+}
+// Proper acceleration magnitude for a trajectory with known local speed and
+// direction in the ultrastatic Ellis metric -c²dt² + (scale F)² dx².
+// k is the Euclidean curvature vector dT/ds of the drawn track; a geodesic
+// obeys k = grad_perp ln F. Only their difference needs lateral thrust.
+export function bridgeTrackLoadG(p,T,k,b,scale,v,parallelG=0){
+ const beta=v/299792458;
+ if(!(scale>0&&beta>=0&&beta<1))return null;
+ const grad=bridgeGradient(p,b),along=grad.reduce((sum,x,i)=>sum+x*T[i],0);
+ const curvature=Math.hypot(...k.map((x,i)=>x-grad[i]+along*T[i]))/(scale*bridgeConformal(Math.hypot(...p),b));
+ return Math.hypot(parallelG,(v*v/((1-beta)*(1+beta)))*curvature/9.80665);
 }
 export function bridgePath(time, throatRadius, travel=true) {
  const phase=travel?Math.max(0,time)*.12:0,l=6*throatRadius*Math.cos(phase);
@@ -67,7 +86,7 @@ export const BRIDGE_VEHICLE_CAMERA=Object.freeze({mode:'track',lookYaw:0,lookPit
 // either side. At rest the hull supplies a continuous frame for the turn,
 // when a tangent inferred from velocity would be undefined.
 export const BRIDGE_HULL_CAMERAS=Object.freeze({
- 'bridge':Object.freeze({...BRIDGE_VEHICLE_CAMERA,pitch:0,focusDistance:5.4}),
+ 'bridge':Object.freeze({...BRIDGE_VEHICLE_CAMERA,pitch:.20,focusDistance:5.4}),
  'bridge-nebulae':Object.freeze({...BRIDGE_VEHICLE_CAMERA,yaw:-Math.PI/2,pitch:0,focusDistance:5})
 });
 
@@ -80,10 +99,12 @@ export function bridgeMetricScale(open,far=false){const radius=Math.max(1e-4,Mat
 // reaches the throat and closes only after it clears the opening on either
 // side. Its phase is derived from the live pose, so pause/save/manual flight
 // and render-worker snapshots cannot desynchronize an extra gate timer.
-export function bridgeResearchGateStage(position,throatRadius){
+export function bridgeResearchGateStage(position,throatRadius,velocity,hardware=false){
  const b=Math.max(1e-30,throatRadius),r=Math.max(1e-30,Math.hypot(...(position||[0,0,6*b]))),l=bridgeProperRadius(r,b),distance=Math.abs(l)/b;
  const t=Math.max(0,Math.min(1,(distance-1.25)/2.25)),open=1-t*t*(3-2*t);
- return {r,l,open,far:l<0,phase:open<=0?'Gate on standby':open>=1?'Gate open':'Gate activating'};
+ // The sign of d|l|/dt reverses at the throat and on the return leg.
+ const outward=velocity&&position?Math.sign(l)*position.reduce((sum,x,i)=>sum+x*velocity[i],0):0;
+ return {r,l,open,far:l<0,phase:open<=0?'Gate on standby':open>=1?'Gate open':outward<0?'Opening gate':outward>0?'Closing gate':'Gate partially open'};
 }
 
 // A robust Gaussian line integral used by the jet sampler. This independent

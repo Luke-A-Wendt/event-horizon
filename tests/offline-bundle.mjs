@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import vm from 'node:vm';
 import {createHash} from 'node:crypto';
+import { WARP_PATCH_GLSL, warpGridSurface } from '../dist/warp-glsl.js';
+import { createCraftGLSL } from '../dist/craft-glsl.js';
 import { SCENE_PRESETS } from '../dist/config.js';
 import { RENDER_WORKER_SOURCE } from '../dist/render-worker-bundle.js';
 import { SCENE_FILE_WORKER_SOURCE } from '../dist/scene-file-worker-bundle.js';
@@ -37,6 +39,16 @@ for (const [label, pattern] of forbiddenRuntime) assert(!pattern.test(html), `Un
 // Blob. Validate its complete executable contents as well as the page closure.
 new vm.Script(RENDER_WORKER_SOURCE, {filename:'embedded-render-worker.js'});
 assert(RENDER_WORKER_SOURCE.includes('__modules["render-worker.js"].installRenderWorker(globalThis)'), 'Worker entrypoint is bundled');
+// Exercise the shipped module bindings: a missing numeric export in a shader
+// template remains valid JavaScript but produces invalid GLSL on the device.
+const workerProbe = {};
+vm.runInNewContext(RENDER_WORKER_SOURCE.replace(
+ '__modules["render-worker.js"].installRenderWorker(globalThis);',
+ 'globalThis.probes=[__modules["warp-glsl.js"].WARP_PATCH_GLSL,__modules["warp-glsl.js"].warpGridSurface(),...[2,8,32,64,128].map(mask=>__modules["craft-glsl.js"].createCraftGLSL({mask}))];'
+), workerProbe);
+const probes=Array.from(workerProbe.probes);
+assert.deepEqual(probes,[WARP_PATCH_GLSL,warpGridSurface(),...[2,8,32,64,128].map(mask=>createCraftGLSL({mask}))], 'Shipped grid and spacecraft shaders agree with the tested modules');
+assert(probes.every(s=>!s.includes('undefined')), 'Shaders must contain the numeric grid constants');
 assert(!/\bimport\s*(?:\(|\{|\*|['"])|^\s*export\s/m.test(RENDER_WORKER_SOURCE), 'Worker must contain no executable imports or exports');
 for(const [label,pattern] of forbiddenRuntime)assert(!pattern.test(RENDER_WORKER_SOURCE),`Unexpected worker ${label} dependency`);
 new vm.Script(SCENE_FILE_WORKER_SOURCE,{filename:'embedded-scene-file-worker.js'});
@@ -81,7 +93,8 @@ for (const scene of SCENE_PRESETS) {
   assert(bytes.equals(await readFile(path.join(root, 'dist', 'assets', `atlas-${scene.id}.webp`))), `Thumbnail differs from source for ${scene.id}`);
   imageBytes += bytes.length;
 }
-assert(javascript.includes('data-thumbnail="${__atlasImages[p.id]}"'), 'Atlas rendering must use the embedded map');
+assert(javascript.includes('data-thumbnail="${p.id}"'), 'Gallery markup holds only scene IDs');
+assert(javascript.includes('const thumbnailUrl=id=>__atlasImages[id]'), 'A visible thumbnail resolves from the embedded map');
 assert(!javascript.includes('src="assets/atlas-'), 'Atlas must not request a relative file');
 
 const favicon = html.match(/<link\b[^>]*\brel="icon"[^>]*\bhref="(data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+)"[^>]*>/);
@@ -155,7 +168,8 @@ for (const match of remoteLiterals) {
   const before = html.slice(Math.max(0, match.index - 30), match.index);
   // Catalog attribution is inert text carried by the body properties. It is
   // never fetched; the runtime-network checks above remain unchanged.
-  const catalogReference=match[0]==='https://exoplanetarchive.ipac.caltech.edu/overview/proxima%20centauri'&&/const CENTAURI_REFERENCE=['"]$/.test(before);
+  const catalogReference=(match[0]==='https://exoplanetarchive.ipac.caltech.edu/overview/proxima%20centauri'&&/const CENTAURI_REFERENCE=['"]$/.test(before))||
+    (match[0]==='https://esrs.jsc.nasa.gov/Tools/orbitTutorial.htm'&&/\breference:'$/.test(before));
   assert(/(?:\bxmlns\s*=\s*["']|\blink\(\s*["'])$/.test(before) || (match[0]==='http://www.w3.org/2000/svg'&&/createElementNS\(\s*['"]$/.test(before)) || creditOffsets.has(match.index)||catalogReference, 'Remote URL appears outside a reference link, approved catalog attribution/author anchor, or XML namespace');
 }
 
@@ -177,6 +191,12 @@ console.log(`PASS: standalone JS syntax; ${Object.keys(atlas).length} exact embe
 // either extracted HTML file requires no module loader or external service.
 for(const entry of ['index.html','dist/index.html']){
  const page=await readFile(path.join(root,entry),'utf8');
+ const heading=page.match(/<script id="scene-link-heading">([\s\S]*?)<\/script>/)[1];
+ const linked=SCENE_PRESETS.find(scene=>scene.id==='shuttle-space'),nodes={};
+ vm.runInNewContext(heading,{location:{search:'?scene='+linked.id},URLSearchParams,document:{getElementById:id=>(nodes[id]??={})}});
+ assert.equal(nodes.sceneTitle.textContent,linked.title);
+ assert.equal(nodes.sceneSubtitle.textContent,linked.subtitle);
+ assert(page.indexOf(heading)<page.indexOf('defer src='),'Deep-link heading is set before the application download completes');
  assert(!page.includes('<base '));assert(!page.includes('type="module"'));
  for(const resource of page.matchAll(/<(?:script|link|img)\b[^>]*?\b(?:src|href)="([^"]+)"/g)){
   const url=resource[1];if(url.startsWith('#')||url.startsWith('data:'))continue;

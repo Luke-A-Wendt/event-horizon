@@ -5,9 +5,18 @@ import {fixture} from './render-fixture.mjs';
 import {serializeScene,parseScene} from '../dist/scene-file.js';
 import {AU_METERS} from '../dist/solar-catalog.js';
 import {REFERENCE_RG_METERS} from '../dist/objects.js';
+// Headings, gallery cards and active scene help must describe the same presets.
+assert.equal(new Set(SCENE_PRESETS.map(p=>p.title)).size,SCENE_PRESETS.length);
+for(const p of SCENE_PRESETS){
+ assert.equal(p.heading,p.title,p.id);
+ assert(p.subtitle&&p.explore,p.id);
+ const words=p.description.trim().split(/\s+/).length;
+ assert(words>=15&&words<=30,`${p.id}: use one short card description; longer tips belong in Help`);
+ assert.match(p.description,/\.$/,p.id);
+}
 const byId=id=>SCENE_PRESETS.find(s=>s.id===id),craft=byId('solar-system'),natural=byId('solar-system-natural');
-assert.equal(craft.title,'Touring Our Solar System');assert.equal(craft.category,'Spacecraft');assert.equal(craft.objects.length,515);
-assert.equal(natural.title,'Our Solar System');assert.equal(natural.category,'Solar systems');assert.equal(natural.objects.length,513);assert(!natural.objects.some(o=>['iss','shuttle','enterprise'].includes(o.type)));
+assert.equal(craft.title,'1g tour of the solar system');assert.equal(craft.category,'Spacecraft');assert.equal(craft.objects.length,514);
+assert.equal(natural.title,'Our solar system');assert.equal(natural.category,'Solar systems');assert.equal(natural.objects.length,513);assert(!natural.objects.some(o=>['habitat','iss','shuttle','enterprise'].includes(o.type)));
 assert.equal(craft.objects[craft.camera.focusIndex].type,'shuttle');assert.equal(natural.objects[natural.camera.focusIndex].name,'Earth');
 for(const id of ['solar-system','solar-system-natural','proxima-centauri','alpha-centauri'])assert.equal(makePreset(id).annotations,true,id);
 for(const id of ['proxima-centauri','alpha-centauri']){

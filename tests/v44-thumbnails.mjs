@@ -3,7 +3,7 @@ import {installSceneThumbnails} from '../dist/scene-thumbnails.js';
 import {uiDomFixture} from './ui-dom-fixture.mjs';
 
 function fixture(withObserver=true){
- const cards=Array.from({length:49},(_,i)=>`<button data-scene="scene-${i}"><div class="atlas-art"><span data-thumbnail-status>Preview…</span><img data-thumbnail="data:image/webp;base64,${i}" hidden></div></button>`).join('');
+ const cards=Array.from({length:49},(_,i)=>`<button data-scene="scene-${i}"><div class="atlas-art"><span data-thumbnail-status>Preview…</span><img data-thumbnail="scene-${i}" hidden></div></button>`).join('');
  const doc=uiDomFixture(`<dialog id="dialog"><div id="grid">${cards}</div></dialog>`),dialog=doc.getElementById('dialog'),grid=doc.getElementById('grid'),images=grid.querySelectorAll('img'),arts=grid.querySelectorAll('.atlas-art');
  let scroll=0,serial=0,requests=0,peak=0,inflight=0,observer=null;
  const timers=new Map(),resize=new Set();
@@ -24,6 +24,7 @@ function fixture(withObserver=true){
 for(const observer of [true,false]){
  const f=fixture(observer);assert.equal(f.requests,0,'Closed dialog starts no image work');
  f.dialog.showModal();f.ui.refresh();assert.equal(f.requests,2);assert.equal(f.inflight,2);
+ assert.equal(f.images[0].src,'assets/atlas-scene-0.webp');assert.equal(f.images[2].src,undefined);
  if(observer){assert.equal(f.observer.options.root,f.dialog);assert.equal(f.observer.options.rootMargin,'400px');}
  f.complete(0);f.complete(1);assert.equal(f.images[0].hidden,false);assert(f.arts[0].querySelector('[data-thumbnail-status]').hidden);
  // Later cards are not tied to native lazy loading or the initial viewport.

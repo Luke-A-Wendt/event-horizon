@@ -1,8 +1,10 @@
+import {applyJanusCanvasLens} from './janus-canvas-lens.js';
 // Old browsers can run Workers without OffscreenCanvas. In that case the
 // worker records projected Canvas primitives; the UI paints bounded batches
 // into a back buffer and presents only a complete frame.
-const METHODS=['beginPath','closePath','moveTo','lineTo','arc','ellipse','fill','stroke','fillRect','clearRect','save','restore','translate','rotate','scale','setTransform'];
+const METHODS=['beginPath','closePath','moveTo','lineTo','bezierCurveTo','arc','ellipse','rect','clip','fill','stroke','fillRect','clearRect','save','restore','translate','rotate','scale','setTransform'];
 const DRAW_METHODS=new Set(['fill','stroke','fillRect']);
+const MAX_POLYGON_VERTICES=64;
 const validNumber=value=>typeof value!=='number'||Number.isFinite(value);
 const validColor=value=>typeof value==='string'&&value.length<=256&&!/NaN|Infinity/.test(value);
 const assertFrame=frame=>{if(!frame||!Number.isInteger(frame.width)||!Number.isInteger(frame.height)||frame.width<1||frame.height<1||frame.width>2048||frame.height>2048||frame.width*frame.height>1048576||!Array.isArray(frame.commands)||!frame.commands.length||frame.commands.length>20000||!Array.isArray(frame.gradients)||frame.gradients.length>2048)throw new Error('The CPU renderer produced an invalid or empty frame.');};
@@ -15,11 +17,35 @@ export function createCpuTaskScheduler(){
  channel.port1.onmessage=event=>{const fn=pending.get(event.data);pending.delete(event.data);fn?.();};
  return {post(fn){const id=++serial;pending.set(id,fn);channel.port2.postMessage(id);return id;},cancel(id){pending.delete(id);},dispose(){pending.clear();channel.port1.close();channel.port2.close();}};
 }
+// Direct Canvas and command replay build the same closed path. Choose the
+// painter once per group of faces, keeping the recorded version compact.
+export function polygonFiller(ctx){
+ if(Object.hasOwn(ctx,'fillMeshPolygon'))return ctx.fillMeshPolygon;
+ return points=>{
+  ctx.beginPath();ctx.moveTo(points[0][0],points[0][1]);
+  for(let i=1;i<points.length;i++)ctx.lineTo(points[i][0],points[i][1]);
+  ctx.closePath();ctx.fill();
+ };
+}
 export class CpuCommandCanvas {
  constructor(){
   this.width=2;this.height=2;this.style={};this.commands=[];this.gradients=[];this.values={};this.stack=[];
-  const context={createRadialGradient:(...args)=>{const gradient={id:this.gradients.length,args,stops:[],addColorStop(offset,color){this.stops.push([offset,color]);}};this.gradients.push(gradient);return gradient;}};
+  const addGradient=(kind,args)=>{const gradient={id:this.gradients.length,kind,args,stops:[],addColorStop(offset,color){this.stops.push([offset,color]);}};this.gradients.push(gradient);return gradient;};
+  const context={createRadialGradient:(...args)=>addGradient('radial',args),createLinearGradient:(...args)=>addGradient('linear',args)};
   const record=command=>{if(this.commands.length>=20000)throw new Error('CPU frame exceeded its bounded command budget.');this.commands.push(command);};
+  // A mesh face is one bounded transfer record. Replay preserves its path,
+  // fill rule, color, transparency and painter's order.
+  context.janusOptics=(op,...args)=>record(['janusOptics',op,...args]);
+  context.fillMeshPolygon=points=>{
+   if(points.length>MAX_POLYGON_VERTICES){
+    context.beginPath();context.moveTo(...points[0]);
+    for(let i=1;i<points.length;i++)context.lineTo(...points[i]);
+    context.closePath();context.fill();return;
+   }
+   const command=['fillPolygon'];
+   for(const [x,y] of points)command.push(x,y);
+   record(command);
+  };
   for(const method of METHODS)context[method]=(...args)=>{if(method==='save')this.stack.push({...this.values});if(method==='restore')this.values=this.stack.pop()||{};record([method,...args]);};
   for(const name of PROPERTIES)Object.defineProperty(context,name,{get:()=>this.values[name],set:value=>{if(this.values[name]===value)return;this.values[name]=value;record(['property',name,typeof value==='object'?{gradient:value.id}:value]);}});
   this.context=context;
@@ -27,7 +53,7 @@ export class CpuCommandCanvas {
  getContext(kind){return kind==='2d'?this.context:null;}
  addEventListener(){}removeEventListener(){}setPointerCapture(){}releasePointerCapture(){}
  beginFrame(){this.commands=[];this.gradients=[];this.values={};this.stack=[];}
- takeFrame(){const frame={width:this.width,height:this.height,commands:this.commands,gradients:this.gradients.map(({args,stops})=>({args,stops}))};this.commands=[];this.gradients=[];return frame;}
+ takeFrame(){const frame={width:this.width,height:this.height,commands:this.commands,gradients:this.gradients.map(({kind,args,stops})=>({kind,args,stops}))};this.commands=[];this.gradients=[];return frame;}
 }
 
 export class CpuCommandPlayer {
@@ -56,13 +82,30 @@ export class CpuCommandPlayer {
     const began=this.now();let operations=0;
     while(gradientIndex<frame.gradients.length&&operations<192&&this.now()-began<4){
      const entry=frame.gradients[gradientIndex++];operations++;
-     if(!entry||!Array.isArray(entry.args)||entry.args.length!==6||!entry.args.every(x=>typeof x==='number'&&Number.isFinite(x))||entry.args[2]<0||entry.args[5]<0||!Array.isArray(entry.stops)||entry.stops.length>32)throw new Error('A CPU gradient contains invalid coordinates.');
-     const g=context.createRadialGradient(...entry.args);
+     const kind=entry?.kind??'radial',linear=kind==='linear';
+     if(!entry||(!linear&&kind!=='radial')||!Array.isArray(entry.args)||entry.args.length!==(linear?4:6)||!entry.args.every(Number.isFinite)||!linear&&(entry.args[2]<0||entry.args[5]<0)||!Array.isArray(entry.stops)||entry.stops.length>32)throw new Error('A CPU gradient contains invalid coordinates.');
+     const g=linear?context.createLinearGradient(...entry.args):context.createRadialGradient(...entry.args);
      for(const stop of entry.stops){if(!Array.isArray(stop)||stop.length!==2||!Number.isFinite(stop[0])||stop[0]<0||stop[0]>1||!validColor(stop[1]))throw new Error('A CPU gradient contains an invalid color.');g.addColorStop(...stop);}gradients.push(g);
     }
     if(gradientIndex<frame.gradients.length){this.timer=this.schedule(step);return;}
     while(index<frame.commands.length&&operations<192&&this.now()-began<4){
-     const command=frame.commands[index++];operations++;
+     const command=frame.commands[index];
+     if(Array.isArray(command)&&command[0]==='janusOptics'){
+      applyJanusCanvasLens(context,frame.width,frame.height,...command.slice(1));
+      index++;operations+=32;continue;
+     }
+     if(Array.isArray(command)&&command[0]==='fillPolygon'){
+      const vertices=(command.length-1)/2;
+      if(!Number.isInteger(vertices)||vertices<3||vertices>MAX_POLYGON_VERTICES)throw new Error('A CPU mesh face has an invalid vertex count.');
+      const cost=vertices+3;
+      if(operations+cost>192)break;
+      operations+=cost;index++;
+      for(let i=1;i<command.length;i++)if(!Number.isFinite(command[i]))throw new Error('A CPU mesh face contains invalid coordinates.');
+      context.beginPath();context.moveTo(command[1],command[2]);
+      for(let i=3;i<command.length;i+=2)context.lineTo(command[i],command[i+1]);
+      context.closePath();context.fill();draws++;continue;
+     }
+     index++;operations++;
      if(!Array.isArray(command)||!command.length||!command.every(validNumber))throw new Error('A CPU draw contains invalid coordinates.');
      const name=command[0];
      if(name==='property'){

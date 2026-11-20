@@ -18,9 +18,22 @@ const unique=new Map();let cases=0;
 function add(name,features,webgl2){
  let vertex=VERTEX,fragment=createFragment(features);
  assert.match(fragment,/vec3 bridgeTrace\(/,name);
- const calls=[...fragment.matchAll(/\bobjectHit\(([^)]*)\)/g)];
+ // Count only top-level separators: chart-space ray endpoints and some
+ // arguments are parenthesized expressions or calls that contain commas.
+ const calls=[];
+ for(const match of fragment.matchAll(/\bobjectHit\s*\(/g)){
+  let depth=1,arity=1,i=match.index+match[0].length;
+  for(;i<fragment.length&&depth;i++){
+   const c=fragment[i];
+   if(c==='(')depth++;else if(c===')')depth--;else if(c===','&&depth===1)arity++;
+  }
+  assert.equal(depth,0,`${name}: unterminated objectHit`);
+  calls.push(arity);
+ }
  assert(calls.length>=2,`${name}: definition and bridge call`);
- for(const call of calls)assert.equal(call[1].split(',').length,5,`${name}: objectHit must receive the per-ray transparency mask`);
+ for(const arity of calls)assert.equal(arity,5,`${name}: objectHit must receive the per-ray transparency mask`);
+ const hardware=['bridge','earth-proxima-gates'].includes(name.split('/')[0]);
+ assert.equal(fragment.includes('vec4 gateLocalSegment('),hardware,name+': engineering hardware must follow the gate scene');
  const start=fragment.indexOf('vec3 bridgeTrace('),trace=fragment.slice(start,fragment.indexOf('return color+metricColor;',start));
  assert(trace.indexOf('transparentMask=0.0')<trace.indexOf('for('),`${name}: reset transparency once per ray, never each step`);
  assert.equal((trace.match(/transparentMask=0\.0/g)||[]).length,1);
