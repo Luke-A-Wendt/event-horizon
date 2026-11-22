@@ -15,15 +15,21 @@ export function dysonHabitableRadius(star){return ASTRONOMICAL_UNIT*Math.sqrt(Ma
 export function dysonIllumination(star,radiusMeters){return Math.min(4,Math.pow(Math.max(0,stellarLuminositySolar(star))/(Math.max(1,radiusMeters)/ASTRONOMICAL_UNIT)**2,.25));}
 
 // Reference intersection used by the Canvas preview and geometric checks.
-// The cap opens toward +Z; cutaway is its fraction of total shell area.
-export function dysonShellHit(origin,direction,cutaway=0,maximum=Infinity,bandOnly=false){
+// Service hoops, meridians and diagonal braces span the rotating frame.
+function frameMember(p,phase){
+ const lon=(Math.atan2(p[2],p[0])+phase)*12/(2*Math.PI);
+ const lat=Math.acos(Math.max(-1,Math.min(1,p[1])))*8/Math.PI;
+ const seam=x=>Math.abs(x-Math.round(x));
+ return seam(lon)<.025||seam(lat)<.032||seam(lon+lat)<.026;
+}
+export function dysonShellHit(origin,direction,cutaway=0,maximum=Infinity,bandOnly=false,phase=0){
  const b=origin.reduce((n,v,i)=>n+v*direction[i],0),cross=[origin[1]*direction[2]-origin[2]*direction[1],origin[2]*direction[0]-origin[0]*direction[2],origin[0]*direction[1]-origin[1]*direction[0]],disc=1-cross.reduce((n,v)=>n+v*v,0);
  if(disc<0)return null;
  const root=Math.sqrt(disc),cap=1-2*Math.max(0,Math.min(.8,cutaway));
  for(const t of [-b-root,-b+root]){
   if(t<1e-7||t>maximum)continue;
   const point=origin.map((v,i)=>v+direction[i]*t);
-  if((cutaway>0&&point[2]>cap)||(bandOnly&&Math.abs(point[1])>.075))continue;
+  if((cutaway>0&&(bandOnly?point[2]>cap:point.reduce((s,v,i)=>s+v*direction[i],0)<0&&!frameMember(point,phase)))||(bandOnly&&Math.abs(point[1])>.075))continue;
   return {t,point,inside:point.reduce((n,v,i)=>n+v*direction[i],0)>0};
  }
  return null;

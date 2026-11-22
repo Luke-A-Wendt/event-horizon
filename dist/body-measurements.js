@@ -1,7 +1,7 @@
 import {TOROID_ID,TOROID_LANES,TOROID_COUNT,TOROID_COLLECTOR_RADIUS} from './toroid-swarm.js';
 import {K2_GRID,K2_ROLES} from './kardashev-solar.js';
 import {GEO_RADIUS,EARTH_RADIUS} from './kardashev-earth.js';
-import {brainTier} from './matrioshka.js';
+import {brainTier,brainTemperature} from './matrioshka.js';
 import {CYLINDER_BOUND,CYLINDER_HALF,CYLINDER_DECK,CYLINDER_BAYS,CYLINDER_OMEGA} from './oneill-cylinder.js';
 import {stellarLuminositySolar} from './dyson.js';
 import {SHKADOV_COVERAGE,SHKADOV_HALF_ANGLE} from './shkadov.js';
@@ -210,6 +210,12 @@ export function observedBodyMeasurements(r){
   add('support','Mirror support','Controlled hover','Light pressure pushes out and stellar gravity pulls in. Small corrections keep the mirror aligned and moving with the star.');
   return result;
  }
+ const tier=brainTier(raw?.catalogId);
+ if(tier){
+  add('function','Subsystem',tier.role);add('radius','Tier radius',metricDistance(radius*RG));
+  add('temperature','Effective temperature',brainTemperature(radius*RG)+' K','A full shell reradiating one solar luminosity from its outer face; not the local chip temperature.');
+  add('order','Layer from star',String(tier.index+1)+' / 4');return result;
+ }
  if(type==='dyson'){
   add('radius','Equatorial floor radius',metricDistance(radius*RG),'Distance from the spin axis to the garden floor at the equator.');
   const spin=frame.dysonSpin;
@@ -218,12 +224,6 @@ export function observedBodyMeasurements(r){
    add('floorGravity','Equatorial floor gravity',(spin.floorGravity/9.80665).toFixed(1)+'g','What a person standing at the equator feels. Stellar gravity supplies part of the inward turn; the floor supplies the rest.');
   }else add('spinLimit','Equatorial floor gravity','Not modeled','These shell dimensions and central mass are outside the sublight spin model.');
   return result;
- }
- const tier=brainTier(raw?.catalogId);
- if(tier){
-  add('function','Subsystem',tier.role);add('radius','Tier radius',metricDistance(radius*RG));
-  add('temperature','Effective temperature',Math.round(5772*Math.sqrt(695700000/(radius*RG)))+' K','A full shell reradiating one solar luminosity from its outer face; not the local chip temperature.');
-  add('order','Layer from star',String(tier.index+1)+' / 4');return result;
  }
  if(raw?.catalogId==='swarm-aster'){
   add('district','Living district','Shielded atrium');add('generation','Power','Photovoltaic wings');add('cooling','Heat rejection','Radiator fins');return result;

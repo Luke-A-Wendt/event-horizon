@@ -93,13 +93,17 @@ export function captureAnnotationFrame(renderer){
  // available for tiny locators and picks without cloning the full scene graph.
  const labelContext=annotationLabelContext(renderer);
  const fleet=renderer.sceneId==='shuttle-space'?new Set(renderer.objects.filter(isDriveCraft).map(o=>o.id)):null;
- const travelCraft=[renderer.selectedId,...(fleet?[]:[renderer.driveId]),renderer.focusId].map(id=>renderer.objects?.find(o=>o.id===id&&['shuttle','enterprise'].includes(o.type))).find(Boolean),autoCraft=travelCraft&&(renderer.getNavigationState?.(travelCraft.id)?.mode||'auto')==='auto',travelCraftId=autoCraft?travelCraft.id:null;
+ const tourCraft=s.annotations&&s.destinationOnlyLabels?(renderer.transfer?.craftId||renderer.dockingMission?.craftId||Object.values(renderer.flightSequences||{}).find(q=>q.active)?.craftId||Object.values(renderer.janusRoutes||{}).find(q=>q.auto)?.craftId):null;
+ const travelCraft=[renderer.selectedId,...(fleet?[]:[renderer.driveId]),renderer.focusId,tourCraft].map(id=>renderer.objects?.find(o=>o.id===id&&['shuttle','enterprise'].includes(o.type))).find(Boolean),autoCraft=travelCraft&&(renderer.getNavigationState?.(travelCraft.id)?.mode||'auto')==='auto',travelCraftId=autoCraft?travelCraft.id:null;
  const bridgePod=travelCraft?.hullModel==='janusPod'&&s.annotations?renderer.getJanusBridge?.(travelCraft.id):null;
  const queue=travelCraftId&&renderer.flightSequences?.[travelCraftId],trip=renderer.transfer;
  const craftTrip=trip?.active&&trip.craftId===travelCraftId?trip:null;
- const gateApproach=craftTrip?.pairedGate&&craftTrip.progress<.5;
- const nextGate=gateApproach?(renderer.getBridgeStage().far?'bridge-proxima-gate':'bridge-earth-gate'):null;
- const destinationId=bridgePod?(bridgePod.active||bridgePod.auto?bridgePod.destinationId:null):s.annotations&&travelCraftId?(nextGate||craftTrip?.targetId||queue?.orbitWait?.targetId||queue?.nodes?.[queue.index]?.targetId)||null:null;
+ const gateStage=craftTrip?.pairedGate&&craftTrip.crossing?renderer.getBridgeStage():null;
+ const gateApproach=gateStage&&gateStage.far!==(craftTrip.targetId==='bridge-far-world');
+ const nextGate=gateApproach?(gateStage.far?'bridge-proxima-gate':'bridge-earth-gate'):null;
+ const dockTarget=renderer.dockingMission?.craftId===travelCraftId?renderer.dockingMission.stationId:null;
+ const janusTarget=bridgePod?.active?bridgePod.destinationId:bridgePod?.auto?(s.destinationOnlyLabels?bridgePod.currentId:bridgePod.destinationId):null;
+ const destinationId=bridgePod?janusTarget:s.annotations&&travelCraftId?(nextGate||dockTarget||craftTrip?.targetId||queue?.orbitWait?.targetId||queue?.nodes?.[queue.index]?.targetId)||null:null;
  let virtual=s.annotations?(renderer.getNavigationWaypoints?.(travelCraft?.id)||[]):[];
  if(s.annotations&&s.bridge&&s.bridgeSurfaces&&renderer.sceneId===PROXIMA_GATE_SCENE_ID)virtual=proximaRouteLabels(renderer,optics,virtual);
  const guildWorlds=s.annotations&&s.bridge&&s.bridgeSurfaces&&s.bridgeTravelerType==='heighliner'&&s.bridgeWorlds==='caladan'?guildWorldLabels(renderer,optics):[];
@@ -113,7 +117,7 @@ export function captureAnnotationFrame(renderer){
   // with the submitted camera, even when its curvature center is offscreen.
   if(straight&&(body.catalogId==='ringworld'||body.catalogId==='shkadov-mirror')&&!(body.id===renderer.focusId&&renderer.focusMode==='onboard'))openSurfaces.push({id:body.id,type:body.type,catalogId:body.catalogId,name:bodyLabel(body),position:vector(body.position),radius:body.radius});
   if((body.type==='waypoint'&&!s.annotations)||['ring','belt','disk','jets','anomaly'].includes(body.type)||body.id===renderer.focusId&&renderer.focusMode==='onboard')continue;
-  const labelEligible=fleet?.has(body.id)||!!body.gridRelativeVelocity||body.id===destinationId||body.type==='waypoint'||!!body.virtual||annotationLabelVisible(body,labelContext);
+  const labelEligible=s.destinationOnlyLabels&&!s.velocityArrows?body.id===destinationId:fleet?.has(body.id)||!!body.gridRelativeVelocity||body.id===destinationId||body.type==='waypoint'||!!body.virtual||annotationLabelVisible(body,labelContext);
   // Unlabelled subpixel catalog bodies remain in the tree/map. Only rendered
   // surfaces need picking anchors; avoid projecting hundreds of hidden moons.
   if((s.annotations||s.velocityArrows)&&!labelEligible&&!(body.index>=0)&&body.id!==renderer.focusId)continue;
@@ -187,10 +191,10 @@ export function captureAnnotationFrame(renderer){
  const pickOptics=defer?{...optics,origin:vector(optics.origin),observer:vector(optics.observer),forward:vector(optics.forward),right:vector(optics.right),up:vector(optics.up),bodies:optics.bodies.map(b=>({...b,center:vector(b.center),axis:vector(b.axis),...(b.waterCap?{waterCap:{...b.waterCap,direction:vector(b.waterCap.direction)}}:{}),...(b.shapeAxes?{shapeAxes:vector(b.shapeAxes),shapeBasis:b.shapeBasis.map(vector)}:{})})),holes:optics.holes.map(b=>({...b,center:vector(b.center),axis:vector(b.axis)})),warp:optics.warp?{...optics.warp,center:vector(optics.warp.center),axis:vector(optics.warp.axis)}:null,occluders:undefined,budget:{...optics.budget}}:null;
  // Keep a navigation bearing independent of the optical visibility budget.
  const dest=destinationId&&(source.find(b=>b.id===destinationId)||holes.find(b=>b.id===destinationId));
- const destinationBearing=dest?{id:dest.id,name:bodyLabel(dest),type:dest.type,position:vector(dest.position),detail:bridgePod?'Bridge endpoint':destinationReadout(renderer,travelCraft,source.find(b=>b.id===travelCraftId),dest,craftTrip)}:null;
+ const destinationBearing=dest?{id:dest.id,name:bodyLabel(dest),type:dest.type,position:vector(dest.position),detail:bridgePod&&dest.id!==bridgePod.currentId?'Bridge endpoint':destinationReadout(renderer,travelCraft,source.find(b=>b.id===travelCraftId),dest,craftTrip)}:null;
  const local=guildWorlds.find(x=>x.localWorld);
  const localWorldBearing=local?{id:local.id,name:local.name,type:'planet',virtual:true,position:local.position}:null;
- return {kind:'annotation-frame',lineupIds:fleet?[...fleet]:null,...(openSurfaces.length?{openSurfaces}:{}),replayShade:studyReplayOpacity(renderer),localWorldBearing,velocityArrows:!!s.velocityArrows,destinationBearing,destinationId,transferPath:s.annotations&&s.plannedPath?captureTransferPath(renderer,optics):null,driveId:renderer.driveId||null,travelCraftId,bridgePod:!!bridgePod,travelTargetIds:bridgePod?[...bridgePod.targets.map(t=>t.id),...(fleet||[])]:travelCraftId&&s.annotations?(renderer.getTravelTargets?.({craftId:travelCraftId})||[]).map(t=>t.id):null,annotations:!!s.annotations,cpu:!!renderer.cpu,sceneRevision:renderer.sceneRevision,time:renderer.time,focusId:renderer.focusId,cameraFrame:{observer:vector(frame.observer),forward:vector(frame.forward),right:vector(frame.right),up:vector(frame.up)},objectFrames:bodies,holes,pickOptics,projection:{aspect,fov,width,height,rays:optics.budget.rays,steps:optics.budget.iterations,limited:optics.budget.limited,weak},interiorView:optics.interior,geometry:s.spectrum==='geometry'};
+ return {kind:'annotation-frame',lineupIds:fleet?[...fleet]:null,...(openSurfaces.length?{openSurfaces}:{}),replayShade:studyReplayOpacity(renderer),localWorldBearing,velocityArrows:!!s.velocityArrows,destinationBearing,destinationId,transferPath:s.annotations&&s.plannedPath?captureTransferPath(renderer,optics):null,driveId:renderer.driveId||null,travelCraftId,bridgePod:!!bridgePod,destinationOnlyLabels:!!s.destinationOnlyLabels,travelTargetIds:s.destinationOnlyLabels?[]:bridgePod?[...bridgePod.targets.map(t=>t.id),...(fleet||[])]:travelCraftId&&s.annotations?(renderer.getTravelTargets?.({craftId:travelCraftId})||[]).map(t=>t.id):null,annotations:!!s.annotations,cpu:!!renderer.cpu,sceneRevision:renderer.sceneRevision,time:renderer.time,focusId:renderer.focusId,cameraFrame:{observer:vector(frame.observer),forward:vector(frame.forward),right:vector(frame.right),up:vector(frame.up)},objectFrames:bodies,holes,pickOptics,projection:{aspect,fov,width,height,rays:optics.budget.rays,steps:optics.budget.iterations,limited:optics.budget.limited,weak},interiorView:optics.interior,geometry:s.spectrum==='geometry'};
 }
 
 // x and y are camera-plane offsets (vertical field of view included).
@@ -259,8 +263,9 @@ export function installAnnotations(scene,getRenderer,options={}){
     const glyph=velocityGlyph(body,p,pixelRadius,{width,height,mobile});
     if(glyph){out.push(glyph.svg);if(body.velocityDetail)boxes.push(...glyph.boxes);}
    }
-   if(!r.annotations||body.labelEligible===false||travelTargets&&!travelTargets.has(body.id)&&!body.waypoint||p.x<3||p.x>width-3||p.y<3||p.y>height-3)continue;
+   if(!r.annotations||body.labelEligible===false||(r.destinationOnlyLabels?body.id!==r.destinationId:travelTargets&&!travelTargets.has(body.id)&&!body.waypoint)||p.x<3||p.x>width-3||p.y<3||p.y>height-3)continue;
    const id=body.id,destination=id===r.destinationId,base={body,id,p,destination,text:body.name||bodyLabel(body),detail:r.lineupIds?.includes(id)?'1× inspect · 2× drive':destination?(r.destinationBearing?.detail||'Destination'):travelTargets?.has(body.id)?(r.bridgePod?'Tap bridge · double-tap exchange':'Tap preview · double-tap Go'):body.collapsed?(body.chartHorizon?'Event horizon':r.cpu?'Shadow · CPU schematic':'Lensed shadow'):(mobile?body.velocityDetail?.replace(' relative to grid',' vs grid'):body.velocityDetail)||'',radius:pixelRadius,priority:body.priority??priority(body,r.focusId),sizeClass:body.sizeClass??Math.floor(Math.log2(Math.max(.25,pixelRadius))),color:'#9bcbe4',shadow:body.collapsed};
+   if(r.destinationOnlyLabels){labels.push(base);continue;}
    if(destination&&body.collapsed&&r.interiorView)labels.push(base);
    if(!body.collapsed||!r.interiorView){labels.push(base);continue;}
    for(const [value,color,inner] of [[body.horizonRadius,'#a6dcf3',false],[body.innerHorizonRadius,'#edca8b',true]]){if(!(value>body.horizonRadius*.001))continue;const radius=value/Math.max(p.z,1e-20)/fov*height;labels.push({...base,destination:false,priority:Math.min(base.priority,9e5),id:id+(inner?':inner':':outer'),p:{...p,x:clamp(p.x+(inner?-1:1)*radius*.7,12,width-12),y:clamp(p.y+(inner?1:-1)*radius*.7,12,height-12)},text:inner?'Inner horizon · r−':'Event horizon · r+',detail:'Coordinate geometry cutaway',radius:0,color,boundary:true,inner});}
@@ -268,7 +273,7 @@ export function installAnnotations(scene,getRenderer,options={}){
   }
   // A missed optical solution is not a lost destination. Use its bearing,
   // without making an occluded body hittable or reusing a previous frame.
-  for(const dest of [r.destinationBearing,r.localWorldBearing])if(r.annotations&&dest&&!labels.some(l=>l.id===dest.id)){
+  for(const dest of [r.destinationBearing,r.destinationOnlyLabels?null:r.localWorldBearing])if(r.annotations&&dest&&!labels.some(l=>l.id===dest.id)){
    const local=dest===r.localWorldBearing;
    const f=r.cameraFrame,v=dest.position.map((x,i)=>x-f.observer[i]),dot=a=>a.reduce((sum,x,i)=>sum+x*v[i],0);
    const z=dot(f.forward),right=dot(f.right),up=dot(f.up);

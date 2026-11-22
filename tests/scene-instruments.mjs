@@ -18,7 +18,9 @@ for(const [id,width,height] of [['nasa-shuttle',1536,864],['shuttle-sgra-direct'
   assert.equal(d.querySelectorAll('#'+metric).length,1,metric+' duplicated');
  }
  for(const control of ['zoomIn','zoomOut','fullscreen','pilotModeAuto','pilotModeDrive','pilotPlaylist','pilotPower'])assert(!rail.contains($(control)),control+' is hidden by collapse');
- const initialHidden=!!body.hidden;toggle.click();assert.equal(!!body.hidden,!initialHidden);assert.equal(toggle.getAttribute('aria-expanded'),String(initialHidden));tick();assert.equal(!!body.hidden,!initialHidden);toggle.click();assert.equal(!!body.hidden,initialHidden);
+ assert.equal(!!body.hidden,false,'The panel is open on initial load');
+ assert.equal($('instrumentAction').textContent,'Minimize');
+ const initialHidden=!!body.hidden;toggle.click();assert.equal($('instrumentAction').textContent,'Expand');assert.match(toggle.getAttribute('aria-label'),/^Expand /);assert.equal(!!body.hidden,!initialHidden);assert.equal(toggle.getAttribute('aria-expanded'),String(initialHidden));tick();assert.equal(!!body.hidden,!initialHidden);toggle.click();assert.equal(!!body.hidden,initialHidden);
  console.log(id,width+'x'+height,'OK: rail owns metric nodes, unique IDs, controls outside, collapse/sync.');
  p.dispose();r.dispose();
 }

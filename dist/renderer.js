@@ -10,7 +10,8 @@ import {networkPhase} from './kardashev-earth.js';
 import {SWARM_LANES,ASTER_LANE,ASTER_BERTH,formationPose} from './dyson-swarm.js';
 import {applySolarAtlas,K2_GRID,LEGACY_SOLAR_CAMERA} from './kardashev-solar.js';
 import {brainTier,brainStarRadius} from './matrioshka.js';
-import {handoffAttitude,TURN_SECONDS,blendAttitude,turnEase} from './flight-attitude.js';
+import {updateDockingCamera} from './docking-camera.js';
+import {handoffAttitude,TURN_SECONDS} from './flight-attitude.js';
 import {HABITAT_FLOOR_METERS,HABITAT_FLOOR_UNITS,habitatSpin,habitatWheelSeconds,paceHabitatWheel} from './habitat-spin.js';
 import {applyGeometryTracer,geometryBeadRadius} from './geometry-tracer.js';
 import {keplerOffset,startDock,startFerry,advanceDock,dockStatus,releaseDock,cancelDock,dockClock} from './station-docking.js';
@@ -498,7 +499,7 @@ export class BlackHoleRenderer {
   if(Number.isFinite(view.lookYaw))this.camera.lookYaw=this.target.lookYaw=view.lookYaw;
   if(Number.isFinite(view.lookPitch))this.camera.lookPitch=this.target.lookPitch=clamp(view.lookPitch,-1.48,1.48);
   if(view.fitGeometry)this.fitGeometryOverview();
-  this.cameraGuide=this.sceneId==='dyson-garden'?'dyson-approach':view.fitWarpSide?'warp-side':view.guideBlueFire?'blue-fire-edge':this.sceneId==='earth-mars-station-ferry'&&this.dockingMission?'dock-ferry':null;
+  this.cameraGuide=['dyson-garden','matrioshka-brain'].includes(this.sceneId)?'dyson-approach':view.fitWarpSide?'warp-side':view.guideBlueFire?'blue-fire-edge':this.dockingMission?.craftId===this.focusId&&this.focusId?'dock-ferry':null;
   if(view.fitWarpSide)this.fitWarpCamera(true);
   // Initialize orbital composition only after the authored camera is installed.
   this.parkedCamera=null;this.updateCameraFrame();this.xr?.recenter();return this.getState();
@@ -1068,11 +1069,12 @@ export class BlackHoleRenderer {
  startTravel(targetId,options={}){const podId=options.craftId||this.driveId||this.selectedId;if(isJanusPod(this.objectById?.get(podId)))return startJanusGo(this,podId,targetId);const janus=this.janusRoutes?.[options.craftId||this.driveId||this.selectedId];if(janus?.stage&&janus.stage!=='orbit')return {error:'Wait for the local exchange to settle.'};if(janus)janus.auto=false;if(this.dockingMission)return {error:'Finish docking or leave guidance first.'};this.travelPreview=null;
   // Public Go must acquire the tangent before the line launcher takes over.
   const id=options.craftId||this.selectedId||this.focusId,craft=this.objects.find(o=>o.id===id);
-  const rest=craft?.waypointHoldId&&(!this.driveId||craft.flight?.speed===0)?craft.waypointHoldId:null,departure=rest||(isParkingCraft(craft||{})&&(!this.driveId||craft.flight?.orbitHold)?craft.parentId:null);
-  if(!this.state.bridge&&!options.sequenceManaged&&!options.fromSequence&&((departure&&departure!==targetId)||(!departure&&Number.isFinite(options.heading)&&this.getFocusFrame(targetId)?.type==='waypoint'))){
+  const bridgeDeparture=this.state.bridge&&this.state.bridgeSurfaces&&craft?.type==='shuttle'&&this.getBridgeParkingOrbit(craft.id)?.targetId;
+  const rest=craft?.waypointHoldId&&(!this.driveId||craft.flight?.speed===0)?craft.waypointHoldId:null,departure=bridgeDeparture||rest||(isParkingCraft(craft||{})&&(!this.driveId||craft.flight?.orbitHold)?craft.parentId:null);
+  if((!this.state.bridge||bridgeDeparture)&&!options.sequenceManaged&&!options.fromSequence&&((departure&&departure!==targetId)||(!departure&&Number.isFinite(options.heading)&&this.getFocusFrame(targetId)?.type==='waypoint'))){
    const checked=this.previewTravel(targetId,options);if(checked.error)return checked;
    this.navigationModes??={};this.navigationModes[id]='auto';
-   const q=this.setFlightSequence(id,[...(departure?[{targetId:departure,kind:rest?'waypoint':'orbit'}]:[]),{targetId,kind:checked.waypoint?'waypoint':'orbit',warpFactor:options.warpFactor??1,...(checked.waypoint&&Number.isFinite(options.heading)?{heading:options.heading}:{})}],{loop:false,active:false});
+   const q=this.setFlightSequence(id,[...(departure?[{targetId:departure,kind:rest?'waypoint':'orbit',...(bridgeDeparture?{extraLaps:0}:{})}]:[]),{targetId,kind:checked.waypoint?'waypoint':'orbit',warpFactor:options.warpFactor??1,...(checked.waypoint&&Number.isFinite(options.heading)?{heading:options.heading}:{})}],{loop:false,active:false});
    if(!q||!this.startFlightSequence(id))return false;this.state.paused=false;return true;
   }
   const result=this.state.bridge?beginBridgeRoute(this,targetId,options):beginRoute(this,targetId,options);if(result&&!result.error&&!options.fromSequence&&!options.sequenceManaged)stopFlightSequence(this,options.craftId||this.transfer?.craftId);return result;}
@@ -1541,6 +1543,11 @@ export class BlackHoleRenderer {
   this.state.viewMode=['onboard','chase'].includes(mode)?'look':'orbit';this.freePosition=this.freeTarget=this.freeBasis=null;this.pointers.clear();this.pinchOwned=false;
   if(this.objects.some(o=>o.id===id))this.selectedId=id;this.focusId=id;this.focusMode=['onboard','chase'].includes(mode)?mode:'track';this.travel=false;this.resetView();
   const earthInfra=obj.catalogId==='earth-elevator-network',earthPorts=obj.catalogId==='type-i-earth';this.target.yaw=earthInfra?.54:earthPorts?-.95:.7;this.target.pitch=earthInfra?.47:earthPorts?.45:.28;this.target.focusDistance=earthInfra?2.65:earthPorts?3.85:obj.type==='hole'?8:6;this.camera.yaw=this.target.yaw;this.camera.pitch=this.target.pitch;this.camera.focusDistance=this.target.focusDistance;if(mode==='track'&&['enterprise','shuttle'].includes(obj.type)){const view=this.bridgeHullCamera(id)||BRIDGE_VEHICLE_CAMERA;this.camera.yaw=this.target.yaw=view.yaw;this.camera.pitch=this.target.pitch=view.pitch;this.camera.focusDistance=this.target.focusDistance=view.focusDistance;this.camera.lookPitch=this.target.lookPitch=0;}if(reset&&mode==='track'&&obj.type==='enterprise'&&!this.bridgeHullCamera(id)){this.cameraGuide='warp-side';this.camera.yaw=this.target.yaw=-Math.PI/2;this.camera.pitch=this.target.pitch=0;this.fitWarpCamera(true);}this.parkedCamera=null;
+  if(mode==='track'&&((obj.type==='cylinder'&&obj.bodyParams[1]>0)||(obj.type==='dyson'&&obj.bodyParams[0]>0))){
+   const cylinder=obj.type==='cylinder';
+   this.camera.yaw=this.target.yaw=cylinder?-.98:-2.55;this.camera.pitch=this.target.pitch=cylinder?.32:.12;
+   this.camera.focusDistance=this.target.focusDistance=cylinder?2.4:3;
+  }
   if(this.sceneId==='earth-andromeda-bridge')this.fillObjects(); // A paused camera can cross between the two local charts.
   if(this.sceneId==='kardashev-2'&&mode==='track'){
    const atlas=obj.catalogId===K2_GRID,cam=LEGACY_SOLAR_CAMERA;
@@ -1904,6 +1911,9 @@ export class BlackHoleRenderer {
     entry.dockActive=!!sample&&!!sample.docking;entry.dockExtension=sample?.extension||0;entry.dockRcs=sample?.rcs;entry.dockTorque=sample?.rcsTorque;
     entry.dockMainThrottle=sample?(sample.docking?0:sample.mainThrustG):undefined;
     if(sample)entry.velocity=mul(sample.velocity,18/LIGHT_SPEED);
+    else if(this.transfer?.craftId===entry.id&&this.transfer.sample?.trimJets){
+     entry.dockActive=true;entry.dockRcs=this.transfer.sample.trimJets;entry.dockMainThrottle=0;
+    }
    }
    if(entry.type==='enterprise'){
     entry.warpImpulse=Number(s.warp&&entry.id===this.warpObjectId&&s.warpFactor>0);
@@ -1922,7 +1932,7 @@ export class BlackHoleRenderer {
    if(entry.type==='cylinder'){
     const scale=entry.radius*REFERENCE_RG_METERS/CYLINDER_BOUND,omega=CYLINDER_OMEGA/Math.sqrt(Math.max(1e-12,scale)),theta=(object.phase+this.time*DESCENT_SECONDS_PER_SCENE_SECOND*omega)%TAU;
     const axialFrame=a=>[[Math.cos(a),Math.sin(a),0],[-Math.sin(a),Math.cos(a),0],[0,0,1]];
-    entry.bodyParams=[theta,0,0,0];entry.frame=axialFrame(theta);
+    entry.bodyParams=[theta,object.dysonCutaway??0,0,0];entry.frame=axialFrame(theta);
     // The survey route above the agricultural coast keeps the service
     // spine and the far endcap visible as the landscape curls overhead.
     entry.cylinderRideFrame=axialFrame(theta+5.52);
@@ -1960,10 +1970,11 @@ export class BlackHoleRenderer {
    }
    if(object?.catalogId==='earth-elevator-network')entry.bodyParams=[6,networkPhase(this.time*DESCENT_SECONDS_PER_SCENE_SECOND),0,object.opacity??1];
    if(this.sceneId==='matrioshka-brain'&&entry.type==='star'&&this.objects.some(t=>t.parentId===entry.id&&brainTier(t.catalogId))){entry.brainStar=true;if(entry.bodyParams[0]===0&&entry.bodyParams[2]>=0)entry.bodyParams[0]=12;}
-   const thermalTier=object&&brainTier(object.catalogId);if(thermalTier)entry.bodyParams=[5,thermalTier.index*.271,thermalTier.index,object.opacity??1];
+   const thermalTier=object&&brainTier(object.catalogId);if(thermalTier)entry.bodyParams=[5,(object.dysonCutaway>0?-1:1)*(1+thermalTier.index*.271),thermalTier.index,object.opacity??1];
    // The array overview enlarges the central disk as a marked scale cue.
    // Leave its catalog radius, mass and all physical orbital calculations intact.
    if(object?.catalogId==='toroid-sun'){
+    if(entry.bodyParams[0]===0&&entry.bodyParams[2]>=0)entry.bodyParams[0]=12;
     entry.physicalRadius=this.objectRadius(object);entry.radius=toroidOverview?TOROID_SUN_DISPLAY_RADIUS/REFERENCE_RG_METERS:entry.physicalRadius;
    }
    if(object?.catalogId==='dyson-collectors'||object?.catalogId===TOROID_ID){
@@ -2263,43 +2274,35 @@ export class BlackHoleRenderer {
   return true;
  }
  bridgeHullCamera(id){
-  return this.state.bridge&&id===this.bridgeObjectId&&BRIDGE_HULL_CAMERAS[this.sceneId]||null;
+  return this.state.bridge&&id===this.bridgeObjectId&&this.state.bridgeTravelerType!=='shuttle'&&BRIDGE_HULL_CAMERAS[this.sceneId]||null;
  }
  updateCameraFrame(){
   const c=this.camera,focused=this.focusId?this.getFocusFrame():null;let observer,forward,right,up,preciseEye=null,inspectCamera=[0,0,6],inspectForward=[0,0,-1],inspectRight=[1,0,0],inspectUp=[0,1,0],inspectIndex=-1,hideIndex=-1;
   if(focused){
    const hullMount=this.bridgeHullCamera(focused.id),parkedGuide=hullMount||(this.janusRoutes?.[focused.id]&&focused.hullModel==='janusPod'&&!this.transfer?.active)?null:updateParkedCamera(this,focused);
-   if(this.cameraGuide==='dock-ferry'&&this.focusMode==='track'&&this.dockingMission?.craftId===focused.id){
-    const m=this.dockingMission,f=m.phase==='transit'?1:clamp(m.sample.rangeMeters/740,0,1),w=f*f*(3-2*f);
-    const arm=unit([.84,.49,-(.15+2.35*w)]),view=(back,sky)=>{const across=cross(sky,back),right=unit(Math.hypot(...across)>1e-7?across:cross(Math.abs(back[2])<.8?[0,0,1]:[1,0,0],back));return [right,cross(back,right),back];};
-    const mounted=hull=>view(transform(hull,arm),hull[1]);
-    let shot=mounted(focused.frame);
-    const target=m.phase==='transit'&&m.plan?.profile==='flip1g'&&this.getFocusFrame(this.getFocusFrame(m.stationId)?.parentId);
-    if(target?.radius>0){
-     // A nose-mounted view turns away during a retroburn. Track the ship
-     // across the planet's sightline instead; the offset lets a distant disc
-     // emerge beside the hull and shows the limb once the ship enters orbit.
-     const sky=this.configCache.primaryBasis[1],out=unit(focused.position.map((v,i)=>v-target.position[i])),right=view(out,sky)[0];
-     const survey=view(unit(add(add(out,mul(right,.17)),mul(sky,.10))),sky);
-     const t=m.wallElapsed??0,left=m.viewSeconds-t,ramp=Math.min(7,m.viewSeconds*.25),legs=m.plan.legs;
-     shot=t<ramp?blendAttitude(mounted(legs[0].a.basis),survey,turnEase(t/ramp)):
-      left<ramp?blendAttitude(survey,mounted(legs.at(-1).b.basis),turnEase(1-left/ramp)):survey;
-    }
-    // Store the live pose in the ordinary orbit controls so dragging or
-    // changing zoom releases guidance with the very same view.
-    this.focusReferenceFrame={id:focused.id,basis:shot};
-    c.yaw=this.target.yaw=0;c.pitch=this.target.pitch=0;
-    c.focusDistance=this.target.focusDistance=(92+350*w)/(focused.radius*REFERENCE_RG_METERS);
-   }
+   if(this.cameraGuide==='dock-ferry'&&this.focusMode==='track'&&this.dockingMission?.craftId===focused.id)updateDockingCamera(this,focused);
    const garden=this.focusMode==='onboard'&&focused.type==='dyson'&&focused.catalogId!=='shkadov-mirror',excursion=this.excursionFrame(focused),reference=garden?focused.gardenFrame:this.focusMode==='onboard'&&focused.cylinderRideFrame?focused.cylinderRideFrame:this.focusMode==='track'&&focused.oceanTide?focused.crustCameraFrame:this.focusMode==='track'&&focused.habitatHubFrame?focused.habitatHubFrame:hullMount?focused.frame:excursion||(this.focusMode==='track'&&this.focusReferenceFrame?.id===focused.id?this.focusReferenceFrame.basis:focused.frame);
    if(this.cameraGuide==='warp-side'&&focused.type==='enterprise'&&this.focusMode==='track')this.fitWarpCamera();
    const onboard=this.focusMode==='onboard',chase=this.focusMode==='chase';
    if(this.cameraGuide==='dyson-approach'&&focused.type==='star'&&this.focusMode==='track'){
-    const shell=this.objectFrames.find(o=>o.type==='dyson'&&o.parentId===focused.id);
+    const brain=this.sceneId==='matrioshka-brain';
+    const shell=this.objectFrames.find(o=>o.parentId===focused.id&&(brain?o.catalogId==='brain-radiator':o.type==='dyson'));
     if(shell){
-     // Equal distance/radius at both ends gives equal apparent angular diameters.
+     // Radius-scaled motion keeps the envelopes readable at every distance.
      const u=clamp(this.time/(this.simulationTimeScale()*56),0,1),ease=u*u*(3-2*u);
-     c.focusDistance=this.target.focusDistance=5.38*Math.pow(shell.radius/focused.radius,1-ease);
+     const start=(brain?2.69:5.38)*shell.radius/focused.radius,end=brain?3.2:5.38;
+     let range=start*Math.pow(end/start,ease);
+     if(!brain){
+      // Linger over the narrow equatorial habitat between the solid walking
+      // deck at 1 R and the transparent pressure canopy at about .93 R.
+      const radius=shell.radius/focused.radius;
+      const stops=[[0,start],[.32,1.07*radius],[.59,.87*radius],[1,end]];
+      const leg=u<.32?0:u<.59?1:2;
+      const [begin,outer]=stops[leg],[finish,inner]=stops[leg+1];
+      const q=(u-begin)/(finish-begin);
+      range=outer*Math.pow(inner/outer,q*q*(3-2*q));
+     }
+     c.focusDistance=this.target.focusDistance=range;
     }
    }
    if(this.cameraGuide==='dyson-orbit'&&focused.type==='star'&&this.focusMode==='track'){
@@ -2342,7 +2345,7 @@ export class BlackHoleRenderer {
    const trip=this.transfer?.active&&!this.transfer.radiusTransfer?this.transfer:parkedGuide,guide=!hullMount&&!excursion&&this.focusMode==='track'&&trip?.craftId===focused.id&&this.focusReferenceFrame?.id===focused.id&&trip.cameraAimOffset?trip:null;
    let aim=guide?unit(inverse(reference,guide.cameraAimOffset.map((v,i)=>v-transform(reference,mul(eye,focused.radius))[i]))):null;
    if(guide?.cameraTargetBody&&guide.cameraTargetOffset){const parentAim=unit(inverse(reference,guide.cameraTargetOffset.map((v,i)=>v-transform(reference,mul(eye,focused.radius))[i])));aim=directionBlend(aim||unit(mul(eye,-1)),parentAim,guide.cameraTargetBlend??1);}
-   if(aim){const center=unit(mul(eye,-1)),cosine=clamp(dot(center,aim),-1,1),angle=Math.acos(cosine),limit=.13+(guide?.cameraTargetBody ? .09*(guide.cameraTargetBlend??1) : 0);if(angle>limit){const lateral=unit(aim.map((v,i)=>v-center[i]*cosine));aim=add(mul(center,Math.cos(limit)),mul(lateral,Math.sin(limit)));}}
+   if(aim){const center=unit(mul(eye,-1)),cosine=clamp(dot(center,aim),-1,1),angle=Math.acos(cosine),limit=focused.type==='shuttle'?.22:.13+(guide?.cameraTargetBody ? .09*(guide.cameraTargetBlend??1) : 0);if(angle>limit){const lateral=unit(aim.map((v,i)=>v-center[i]*cosine));aim=add(mul(center,Math.cos(limit)),mul(lateral,Math.sin(limit)));}}
    const aimUp=garden?[0,0,1]:guide?.cameraPathUp?inverse(reference,guide.cameraPathUp):[0,1,0];
    let baseForward=aim||(cylinderCabin?unit(CYLINDER_AIM):garden?[1,0,0]:onboard&&hullType(focused)==='janusPod'?unit([0,-.14,1]):onboard||chase?[0,0,1]:unit(mul(eye,-1)));
    const baseRight=unit(cross(baseForward,Math.abs(dot(baseForward,aimUp))>.9999?(Math.abs(baseForward[2])<.9?[0,0,1]:[1,0,0]):aimUp));let baseUp=cross(baseRight,baseForward);

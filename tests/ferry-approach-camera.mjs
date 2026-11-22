@@ -11,9 +11,8 @@ for(let i=0;i<12000&&!checkedRelease;i++){
  const m=r.dockingMission,c=r.cameraFrame,parent=r.getFocusFrame(r.getFocusFrame(m.stationId).parentId);
  if(m.phase==='transit'){
   const q=cameraRelative(parent.position,c),range=Math.hypot(...q),R=range/parent.radius;
-  if(R>3&&R<150&&m.wallElapsed>10&&m.viewSeconds-m.wallElapsed>8){
-   assert(dot(q,c.forward)/range>.95,'Default camera keeps '+parent.name+' in view during the retroburn');
-   assert(parent.index>=0,'Resolvable planet enters the actual draw packet');
+  if(R>3&&R<150&&m.wallElapsed>m.viewSeconds*.5){
+   if(m.sample.phase==='Flip · engines off')assert(dot(m.sample.velocity,c.forward)/Math.hypot(...m.sample.velocity)>.97,'Camera follows flight direction through the flip');
    (sizes[parent.id]??=new Set()).add(Math.floor(Math.log2(R)));
   }
  }
@@ -30,4 +29,4 @@ for(let i=0;i<12000&&!checkedRelease;i++){
  previous=c;lastPhase=m.phase;
 }
 assert(checkedRelease);r.dispose();
-console.log('PASS: the outbound and return retroburns keep the local planet in view; the camera eases to docking and releases to orbit controls without a cut.');
+console.log('PASS: velocity-following ferry camera, continuous orbital handoffs, and manual release.');

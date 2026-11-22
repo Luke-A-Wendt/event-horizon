@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {fixture} from './render-fixture.mjs';
 import {beginRoute,advanceRoute,cancelRoute} from '../dist/travel-routes.js';
-import {advanceAutopilot,advanceBridgeAutopilot} from '../dist/autopilot.js';
+import {advanceBridgeAutopilot} from '../dist/autopilot.js';
 const dot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0),sub=(a,b)=>a.map((v,i)=>v-b[i]),unit=a=>a.map(v=>v/Math.hypot(...a));
 const close=(a,b,e=1e-7)=>assert(Math.abs(a-b)<=e,`${a} != ${b}`);
 for(const [width,height]of [[1280,840],[390,740]])for(const scene of ['shuttle-earth-moon-loop','test-shuttle-bridge']){
  const r=new BlackHoleRenderer(fixture({width,height}).canvas,{autoStart:false,bindControls:false});r.loadScene(scene);r.state.paused=false;
  const craft=r.objects.find(o=>o.type==='shuttle');r.selectedId=craft.id;
- if(r.state.bridge){for(let i=0;i<120;i++)advanceAutopilot(r,.1);}else assert(beginRoute(r,r.objects.find(o=>o.name==='Moon').id));
+ if(r.state.bridge){r.sceneLoad=null;for(let i=0;i<900&&!r.transfer;i++)r.advanceChartStages(.1);}else assert(beginRoute(r,r.objects.find(o=>o.name==='Moon').id));
  let previous;
  const projection=(point,frame)=>{const d=sub(point,frame.observer),z=dot(d,frame.forward),fov=.83*Math.max(1,1.35*height/width);return {x:dot(d,frame.right)/z/fov/(width/height),y:dot(d,frame.up)/z/fov,z,fov};};
  const dt=r.transfer.wallSeconds/600;for(let i=0;i<599;i++){

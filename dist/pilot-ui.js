@@ -106,16 +106,23 @@ export function installPilotControls(api){
  const distancePanel=scene?.querySelector('.scene-bottom');
  // Reparent the existing outputs so each measurement still has one live source.
  const instruments=document.createElement('section');instruments.id='sceneMetrics';instruments.className='scene-metrics';instruments.setAttribute('aria-label','Scene instruments');instruments.setAttribute('data-scene-control','');
- const instrumentsToggle=document.createElement('button');instrumentsToggle.setAttribute('type','button');instrumentsToggle.className='instrument-toggle';instrumentsToggle.innerHTML='<span id="instrumentSubject">Scene overview</span><small id="instrumentProfile">Overview</small>';instrumentsToggle.setAttribute('aria-controls','instrumentBody');instrumentsToggle.setAttribute('aria-expanded','true');
+ const instrumentsToggle=document.createElement('button');instrumentsToggle.setAttribute('type','button');instrumentsToggle.className='instrument-toggle';instrumentsToggle.innerHTML='<span id="instrumentSubject">Scene overview</span><small id="instrumentProfile">Overview</small><span id="instrumentAction" aria-hidden="true">Minimize</span>';instrumentsToggle.setAttribute('aria-controls','instrumentBody');instrumentsToggle.setAttribute('aria-expanded','true');
  const instrumentBody=document.createElement('div');instrumentBody.id='instrumentBody';
  const subjectName=instrumentsToggle.querySelector('#instrumentSubject'),profileName=instrumentsToggle.querySelector('#instrumentProfile');
+ const instrumentAction=instrumentsToggle.querySelector('#instrumentAction');
+ function syncInstrumentDisclosure(){
+  const action=instrumentBody.hidden?'Expand':'Minimize';
+  instrumentAction.textContent=action;
+  instrumentsToggle.setAttribute('aria-expanded',String(!instrumentBody.hidden));
+  instrumentsToggle.setAttribute('aria-label',action+' '+subjectName.textContent+' instruments');
+ }
  const bodyData=document.createElement('dl');bodyData.id='bodyMeasurements';bodyData.hidden=true;bodyData.setAttribute('aria-label','Body measurements');
  let lastSubject=null,bodyFields=[];
  function updateSubject(subject,profile,measurements){
   const name=subject?.name||subject?.label||crewNames[subject?.type]||subject?.id||'Scene overview',id=subject?.id||'',type=subject?.type||'overview';
   if(lastSubject!==id||subjectName.textContent!==name||profileName.textContent!==profile){
    subjectName.textContent=name;profileName.textContent=profile;instruments.setAttribute('data-subject-id',id);instruments.setAttribute('data-subject-type',type);
-   instrumentsToggle.setAttribute('aria-label',name+' · '+profile+' instruments');instruments.setAttribute('aria-label',name+' instruments');lastSubject=id;
+   syncInstrumentDisclosure();instruments.setAttribute('aria-label',name+' instruments');lastSubject=id;
   }
   const rows=measurements?.rows||[];
   bodyData.hidden=!rows.length;if(distancePanel)distancePanel.hidden=!!rows.length;
@@ -142,7 +149,7 @@ export function installPilotControls(api){
  scene?.append(instruments);instruments.append(instrumentsToggle,instrumentBody);
  // Route first, then local motion, clock/camera distance, and renderer status.
  instrumentBody.append(bodyData,tripGroup,stack,rimData,telemetry);if(distancePanel)instrumentBody.append(distancePanel);if(renderPill)instrumentBody.append(renderPill);
- instrumentsToggle.addEventListener('click',()=>{instrumentBody.hidden=!instrumentBody.hidden;instrumentsToggle.setAttribute('aria-expanded',String(!instrumentBody.hidden));});
+ instrumentsToggle.addEventListener('click',()=>{instrumentBody.hidden=!instrumentBody.hidden;syncInstrumentDisclosure();});
  const dockingPanel=installDockingPanel(instrumentBody,{...api,update});
  stack.before(instrumentBody.querySelector('.docking-instruments'));
  const janusPanel=installJanusControls(instrumentBody,{...api,update});
@@ -200,6 +207,7 @@ export function installPilotControls(api){
    // reading order, before docking, rotation and motion, even on a short rail.
    if(observer!==observerClockFirst){if(observer)instrumentBody.prepend(telemetry);else rimData.after(telemetry);observerClockFirst=observer;}
    if(observer)instrumentBody.scrollTop=0;
+   telemetry.classList.toggle('ship-clock',!!crew&&!observer);
    telemetry.setAttribute('aria-label',hub?'Station hub clock':subject?.type==='astronaut'?'Astronaut clock':subject?.type==='iss'?'Station clock':'Onboard clock');
    clockSubjectKey=key;
   }
@@ -216,7 +224,7 @@ export function installPilotControls(api){
   $('pilotProperLabel').textContent=subject.type==='habitat'?'Hub proper time':clock.approachHeld?'Proper time (frozen)':'Proper time';
   const onboard=$('pilotOnboard'),elapsed=formatProperClock(clock.properSeconds);
   if(onboard.textContent!==elapsed){
-   const split=elapsed.includes(':')?elapsed.lastIndexOf(' ')+1:0,calendar=$('clockCalendar'),face=$('clockFace');
+   const split=elapsed.includes(':')?elapsed.lastIndexOf(' ')+1:elapsed==='—'?0:elapsed.length,calendar=$('clockCalendar'),face=$('clockFace');
    const prefix=elapsed.slice(0,split);calendar.hidden=!prefix;if(calendar.textContent!==prefix)calendar.textContent=prefix;
    face.textContent=elapsed.slice(split);
   }

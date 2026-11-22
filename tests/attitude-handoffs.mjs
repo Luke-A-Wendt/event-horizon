@@ -25,10 +25,21 @@ const make=()=>new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindContr
 const r=make(),copy=make();
 try{
  r.loadScene('shuttle-earth-moon-loop');r.sceneLoad=null;r.state.paused=false;
- const craft=r.objects.find(o=>o.type==='shuttle');let contact=false;
+ const craft=r.objects.find(o=>o.type==='shuttle');let contact=false,alignSeconds=0;
  for(let i=0;i<3500;i++){const active=r.transfer;r.advanceChartStages(1/30);r.fillObjects();
-  if(active&&!r.transfer&&craft.driveReturn?.attitudeOnly){contact=true;break;}}
- assert(contact,'Ordinary shuttle arrival preserves the precontact braking hull frame');
+  if(r.transfer?.phaseName==='Aligning for orbit'){
+   alignSeconds+=1/30;
+   eq(craft.flight.thrust,0);
+   eq(craft.flight.speed,r.transfer.finalSpeed);
+  }
+  if(active&&!r.transfer&&craft.driveReturn?.attitudeOnly){
+   contact=true;
+   eq(dot(r.getFocusFrame(craft.id).frame[2],active.tangent),1);
+   break;
+  }
+ }
+ assert(alignSeconds>4,'The return to prograde receives its own presentation time before orbit capture');
+ assert(contact,'Ordinary shuttle preserves its prograde insertion attitude');
  for(let i=0;i<30;i++)r.advanceChartStages(1/30);
  r.fillObjects();assert(craft.driveReturn.referenceBasis);const elapsed=craft.driveReturn.elapsed;
  assert(elapsed>=.99&&elapsed<1.05);const here=r.getFocusFrame(craft.id).frame;

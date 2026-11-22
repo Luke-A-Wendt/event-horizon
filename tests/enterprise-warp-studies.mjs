@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {SCENE_PRESETS,SCENE_PROGRESSIONS} from '../dist/config.js';
+import {SCENE_PRESETS,SCENE_PROGRESSIONS,makePreset} from '../dist/config.js';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {CpuRenderer} from '../dist/cpu-renderer.js';
 import {CpuCommandCanvas} from '../dist/cpu-commands.js';
@@ -18,7 +18,7 @@ function fly(Renderer,id,model){
   assert.equal(r.state.disk,true);assert.equal(r.colorData[r.getFocusFrame().index*4+3],OBJECT_KIND[model]);
   if(model==='classicEnterprise'){
    assert.equal(ship.name,'USS Enterprise');assert(r.shaderFeatures().craftMask&64);
-   assert.equal(r.state.diskPalette,'artistic');
+   const source=makePreset(id.replace('enterprise-',''));assert.equal(r.state.diskPalette,source.diskPalette);assert.equal(r.state.diskColor,source.diskColor);
    const saved=parseScene(serializeScene(r));
    assert.equal(hullType(saved.objects.find(o=>o.id===ship.id)),model);
   }

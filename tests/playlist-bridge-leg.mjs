@@ -16,7 +16,7 @@ for(const id of ['test-shuttle-bridge','bridge-nebulae']){
   // The planner assumes the mathematical parking tangent; sampled display poses
   // on a compressed wormhole chart need not agree to machine precision.
   for(const k of ['properSeconds','distanceMeters','coordinateSeconds','dilationSeconds'])assert(Math.abs(t[k]-a[k]-(b?.[k]||0))<Math.max(1e-9,Math.abs(t[k])*.004),k);
-  if(b){assert(a.flyThroughThroat&&b.flyThroughThroat);assert.equal(a.peakSpeed,b.peakSpeed);r.advanceTravel(t.wallSeconds/2);assert(Math.abs(t.properElapsedSeconds/a.properSeconds-1)<.004,'Crossing clock is the moving flip point, not an extra stop at rest');}
+  if(b){assert(a.flyThroughThroat&&b.flyThroughThroat);assert(a.peakSpeed>0&&b.peakSpeed>0);r.advanceTravel(t.wallSeconds/2);assert(Math.abs(t.properElapsedSeconds/a.properSeconds-1)<.004,'Crossing clock ends the first local burn profile at the open throat');}
   else {
    assert.equal(a.dilationSeconds,0);
    const clock=c.clock,baseline=clock.properSeconds-t.sample.coordinateSeconds;

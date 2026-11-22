@@ -11,6 +11,7 @@ import { objectCategory,mapCategoryVisible } from './object-taxonomy.js';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dot=(a,b)=>a.reduce((s,x,i)=>s+x*b[i],0);
+const componentColors={disk:'diskColor',jets:'jetColor','secondary-disk':'secondaryDiskColor','secondary-jets':'secondaryJetColor'};
 export function mapRadius(radius,maximum,reference,logarithmic=true){
  if(!(maximum>0))return 0;
  return logarithmic?Math.log1p(Math.max(0,radius)/reference)/Math.log1p(maximum/reference):Math.max(0,radius)/maximum;
@@ -54,9 +55,10 @@ export function mapModel(renderer,centerId,{filters=null}={}){
    radiusMeters:original.radiusMeters?original.radiusMeters*(original.scale||1):(frame.physicalRadius||frame.radius)*REFERENCE_RG_METERS,
    distanceMeters:Math.hypot(...relative)*REFERENCE_RG_METERS,x:dot(relative,xAxis)*REFERENCE_RG_METERS,y:dot(relative,yAxis)*REFERENCE_RG_METERS,
    vx:velocity?dot(velocity,xAxis)*velocityUnits:null,vy:velocity?dot(velocity,yAxis)*velocityUnits:null,
-   color:original.color||(['star','blackhole','hole'].includes(frame.type)?'#ffe1a0':'#8ebfe6'),massSolar,dataNote:original.dataNote||'',eccentricity:original.eccentricity||0,innerRadiusRatio:original.innerRadiusRatio||.55};
+   featureAxis:frame.type==='jets'?(frame.frame?.[1]||[0,1,0]):null,
+   color:original.color||renderer.state?.[componentColors[frame.id]]||(['star','blackhole','hole'].includes(frame.type)?'#ffe1a0':'#8ebfe6'),massSolar,dataNote:original.dataNote||'',eccentricity:original.eccentricity||0,innerRadiusRatio:original.innerRadiusRatio||.55};
  };
- const allEntries=nodes.filter(n=>n.parentId===id).map(n=>getFrame(n.id)).filter(Boolean).map(body),entries=allEntries.filter(b=>mapCategoryVisible(b,filters)),children=entries.filter(b=>b.catalogId==='swarm-aster'||!['disk','jets','belt','ring','dyson','warp','bridge'].includes(b.type)),attachments=entries.filter(b=>b.catalogId!=='swarm-aster'&&['ring','belt','disk','dyson'].includes(b.type)),host=body(center);
+ const allEntries=nodes.filter(n=>n.parentId===id).map(n=>getFrame(n.id)).filter(Boolean).map(body),entries=allEntries.filter(b=>mapCategoryVisible(b,filters)),children=entries.filter(b=>b.catalogId==='swarm-aster'||!['disk','jets','belt','ring','dyson','warp','bridge'].includes(b.type)),attachments=entries.filter(b=>b.catalogId!=='swarm-aster'&&['ring','belt','disk','jets','dyson'].includes(b.type)),host=body(center);
  return{centerId:id,xAxis,yAxis,parentId:nodeMap.get(id)?.parentId||null,host,children,attachments,entries,allEntries,filters,hiddenCount:allEntries.length-entries.length,maximum:Math.max(host.radiusMeters*5,...children.map(b=>Math.max(b.distanceMeters*1.1,b.radiusMeters*3)),...attachments.map(b=>b.radiusMeters*1.1)),nodes};
 }
 export function renderOrbitMap(model,{logDistance=true,logSize=true,amplification=6,grid=true,annotations=true,metrics=annotations,selectedId=null,viewportWidth=900}={}){
@@ -100,7 +102,7 @@ export function renderOrbitMap(model,{logDistance=true,logSize=true,amplificatio
    const paths=lanes.map(l=>stroke(Array.from({length:57},(_,i)=>{
     const angle=i*Math.PI/28;return projected(l.u.map((val,j)=>l.radius*(val*Math.cos(angle)+l.v[j]*Math.sin(angle))));
    }))+'Z').join('');
-   parts.push(`<g class="map-body map-fleet" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · ${ring.catalogId===TOROID_ID?'ten':'six'} independent orbital lanes</title><path d="${paths}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="8"/><path d="${paths}" fill="none" stroke="${escape(ring.color)}" stroke-width="${selected?'1.6':'1'}" stroke-opacity="${selected?'1':'.63'}"/></g>`);
+   parts.push(`<g class="map-body map-fleet" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · ${ring.catalogId===TOROID_ID?lanes.length:'six'} independent orbital lanes</title><path d="${paths}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="8"/><path d="${paths}" fill="none" stroke="${escape(ring.color)}" stroke-width="${selected?'1.6':'1'}" stroke-opacity="${selected?'1':'.63'}"/></g>`);
   }else if(ring.catalogId==='shkadov-mirror'){
    // Draw sections of the actual spherical cap. The radial map scale can
    // be logarithmic, so project each sample instead of rescaling an ellipse.
@@ -115,6 +117,12 @@ export function renderOrbitMap(model,{logDistance=true,logSize=true,amplificatio
    const [labelX,labelY]=point(0,0);
    parts.push(`<g class="map-body map-mirror" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · mirror radius ${(ring.radiusMeters/149597870700).toPrecision(3)} AU</title><path d="${rim}" fill="${escape(ring.color)}" fill-opacity=".12" stroke="${escape(ring.color)}" stroke-width="${selected?'2':'1.3'}"/><path d="${ribs}" stroke="${escape(ring.color)}" fill="none" stroke-width=".8"/>${annotations?`<text x="${f(labelX)}" y="${f(labelY-8)}" text-anchor="middle" fill="#e2d4ba" font-family="system-ui,sans-serif" font-size="11">${escape(ring.name)}</text>`:''}</g>`);
    if(annotations)attachmentLabels.push({x:labelX-50,y:labelY-20,w:100,h:16});
+  }else if(ring.type==='jets'){
+   const dx=outer*dot(ring.featureAxis,model.xAxis),dy=-outer*dot(ring.featureAxis,model.yAxis);
+   const jetPath=`M${f(cx-dx)} ${f(cy-dy)}L${f(cx+dx)} ${f(cy+dy)}`;
+   const jetColor=escape(ring.color);
+   const glyph=Math.hypot(dx,dy)>10?`<path d="${jetPath}" fill="none" stroke="${jetColor}" stroke-width="4"/><path d="${jetPath}" fill="none" stroke="transparent" stroke-width="16"/>`:`<circle cx="${cx}" cy="${cy}" r="18" stroke="${jetColor}" fill="none" stroke-width="3"/><circle cx="${cx}" cy="${cy}" r="18" stroke="transparent" fill="none" stroke-width="12"/>`;
+   parts.push(`<g class="map-body" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)}</title>${glyph}</g>`);
   }else if(ring.type==='dyson'||brainTier(ring.catalogId)){
    const tier=brainTier(ring.catalogId),show=annotations&&(!tier||selected),label=ring.name.length>26?ring.name.slice(0,25)+'…':ring.name,labelY=Math.max(43,cy-outer-9),labelWidth=Math.min(180,label.length*6.2+8);
    parts.push(`<g class="map-body map-shell" data-map-object="${escape(ring.id)}" role="button" tabindex="0" aria-label="Select ${escape(ring.name)}"><title>${escape(ring.name)} · ${tier?'tier radius':ring.catalogId==='ringworld'?'equatorial deck radius':'shell radius'} ${(ring.radiusMeters/149597870700).toPrecision(3)} AU</title><circle cx="${cx}" cy="${cy}" r="${f(outer)}" fill="none" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke"/><circle cx="${cx}" cy="${cy}" r="${f(outer)}" fill="none" stroke="${selected?'#d9f0ff':escape(ring.color)}" stroke-opacity="${selected?'1':'.7'}" stroke-width="${selected?'2.2':'1.4'}"/>${show?`<text x="${cx}" y="${f(labelY)}" text-anchor="middle" fill="#bfd4df" font-family="system-ui,sans-serif" font-size="11">${escape(label)}</text>`:''}</g>`);

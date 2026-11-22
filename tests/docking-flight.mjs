@@ -33,7 +33,7 @@ for(const side of [-1,1]){
 let elapsed=0,phase=0;
 for(const outbound of [true,false,true]){
  const departure=source(!outbound,elapsed,outbound?1:-1),at=t=>source(outbound,elapsed+t,outbound?-1:1),start=dockingStandOff(departure,craftRadius),plan=createDockingTransit(start,at,{departureStation:departure});
- assert(plan.duration>24*3600&&plan.duration<30*86400);assert.equal(plan.legs.length,3);assert.deepEqual(structuredClone(plan),plan);
+ assert(plan.duration>24*3600&&plan.duration<30*86400);assert.equal(plan.legs.length,5);assert.deepEqual(structuredClone(plan),plan);
  const first=sampleDockingTransit(plan,0,at(0)),end=sampleDockingTransit(plan,plan.duration,at(plan.duration)),gate=sampleDockingOrbit(at(plan.duration),craftRadius);
  near(first.position,start.position);near(first.velocity,start.velocity);near(end.position,gate.position,.001);near(end.velocity,gate.velocity);near(end.basis[2],gate.basis[2]);
  let peak=0;const ticks=4000;
@@ -45,7 +45,15 @@ for(const outbound of [true,false,true]){
   if(q.mainThrustG>1e-8)assert(dot(q.basis[2],q.properAcceleration)/len(q.properAcceleration)>.9999999,'main engines burn through the thrust axis');
  }
  assert(peak>.999,'sustained one-g transfer');
- const leg=plan.legs[1],startLeg=plan.legs[0].T;
+ const leg=plan.legs[2],startLeg=plan.legs[0].T+plan.legs[1].T;
+ const course=leg.boost[2];
+ assert(dot(course,leg.brake[2])< -1+1e-12,'Cruise boost and braking share one straight line');
+ for(const leg of [plan.legs[0],plan.legs.at(-1)]){
+  const drift=leg===plan.legs[0]?departure.parentVelocity:at(plan.duration).parentVelocity;
+  const tangent=sub(leg===plan.legs[0]?leg.v0:leg.v1,drift);
+  const line=sub(sub(leg.b.position,leg.a.position),mul(drift,leg.T));
+  assert(dot(tangent,line)/(len(tangent)*len(line))>1-1e-12,'Local departure and insertion are tangent in the planet frame');
+ }
  for(const burnTime of [leg.hold+leg.burn*.25,leg.hold+leg.burn*.75,leg.hold+leg.burn+leg.coast+leg.braking*.5]){
   const sample=sampleDockingTransit(plan,startLeg+burnTime);assert(sample.mainThrustG>.999&&sample.mainThrustG<=1,'true 1g transfer and braking cruise');
  }

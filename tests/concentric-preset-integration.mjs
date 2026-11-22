@@ -49,6 +49,7 @@ try{
   for(let leg=0;leg<(scene==='nasa-shuttle'?nodes.length-1:nodes.length);leg++){
    const start=nodes[leg].radiusMeters,end=nodes[(leg+1)%nodes.length].radiusMeters;
    let prev=location(),sweep=0,burnSeconds=0,sawBurn=false,lastAngle=0,prevLocalClock=0;
+   const slews=new Set();
    for(let tick=0;tick<4500;tick++){
     const before=r.transfer;
     r.advanceChartStages(step);
@@ -70,6 +71,19 @@ try{
     }
     if(t){
      assert((now.R-prev.R)*Math.sign(end-start)>=-start*1e-9,'Actual radius moves toward target');
+     if(t.plan.spiral&&t.progress>0){
+      const s=t.sample,R=t.orbitRadial,normal=t.tangentLeg.normal;
+      const T=[normal[1]*R[2]-normal[2]*R[1],normal[2]*R[0]-normal[0]*R[2],normal[0]*R[1]-normal[1]*R[0]];
+      if(s.slew!==undefined){
+       slews.add(s.phase);
+       assert.equal(ship.flight.thrust,0,'Main engine is off while slewing on the circular coast');
+       near(s.radialVelocity,0,1e-7,'Radial velocity on a parking coast');
+       near(s.tangentialVelocity,Math.sqrt(t.plan.mu/s.radius),1e-6,'Circular speed is preserved during the slew');
+      }else if(s.requiredSupportG>.001){
+       const F=R.map((v,k)=>v*s.radialThrust+T[k]*s.tangentialThrust+normal[k]*s.normalThrust);
+       near(dot(ship.flight.basis[2],F)/Math.hypot(...F),1,1e-8,'Main nozzle follows applied acceleration, independent of velocity');
+      }
+     }
      if(t.progress>.35&&t.progress<.65){
       sawBurn||=ship.flight.thrust>0;assert(ship.flight.thrust>=0&&ship.flight.thrust<=1+1e-10,'The engine command is at most 1g, even on an unsupported trajectory');
       const s=t.sample,clock=r.getObjectClock(id),v=ship.flight.velocity;
@@ -93,6 +107,7 @@ try{
      near(Number(bar.value),elapsed/proper,1e-6,'Progress belongs to this maneuver');
     }
     if(before&&!t){
+     if(before.plan.spiral)assert.deepEqual([...slews],['Orienting for radius change','Aligning with parking orbit']);
      assert(sawBurn,'The live motor fired during the radius change');near(burnSeconds,before.wallSeconds,step+.000001,'Each burn consumes its scheduled presentation interval');
      assert.equal(ship.parentId,body);near(now.R,end,end*1e-8,'Selected radius reached');
      assert(q.orbitWait,'Arrival starts the next orbit');

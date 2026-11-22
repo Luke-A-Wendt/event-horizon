@@ -4,14 +4,13 @@ import {PROTECTED_CLOCK_RATE,tickAtClockRate} from './object-clocks.js';
 import {accumulateCrewExposure} from './crew-load.js';
 import {proximityOrbits} from './proximity-orbits.js';
 import {effectiveWarpRadius} from './warp-physics.js';
-import {limitedCrew,oneGravityRadius} from './orbit-clearance.js';
 import {HALF_TURN_SECONDS} from './travel-math.js';
 // Editable flight queues and a bounded optical-chart wormhole itinerary.
 // These are cinematic routes with analytic clocks, not an N-body solver.
 import {parkedOrbitGeometry,parkedCameraFraming} from './orbit-path.js';
 import {REFERENCE_RG_METERS} from './objects.js';
 import {bridgeWorldLayout,PROXIMA_GATE_SCENE_ID} from './proxima-gate-layout.js';
-import {isBridgeGate,pairedGatePart,pairedGatePhase} from './paired-gate-flight.js';
+import {bridgeOrbit,bridgeTangentContacts,isBridgeGate,pairedGatePart,pairedGatePhase,timeGateTransition,GATE_LEG_SECONDS} from './paired-gate-flight.js';
 import {bridgeConformal,bridgeIsotropicRadius,bridgeProperRadius,bridgeRayStep,bridgeTrackLoadG} from './bridge-math.js';
 import {makeCapture,levelTurn,routeState,routePathSamples,guideRouteCamera,travelCraft} from './travel-routes.js';
 import {estimateTransfer,buildTransferCurve,orbitTransferPath,sampleTransferCurve,transferCurvePoint,transferCurveDerivative,transferCurveFraction,sampleTransferAtDistance,sampleTransfer,TRANSFER_WALL_SECONDS,transferEase} from './travel-math.js';
@@ -27,12 +26,6 @@ const clone=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const isWorld=id=>id==='bridge-near-world'||id==='bridge-far-world';
 function blendDirection(a,b,t){const d=clamp(dot(a,b),-1,1);if(d>.999)return unit(add(mul(a,1-t),mul(b,t)));const angle=Math.acos(d),axis=d<-.999?unit(cross(a,Math.abs(a[1])<.8?[0,1,0]:[1,0,0])):unit(sub(b,mul(a,d)));return add(mul(a,Math.cos(angle*t)),mul(axis,Math.sin(angle*t)));}
 export function manualDriveEligibility(r,id){const c=r.objects.find(o=>o.id===id);return {allowed:!!c&&['shuttle','enterprise'].includes(c.type),reason:c&&['shuttle','enterprise'].includes(c.type)?'':'Select a spacecraft.'};}
-function bridgeOrbit(r,far=false,craftId,radiusMeters){
- const b=r.configCache.bridgeRadius*REFERENCE_RG_METERS,plane=r.configCache.primaryBasis,craft=r.objects.find(o=>o.id===(craftId||r.bridgeObjectId));
- const world=bridgeWorldLayout(far,r.sceneId);
- const distance=world.distance*b,R=radiusMeters||r.flightSequences?.[craft?.id]?.nodes.find(n=>n.targetId===(far?'bridge-far-world':'bridge-near-world'))?.radiusMeters||Math.max(oneGravityRadius(craft?.type,world.massSolar)*world.radius*b/world.radiusMeters,world.radius*b*1.04+2*(craft?r.objectRadius(craft)*REFERENCE_RG_METERS:0)),factor=far?b*b/(4*(distance*distance-R*R)):1;
- const physicalRadiusMeters=R*world.radiusMeters/(world.radius*b),speed=limitedCrew(craft?.type)?Math.sqrt(1.32712440018e20*world.massSolar/physicalRadiusMeters):R*factor*.12;return {center:mul(plane[2],distance*factor),radius:R*factor,speed,localRadiusMeters:physicalRadiusMeters,physicalRadiusMeters:limitedCrew(craft?.type)?physicalRadiusMeters:undefined,plane,far};
-}
 function orbitPose(orbit,phase){const {center,radius,plane}=orbit,radial=add(mul(plane[0],Math.cos(phase)),mul(plane[2],Math.sin(phase))),forward=unit(add(mul(plane[0],Math.sin(phase)),mul(plane[2],-Math.cos(phase))));return {position:add(center,mul(radial,radius)),basis:[unit(cross(plane[1],forward)),plane[1],forward]};}
 function waypointPose(r,id,forward,heading){
  const b=r.configCache.bridgeRadius*REFERENCE_RG_METERS,plane=r.configCache.primaryBasis,far=id==='bridge-far-world',radius=isBridgeGate(id)?b*.5:bridgeIsotropicRadius((far?-6:6)*b,b);
@@ -64,8 +57,10 @@ export function configureAutopilot(r,preset){
  r.autopilot=null;r.flightSequences={};r.bridgeParking={};
  const craft=r.objects.find(o=>['shuttle','enterprise'].includes(o.type));if(!craft)return null;
  if(r.state.bridge){
-  r.state.bridgeTravel=false;r.state.warp=false;r.warpObjectId=null;craft.warpEnabled=false;const id='bridge-near-world',pose=r.state.bridgeSurfaces?orbitPose(bridgeOrbit(r,false,craft.id),-Math.PI/2):waypointPose(r,id,mul(r.configCache.primaryBasis[2],-1));
-  setBridgePose(r,craft,pose);r.bridgeParking[craft.id]={targetId:id,phase:-Math.PI/2};
+  r.state.bridgeTravel=false;r.state.warp=false;r.warpObjectId=null;craft.warpEnabled=false;
+  const phase=preset.id===PROXIMA_GATE_SCENE_ID&&craft.type==='shuttle'?bridgeTangentContacts(r,craft.id,false).departure:-Math.PI/2;
+  const id='bridge-near-world',pose=r.state.bridgeSurfaces?orbitPose(bridgeOrbit(r,false,craft.id),phase):waypointPose(r,id,mul(r.configCache.primaryBasis[2],-1));
+  setBridgePose(r,craft,pose);r.bridgeParking[craft.id]={targetId:id,phase};
   const paired=preset.id===PROXIMA_GATE_SCENE_ID;
   const stops=paired?['bridge-near-world','bridge-earth-gate','bridge-far-world','bridge-proxima-gate']:r.state.bridgeSurfaces?['bridge-near-world','bridge-throat','bridge-far-world','bridge-throat']:['bridge-near-world','bridge-far-world'];
   const nodes=stops.map(targetId=>({targetId,...(paired&&isWorld(targetId)?{extraLaps:1}:{}),warpFactor:craft.type==='enterprise'?0:1}));setFlightSequence(r,craft.id,nodes,{loop:true});
@@ -132,7 +127,7 @@ function bridgePlan(r,id,options={},departure=null){
  const craft=travelCraft(r,options),target=bridgeTravelTargets(r,options).find(t=>t.id===id);if(!craft||!target)return {error:'Select a spacecraft and a destination.'};
  if(!departure)r.fillObjects();const frame=departure?null:r.getFocusFrame(craft.id);if(!departure&&!frame)return {error:'The spacecraft is unavailable.'};
  const f=!departure&&r.driveId===craft.id?craft.flight:null,start=departure?.pose||{position:f?[...f.position]:mul(frame.position,REFERENCE_RG_METERS),basis:(f?.basis||(r.sceneId===PROXIMA_GATE_SCENE_ID&&craft.driveBasis)||frame.frame).map(v=>[...v])},b=r.configCache.bridgeRadius*REFERENCE_RG_METERS,plane=r.configCache.primaryBasis;
- if(options.rejoin&&craft.type==='shuttle'&&f&&!f.orbitHold&&Math.hypot(...f.velocity)>0){
+ if((options.rejoin||r.state.bridgeSurfaces)&&craft.type==='shuttle'&&f&&!f.orbitHold&&Math.hypot(...f.velocity)>1e-8){
   const direction=unit(f.velocity),world=bridgeWorldLayout(Math.hypot(...start.position)<b*.5,r.sceneId),scale=r.state.bridgeSurfaces?world.radiusMeters/(world.radius*b):1;
   const c=makeCapture('shuttle',start.position,f.velocity,direction,0,start.basis[2],plane[1]);
   // The generic braking profile measures SI distance; only its drawing is
@@ -144,21 +139,23 @@ function bridgePlan(r,id,options={},departure=null){
    startPose:start,endPose:{position:end,basis:orthonormalFrame([start.basis[0],plane[1],c.retro])},parts:[{plan:c.brake}],points,arc:built.arc,length:ds,
    pathPoints:points,distanceMeters:c.length,coordinateSeconds:c.coordinateSeconds,properSeconds:c.properSeconds,dilationSeconds:c.dilationSeconds,estimatedDilationSeconds:c.dilationSeconds};
  }
- const near=Math.hypot(...start.position)>=b*.5,direction=mul(plane[2],isBridgeGate(id)?(near?-1:1):id==='bridge-far-world'?-1:1),endOrbit=r.state.bridgeSurfaces&&isWorld(id)?bridgeOrbit(r,id==='bridge-far-world',craft.id,departure?.endRadius):null,gate=mul(plane[2],b*.5),towardGate=endOrbit?sub(gate,endOrbit.center):null,endPhase=endOrbit&&r.sceneId===PROXIMA_GATE_SCENE_ID?(endOrbit.far?1:-1)*Math.PI/2:endOrbit?Math.atan2(dot(towardGate,plane[2]),dot(towardGate,plane[0]))-Math.acos(Math.min(1,endOrbit.radius/Math.hypot(...towardGate))):0;
+ const near=Math.hypot(...start.position)>=b*.5,direction=mul(plane[2],isBridgeGate(id)?(near?-1:1):id==='bridge-far-world'?-1:1),endOrbit=r.state.bridgeSurfaces&&isWorld(id)?bridgeOrbit(r,id==='bridge-far-world',craft.id,departure?.endRadius):null,gate=mul(plane[2],b*.5),towardGate=endOrbit?sub(gate,endOrbit.center):null,atGate=Math.hypot(...sub(start.position,gate))<b*1e-6,contacts=craft.type==='shuttle'&&r.state.bridgeSurfaces?bridgeTangentContacts(r,craft.id,atGate&&endOrbit?!endOrbit.far:!near,departure?.orbit?.chartRadius,departure?.endRadius,isBridgeGate(id)||atGate,!departure&&!r.bridgeParking?.[craft.id]?start.position:null):null,endPhase=endOrbit&&contacts?contacts.arrival:endOrbit?Math.atan2(dot(towardGate,plane[2]),dot(towardGate,plane[0]))-Math.acos(Math.min(1,endOrbit.radius/Math.hypot(...towardGate))):0;
  const end=endOrbit?orbitPose(endOrbit,endPhase):waypointPose(r,id,direction,options.heading),fromThroat=Math.hypot(...sub(start.position,mul(plane[2],b*.5)))<b*1e-6,crossing=!isBridgeGate(id)&&!fromThroat&&(options.viaThroat||near!==(id==='bridge-near-world'));
  if(Math.hypot(...sub(start.position,end.position))<Math.max(1e-5,(departure?r.objectRadius(craft):frame.radius)*REFERENCE_RG_METERS*.001))return {error:'Already at this waypoint or orbit.'};
  const throat=waypointPose(r,'bridge-throat',direction,options.throatHeading),stops=crossing?[throat,end]:[end],parts=[];let from=start;
- const pairedGate=crossing&&craft.type==='shuttle'&&r.sceneId===PROXIMA_GATE_SCENE_ID;
+ const pairedGate=!!contacts;
+ if(contacts&&crossing)throat.position=contacts.gate;
  const world=bridgeWorldLayout(!near,r.sceneId);
- const initialSpeed=Math.max(0,departure?.speed??f?.speed??(pairedGate?bridgeOrbit(r,!near,craft.id).speed:0)),warpRejoin=craft.type==='enterprise'&&!!options.rejoin,initialWarp=warpRejoin?8:Number.isFinite(options.warpFactor)?options.warpFactor:1,impulse=craft.type==='enterprise'&&initialWarp===0,scale=r.state.bridgeSurfaces?world.radiusMeters/(world.radius*b):1;
+ const initialSpeed=Math.max(0,departure?.speed??f?.speed??(pairedGate&&!atGate?bridgeOrbit(r,!near,craft.id).speed:0)),warpRejoin=craft.type==='enterprise'&&!!options.rejoin,initialWarp=warpRejoin?8:Number.isFinite(options.warpFactor)?options.warpFactor:1,impulse=craft.type==='enterprise'&&initialWarp===0,scale=r.state.bridgeSurfaces?world.radiusMeters/(world.radius*b):1;
  for(let index=0;index<stops.length;index++){
   const to=stops[index],last=index===stops.length-1,partWarp=!warpRejoin&&crossing&&index===0&&Number.isFinite(options.throatWarpFactor)?options.throatWarpFactor:initialWarp,partImpulse=craft.type==='enterprise'&&partWarp===0,parking=r.bridgeParking?.[craft.id],startOrbit=departure?(index===0?departure.orbit:null):index===0&&(!f||f.orbitHold)&&r.state.bridgeSurfaces&&isWorld(parking?.targetId)?bridgeOrbit(r,parking.targetId==='bridge-far-world',craft.id):null;
   const velocity=index===0&&f?(craft.type==='enterprise'?warpVelocity(f):f.velocity):null;
   const tangent=velocity&&Math.hypot(...velocity)>1e-6?unit(velocity):from.basis[2];
   if(pairedGate){
-   const far=index===0?!near:near,layout=bridgeWorldLayout(far,r.sceneId),localScale=layout.radiusMeters/(layout.radius*b);
+   const far=fromThroat&&endOrbit?endOrbit.far:index===0?!near:near,layout=bridgeWorldLayout(far,r.sceneId),localScale=layout.radiusMeters/(layout.radius*b);
    const part=pairedGatePart(from,to,b,far,localScale,index===0?initialSpeed:1200,last?endOrbit?.speed||0:1200);
    if(part.plan.error)return part.plan;
+   if(crossing&&r.sceneId===PROXIMA_GATE_SCENE_ID)timeGateTransition(part,b);
    parts.push(part);from=to;continue;
   }
   const handle=Math.hypot(...sub(to.position,from.position))*.30,points=r.state.bridgeSurfaces?{segments:[[from.position,add(from.position,mul(tangent,handle)),sub(to.position,mul(to.basis[2],handle)),to.position]]}:orbitTransferPath({start:from.position,end:to.position,startCenter:startOrbit?.center||null,startTangent:tangent,endCenter:last?endOrbit?.center:null,endTangent:to.basis[2],lift:[0,0,0]}),built=buildTransferCurve(points);
@@ -167,7 +164,7 @@ function bridgePlan(r,id,options={},departure=null){
   if(partImpulse){plan.properSeconds=plan.coordinateSeconds;plan.dilationSeconds=0;}
   parts.push({points,arc:built.arc,length:built.length,plan,impulse:partImpulse,warpFactor:partWarp,initialSpeed:index===0?initialSpeed:0});from=to;
  }
- const cinematicBridge=craft.type==='enterprise'&&!r.state.bridgeSurfaces&&crossing&&impulse&&!Number.isFinite(options.throatHeading),wallSeconds=pairedGate?30:cinematicBridge?Math.PI/.12:options.wallSeconds??TRANSFER_WALL_SECONDS;
+ const cinematicBridge=craft.type==='enterprise'&&!r.state.bridgeSurfaces&&crossing&&impulse&&!Number.isFinite(options.throatHeading),wallSeconds=pairedGate?parts.reduce((n,p)=>n+GATE_LEG_SECONDS+(p.apertureTime?.extra||0),0):cinematicBridge?Math.PI/.12:options.wallSeconds??TRANSFER_WALL_SECONDS;
  // A radial passage is a single leg in signed proper distance l, even
  // though its isotropic chart radius changes scale at the throat. Never
  // insert a second rest-to-rest burn or a chart-speed kink at the crossing.
@@ -185,10 +182,12 @@ function bridgePlan(r,id,options={},departure=null){
  // *local chart radius*, never its SI radius or its opposite-mouth image.
  const parked=r.bridgeParking?.[craft.id],fromOrbit=departure?departure.orbit:
   r.state.bridgeSurfaces&&isWorld(parked?.targetId)&&(!f||f.orbitHold)?bridgeOrbit(r,parked.targetId==='bridge-far-world',craft.id):null;
+ const departureDirection=unit(transferCurveDerivative(points,0)),turnAngle=Math.acos(clamp(dot(start.basis[2],departureDirection),-1,1));
+ const turnSeconds=pairedGate&&initialSpeed<.01&&turnAngle>.001?Math.max(1,HALF_TURN_SECONDS*turnAngle/Math.PI):0;
  const baseView=flyThrough?Math.max(14,wallSeconds):wallSeconds;
  const contactClock=!pairedGate&&(fromOrbit||endOrbit)?contactPlaybackClock(parts.reduce((n,p)=>n+p.length,0),fromOrbit?.radius||0,endOrbit?.radius||0,baseView):null;
  const pathPoints=departure?[]:Array.from({length:193},(_,i)=>transferCurvePoint(points,i/192));
- return {craftId:craft.id,craftType:craft.type,type:craft.type,mode:craft.type==='shuttle'?'1g · wormhole shortcut':impulse?'Impulse · wormhole shortcut':warpRejoin?'Warp recovery':'Warp '+initialWarp,warpFactor:warpRejoin?Math.max(...parts.map(p=>p.plan.warpFactor)):initialWarp,targetId:id,targetName:target.name,waypoint:target.waypoint,heading:options.heading,wallSeconds:contactClock?.wallSeconds??baseView,contactClock,pairedGate,cinematicBridge,radialPass,flyThrough,throughPlan,peakFraction,distanceMeters:throughPlan?.distanceMeters??parts.reduce((s,p)=>s+p.plan.distanceMeters,0),orbitRadiusMeters:endOrbit?.radius||0,pathPoints,parts,points,arc:built.arc,length:built.length,crossing,fromThroat,impulse,alignHold,endPose:end,endPhase,startPose:start,initialSpeed,initialThrust:f?.thrust||0,coordinateSeconds:totals.coordinateSeconds,properSeconds:totals.properSeconds,dilationSeconds:totals.dilationSeconds,estimatedDilationSeconds:totals.dilationSeconds};
+ return {craftId:craft.id,craftType:craft.type,type:craft.type,mode:craft.type==='shuttle'?'1g · wormhole shortcut':impulse?'Impulse · wormhole shortcut':warpRejoin?'Warp recovery':'Warp '+initialWarp,warpFactor:warpRejoin?Math.max(...parts.map(p=>p.plan.warpFactor)):initialWarp,targetId:id,targetName:target.name,waypoint:target.waypoint,heading:options.heading,wallSeconds:(contactClock?.wallSeconds??baseView)+turnSeconds,turnSeconds,departureDirection,contactClock,pairedGate,cinematicBridge,radialPass,flyThrough,throughPlan,peakFraction,distanceMeters:throughPlan?.distanceMeters??parts.reduce((s,p)=>s+p.plan.distanceMeters,0),orbitRadiusMeters:endOrbit?.radius||0,pathPoints,parts,points,arc:built.arc,length:built.length,crossing,fromThroat,impulse,alignHold,endPose:end,endPhase,startPose:start,initialSpeed,initialThrust:f?.thrust||0,coordinateSeconds:totals.coordinateSeconds+turnSeconds,properSeconds:totals.properSeconds+turnSeconds,dilationSeconds:totals.dilationSeconds,estimatedDilationSeconds:totals.dilationSeconds};
 }
 // Estimate from the stop's authored departure contact rather than the current
 // craft pose. A throat between two worlds belongs to one compound flight.
@@ -209,10 +208,10 @@ export function bridgePlaylistLeg(r,craft,sequence,fromIndex,toIndex){
  if(orbit){
   const gateVector=sub(mul(axis[2],b*.5),orbit.center);
   const angle=Math.atan2(dot(gateVector,axis[2]),dot(gateVector,axis[0]))+Math.acos(Math.min(1,orbit.radius/Math.hypot(...gateVector)));
-  pose=orbitPose(orbit,r.sceneId===PROXIMA_GATE_SCENE_ID?(orbit.far?1:-1)*Math.PI/2:angle);
+  pose=orbitPose(orbit,craft.type==='shuttle'?bridgeTangentContacts(r,craft.id,orbit.far,origin.radiusMeters,destination.radiusMeters,isBridgeGate(destination.targetId)).departure:angle);
  }else pose=waypointPose(r,origin.targetId,forward);
  const initialPark=r.bridgeParking?.[craft.id]?.targetId===origin.targetId&&r.driveId!==craft.id&&!craft.completedTransfer;
- const plan=bridgePlan(r,destination.targetId,{craftId:craft.id,warpFactor:destination.warpFactor??1,heading:destination.heading,viaThroat:!!gate,throatHeading:gate?.heading,throatWarpFactor:gate?.warpFactor},{pose,orbit,endRadius:destination.radiusMeters,speed:initialPark&&r.sceneId!==PROXIMA_GATE_SCENE_ID?0:orbit?.speed||0});
+ const plan=bridgePlan(r,destination.targetId,{craftId:craft.id,warpFactor:destination.warpFactor??1,heading:destination.heading,viaThroat:!!gate,throatHeading:gate?.heading,throatWarpFactor:gate?.warpFactor},{pose,orbit,endRadius:destination.radiusMeters,speed:initialPark&&craft.type!=='shuttle'?0:orbit?.speed||0});
  if(plan.error)return plan;
  const description=gate?'Bridge passage via the throat':plan.crossing?'Bridge crossing':'Bridge approach';
  const total={flyThroughThroat:!!(gate&&(plan.throughPlan||plan.pairedGate)),properSeconds:plan.properSeconds,coordinateSeconds:plan.coordinateSeconds,dilationSeconds:plan.dilationSeconds,distanceMeters:plan.distanceMeters,peakSpeed:plan.throughPlan?.peakSpeed??Math.max(...plan.parts.map(p=>p.plan.peakSpeed)),description};
@@ -331,7 +330,17 @@ export function advanceBridgeAutopilot(r,dt){
  const t=r.transfer;if(!t?.active||!t.bridgeRoute)return false;const craft=r.objects.find(o=>o.id===t.craftId),f=craft?.flight;if(!craft||!f)return false;r.transferClockObjectId=craft.id;
  t.elapsed=Math.min(t.wallSeconds,t.elapsed+Math.max(0,dt));if(t.elapsed>t.wallSeconds-1e-8)t.elapsed=t.wallSeconds;
  if(t.rejoinBrake)return advanceBridgeBrake(r,t,craft,f,dt);
- const progress=t.elapsed/t.wallSeconds,baseProgress=contactPlaybackProgress(t.contactClock,progress,u=>{
+ if(t.turnSeconds&&t.elapsed<t.turnSeconds){
+  const u=t.elapsed/t.turnSeconds,along=blendDirection(t.initialBasis[2],t.departureDirection,transferEase(u)),up=r.configCache.primaryBasis[1];
+  const basis=orthonormalFrame([cross(up,along),up,along]);
+  setBridgePose(r,craft,{position:t.startPose.position,basis});f.thrust=0;f.speed=0;f.velocity=[0,0,0];
+  const elapsed=t.elapsed-(t.sample?.properSeconds||0);
+  if(craft.clock){addClock(craft.clock,'coordinateSeconds','coordinateCompensation',elapsed);addClock(craft.clock,'properSeconds','properCompensation',elapsed);}
+  t.sample={...t.sample,speedMetersPerSecond:0,properSeconds:t.elapsed,coordinateSeconds:t.elapsed};
+  t.properElapsedSeconds=t.coordinateElapsedSeconds=t.elapsed;
+  f.visualJet=u<.5?1:-1;t.phaseName='Turning for departure';t.commandedThrustG=0;return true;
+ }
+ const progress=(t.elapsed-(t.turnSeconds||0))/(t.wallSeconds-(t.turnSeconds||0)),baseProgress=contactPlaybackProgress(t.contactClock,progress,u=>{
   const ph=bridgePhase(t,u),part=t.parts[ph.second?1:0];
   return ((ph.second?t.parts[0].length:0)+part.length*ph.fraction)/t.contactClock.length;
  }),phase=bridgePhase(t,baseProgress),part=t.parts[phase.second?1:0],raw=phase.sample||sampleTransferAtDistance(t.throughPlan||part.plan,t.radialPass?phase.ease:t.flyThrough?(phase.second?t.peakFraction+(1-t.peakFraction)*phase.fraction:t.peakFraction*phase.fraction):phase.fraction),before=!t.throughPlan&&phase.second?t.parts[0].plan:null;
@@ -340,8 +349,8 @@ export function advanceBridgeAutopilot(r,dt){
  // from the longitudinal clock. Neither a nonzero throttle nor a rotating
  // nose establishes the net proper acceleration of the drawn worldline.
  const restingAtWaypoint=t.alignHold>0&&!phase.second&&phase.stage===4&&phase.fraction===1&&raw.speedMetersPerSecond===0;
- const sample={...raw,bridgeProperG:restingAtWaypoint?0:null,coordinateSeconds:raw.coordinateSeconds+(before?.coordinateSeconds||0)+phase.hold,properSeconds:raw.properSeconds+(before?.properSeconds||0)+phase.hold,dilationSeconds:raw.dilationSeconds+(before?.dilationSeconds||0)};
- const curve=sampleTransferCurve(part,phase.fraction),forward=unit(transferCurveDerivative(part.points,curve.parameter)),up=r.configCache.primaryBasis[1],right=unit(cross(up,forward)),targetAlong=unit(add(mul(forward,Math.cos(phase.turn)),mul(right,Math.sin(phase.turn)))),along=blendDirection(t.initialBasis[2],targetAlong,transferEase(progress/.08)),basis=orthonormalFrame([cross(up,along),up,along]),old=t.sample,previousForward=[...f.basis[2]];
+ const sample={...raw,bridgeProperG:restingAtWaypoint?0:null,coordinateSeconds:raw.coordinateSeconds+(before?.coordinateSeconds||0)+phase.hold+(t.turnSeconds||0),properSeconds:raw.properSeconds+(before?.properSeconds||0)+phase.hold+(t.turnSeconds||0),dilationSeconds:raw.dilationSeconds+(before?.dilationSeconds||0)};
+ const curve=sampleTransferCurve(part,phase.fraction),forward=unit(transferCurveDerivative(part.points,curve.parameter)),up=r.configCache.primaryBasis[1],right=unit(cross(up,forward)),targetAlong=unit(add(mul(forward,Math.cos(phase.turn)),mul(right,Math.sin(phase.turn)))),along=t.pairedGate?targetAlong:blendDirection(t.initialBasis[2],targetAlong,transferEase(progress/.08)),basis=orthonormalFrame([cross(up,along),up,along]),old=t.sample,previousForward=[...f.basis[2]];
  const consumed=phase.second?t.parts[0].length:0,distanceFraction=(consumed+part.length*phase.fraction)/Math.max(1e-30,t.length),global=sampleTransferCurve(t,distanceFraction);t.curveParameter=global.parameter;t.currentDistanceFraction=distanceFraction;t.currentPosition=[...curve.position];
  setBridgePose(r,craft,{position:curve.position,basis});
  // Follow the local chart leg. A concatenated curve has differently scaled

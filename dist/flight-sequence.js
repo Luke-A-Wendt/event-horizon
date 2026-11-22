@@ -9,8 +9,8 @@ import {stopMinimumMeters,oneGravityRadius,limitedCrew} from './orbit-clearance.
 import {orbitalTangentLeg,sequencePlaneHeight} from './travel-routes.js';
 import {arcPlaybackFraction} from './travel-math.js';
 import {turnDuration,attitudeAngle,blendAttitude} from './flight-attitude.js';
-import {bridgeWorldLayout,PROXIMA_GATE_SCENE_ID} from './proxima-gate-layout.js';
-import {isBridgeGate} from './paired-gate-flight.js';
+import {bridgeWorldLayout} from './proxima-gate-layout.js';
+import {isBridgeGate,bridgeTangentContacts} from './paired-gate-flight.js';
 import {REFERENCE_RG_METERS} from './objects.js';
 const RG=REFERENCE_RG_METERS;
 const clone=value=>value==null?value:JSON.parse(JSON.stringify(value));
@@ -280,7 +280,12 @@ export function beginSequenceOrbitWait(r,q){
    return distance>0&&beginPointTurn(r,q,craft,offset.map(v=>v/distance));
   }
   const local=r.getBridgeParkingOrbit(craft.id),axis=r.configCache.primaryBasis,gate=axis[2].map(v=>v*r.configCache.bridgeRadius*.5),delta=gate.map((v,i)=>v-local.center[i]),project=a=>delta.reduce((n,v,i)=>n+v*a[i],0);
-  const x=project(axis[0]),z=project(axis[2]),angle=Math.atan2(z,x)+Math.acos(Math.min(1,local.radius/Math.hypot(x,z)));sweep=r.sceneId===PROXIMA_GATE_SCENE_ID?0:((orbit.phase-angle)%TAU+TAU)%TAU;
+  const x=project(axis[0]),z=project(axis[2]);
+  const goal=q.nodes[next],far=at==='bridge-far-world',other=q.nodes[next+1]||(q.loop?q.nodes[0]:null);
+  const dest=isBridgeGate(goal.targetId)?other:goal;
+  const tangent=craft.type==='shuttle'&&(!dest||dest.targetId!==at);
+  const angle=tangent?bridgeTangentContacts(r,craft.id,far,undefined,dest?.radiusMeters,dest?.kind!=='orbit').departure:Math.atan2(z,x)+Math.acos(Math.min(1,local.radius/Math.hypot(x,z)));
+  sweep=((orbit.phase-angle)%TAU+TAU)%TAU;
  }else{
   if(!orbit&&!craft.waypointHoldId)return false;
   r.enablePlanarRouteChart?.(craft.id);const target=q.nodes[next];

@@ -3,13 +3,19 @@
 import {GARDEN_WATER_GLSL} from './garden-waters.js';
 export const DYSON_GLSL=`
 const float DYSON_TUBE=.075;
-vec4 dysonSurfaceHit(vec3 ro,vec3 rd,float maximum,float cutaway,bool bandOnly){
+vec4 dysonSurfaceHit(vec3 ro,vec3 rd,float maximum,float cutaway,bool bandOnly,float phase){
  float b=dot(ro,rd),h=1.0-dot(cross(ro,rd),cross(ro,rd));
  if(h<0.0)return vec4(0,0,0,-1);
  float root=sqrt(h),cap=1.0-2.0*cutaway;
  for(int side=0;side<2;side++){
   float t=-b+(side==0?-root:root);if(t<.0000001||t>maximum)continue;
-  vec3 point=ro+rd*t;if((cutaway>0.0&&point.z>cap)||(bandOnly&&abs(point.y)>DYSON_TUBE))continue;
+  vec3 point=ro+rd*t;
+  if(bandOnly&&(abs(point.y)>DYSON_TUBE||(cutaway>0.&&point.z>cap)))continue;
+  if(cutaway>0.&&!bandOnly&&side==0){
+   float lon=(atan(point.z,point.x)+phase)*12./(2.*PI),lat=acos(clamp(point.y,-1.,1.))*8./PI;
+   vec3 seam=abs(fract(vec3(lon,lat,lon+lat)+.5)-.5);
+   if(all(greaterThanEqual(seam,vec3(.025,.032,.026))))continue;
+  }
   return vec4(unit(point),t);
  }
  return vec4(0,0,0,-1);

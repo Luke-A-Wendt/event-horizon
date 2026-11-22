@@ -29,6 +29,11 @@ for(const Renderer of [BlackHoleRenderer,CpuRenderer]){
  assert(Math.hypot(...eye().slice(0,2))<CYLINDER_DECK&&Math.abs(eye()[2])<CYLINDER_HALF);
  assert.equal(r.cameraFrame.hideIndex,-1,'onboard view keeps the uncut enclosure');
  const m=observedBodyMeasurements(r);assert(m.rows.some(x=>x.key==='bays'&&x.value==='6'));assert(m.rows.some(x=>x.key==='period'&&x.value==='28.4 min'));
+ assert.equal(frame().bodyParams[1],0);
+ r.updateObject(o.id,{dysonCutaway:.60});r.fillObjects();eps(frame().bodyParams[1],.60);
+ assert.notEqual(cylinderPixel([-1,.1,.16],[1,0,0],0,.60),cylinderPixel([-1,.1,.16],[1,0,0],0));
+ restoreRenderer(r,parseScene(serializeScene(r)));r.fillObjects();eps(frame().bodyParams[1],.60);
+ r.updateObject(o.id,{dysonCutaway:0});
  const t=30;r.time=t*299792458/(18*REFERENCE_RG_METERS);r.fillObjects();r.updateCameraFrame();eps(frame().bodyParams[0],t*CYLINDER_OMEGA);
  const phase=frame().bodyParams[0];restoreRenderer(r,parseScene(serializeScene(r)));r.fillObjects();r.updateCameraFrame();
  eps(frame().bodyParams[0],phase);assert.equal(r.focusMode,'onboard');

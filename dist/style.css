@@ -1305,6 +1305,15 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 #sceneMetrics .instrument-toggle::after{margin-left:2px}
 #sceneMetrics:has(.instrument-toggle[aria-expanded=false]){width:fit-content;max-width:min(290px,calc(100% - 78px))}
 #sceneMetrics .instrument-toggle[aria-expanded=false] #instrumentProfile{display:none}
+#instrumentAction{display:none}
+@media(max-width:700px),(pointer:coarse) and (max-height:560px){
+ #sceneMetrics .instrument-toggle{min-height:44px;padding:6px 10px}
+ #sceneMetrics #instrumentProfile{display:none}
+ #sceneMetrics #instrumentAction{display:inline-flex;align-items:center;gap:6px;flex:none;margin-left:auto;padding:4px 8px;border:1px solid #516779;border-radius:6px;background:#1b2b38;color:#e1f1ff;font:600 12px/1.25 var(--font)}
+ #sceneMetrics .instrument-toggle::after{display:none}
+ #instrumentAction::before{content:"";width:9px;height:2px;background:currentColor}
+ #sceneMetrics .instrument-toggle[aria-expanded=false] #instrumentAction::before{height:9px;background:linear-gradient(currentColor,currentColor) center/9px 2px no-repeat,linear-gradient(currentColor,currentColor) center/2px 9px no-repeat}
+}
 #sceneMetrics #bodyMeasurements{margin:0;padding:9px 12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;border-top:1px solid var(--hair)}
 #bodyMeasurements>div{min-width:0}
 #bodyMeasurements dt{margin:0 0 2px;color:var(--label);font:600 10px/1.3 var(--font);letter-spacing:.04em}
@@ -1314,7 +1323,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 #sceneMetrics[data-subject-type=enterprise] #pilotLegSpeed{grid-column:1/-1}
 @media(max-width:700px){
  #sceneMetrics #bodyMeasurements{padding:7px 10px;gap:6px 9px}
- #sceneMetrics .instrument-toggle{min-height:38px}
+
 }
 @media(max-height:540px){
  #sceneMetrics #bodyMeasurements{gap:4px 9px;padding-block:5px}
@@ -1370,7 +1379,7 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 #sceneMetrics #pilotOnboard{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .55em;text-align:left}
 #sceneMetrics #clockFace,#sceneMetrics #clockCalendar{font-variant-numeric:tabular-nums;white-space:nowrap;text-transform:none;letter-spacing:0}
 #sceneMetrics #clockFace{color:var(--ink);font-size:clamp(17px,2vw,21px);line-height:1.2;font-weight:650}
-#sceneMetrics #clockCalendar{font-size:13px;color:var(--label);font-weight:550}
+#sceneMetrics #clockCalendar{flex-basis:100%;color:var(--ink);font-size:clamp(24px,3vw,30px);line-height:1.15;font-weight:750;white-space:normal}
 #sceneMetrics #clockCalendar[hidden]{display:none}
 #sceneMetrics #pilotDilationRow,#sceneMetrics #pilotDilationRateRow{align-content:start}
 
@@ -1413,3 +1422,12 @@ body,main,.workspace,.workspace>.scene{width:100%;max-width:none;box-sizing:bord
 #scene.render-failed #sceneMetrics {display:none}
 #scene.scene-awaiting-frame .scene-heading {display:block;visibility:visible;opacity:1}
 #scene.scene-awaiting-frame #sceneSubtitle {display:block}
+
+.object-feature-links:not([hidden]){display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 12px}
+.object-feature-links small{flex-basis:100%;color:var(--label);font-weight:600}
+
+#sceneMetrics #pilotTelemetry.ship-clock{
+ width:auto;align-self:stretch;margin:6px 10px;padding:8px 10px;
+ border:1px solid var(--hair);border-radius:6px;background:rgba(4,12,22,.68)
+}
+#sceneMetrics .ship-clock #clockFace{font-variant-numeric:tabular-nums}

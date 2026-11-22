@@ -4,7 +4,7 @@ import {hullType,REFERENCE_RG_METERS} from './objects.js';
 import {FLIGHT_LIGHT_SPEED,FLIGHT_STANDARD_GRAVITY} from './flight-dynamics.js';
 import {paceHabitatWheel} from './habitat-spin.js';
 import {tickAtClockRate} from './object-clocks.js';
-import {sampleDockingClose,dockingCloseDuration,createDockingTransit,sampleDockingTransit,dockingTransitElapsed,dockingTransitScreenSeconds,dockingStageElapsed,dockingOrbitDuration,sampleDockingOrbit,dockingAcquireDuration,sampleDockingAcquire} from './docking-flight.js';
+import {sampleDockingClose,dockingCloseDuration,createDockingTransit,sampleDockingTransit,dockingTransitElapsed,dockingTransitScreenSeconds,dockingStageElapsed,dockingAttitudeElapsed,dockingAcquisitionScreenTime,dockingOrbitDuration,ferryTangentWait,sampleDockingOrbit,dockingAcquireDuration,sampleDockingAcquire} from './docking-flight.js';
 
 const RG=REFERENCE_RG_METERS,C=FLIGHT_LIGHT_SPEED,G=FLIGHT_STANDARD_GRAVITY;
 const T=18*RG/C,TAU=2*Math.PI,Z=[0,0,0];
@@ -56,26 +56,52 @@ function predict(r,id,sec,cache){
 function endpoint(r,id,side,seconds=0){
  const o=r.objectById.get(id),f=r.frameById.get(id);if(!o||!f||o.type!=='habitat')return null;
  const cache=new Map(),p=predict(r,id,seconds,cache),parent=r.getFocusFrame(o.parentId),parentPose=parent&&predict(r,o.parentId,seconds,cache);
- return {id,side,position:mul(p.position,RG),velocity:mul(p.velocity,C/18),basis:copyBasis(f.habitatHubFrame||f.frame),radiusMeters:r.objectRadius(o)*RG,...(parent&&parentPose&&parent.radius>0?{parentPosition:mul(parentPose.position,RG),parentVelocity:mul(parentPose.velocity,C/18),parentRadiusMeters:parent.radius*RG}:{})};
+ return {id,side,ferry:r.dockingMission?.ferry,position:mul(p.position,RG),velocity:mul(p.velocity,C/18),basis:copyBasis(f.habitatHubFrame||f.frame),radiusMeters:r.objectRadius(o)*RG,...(parent&&parentPose&&parent.radius>0?{parentPosition:mul(parentPose.position,RG),parentVelocity:mul(parentPose.velocity,C/18),parentRadiusMeters:parent.radius*RG}:{})};
 }
 function shipState(r,o){
  const f=r.frameById.get(o.id),isDriven=r.driveId===o.id&&o.flight&&!o.flight.orbitHold,par=r.getFocusFrame(o.parentId);
  return {position:mul(f.position,RG),velocity:isDriven?[...o.flight.velocity]:mul(f.velocity||Z,C/18),basis:copyBasis(f.frame),radiusMeters:r.objectRadius(o)*RG,...(par?.radius>0?{parentPosition:mul(par.position,RG),parentVelocity:mul(par.velocity||Z,C/18),parentRadiusMeters:par.radius*RG}:{})};
 }
 function claim(r,o,m){
+ const follow=r.focusMode==='track'&&r.focusId===o.id&&!r.parkedCamera?.released;
+ const entry=follow&&r.cameraFrame&&r.getFocusFrame(o.id);
+ if(entry){
+  const frame=r.cameraFrame,back=mul(frame.forward,-1);
+  m.cameraView={basis:[frame.right.slice(),frame.up.slice(),back],distance:r.camera.focusDistance,phase:'entry',time:0,duration:0};
+ }
  if(r.transfer?.active)r.cancelTravel();
  if(!m.playlist)r.stopFlightSequence(o.id);
  if(!m.playlist&&r.autopilot){r.autopilot.enabled=false;r.autopilot.engaged=false;}
  r.setFreeDrive(o.id,true,{guidance:true});r.navigationModes[o.id]='auto';
  o.flight.orbitHold=false;o.flight.thrust=0;o.flight.brakeSpeed=false;o.flight.visualJet=0;delete o.driveReturn;delete o.waypointHoldId;delete o.waypointHoldBasis;
- r.flightInput={speed:0,curvature:0,torsion:0};r.dockingMission=m;r.dockingCoastId=null;r.lastDockingError='';
+ r.flightInput={speed:0,curvature:0,torsion:0};r.dockingMission=m;if(follow)r.cameraGuide='dock-ferry';r.dockingCoastId=null;r.lastDockingError='';
 }
 function stage(r,m,phase,plan=null){
+ const ferry=(m.ferry||r.sceneId==='earth-mars-station-ferry')&&m.playlist;
+ if(ferry)m.ferry=true;else delete m.ferry;
  const e=endpoint(r,m.stationId,m.side),o=r.objectById.get(m.craftId);
  if(!e||!o)return false;
  const radius=r.objectRadius(o)*RG;
  m.phase=phase;m.paced=true;m.elapsed=m.wallElapsed=0;m.startSceneTime=r.time;m.duration=phase==='transit'?plan.duration:phase==='orbit'?dockingOrbitDuration(e):phase==='departOrbit'?2*dockingOrbitDuration(e):phase==='acquire'||phase==='depart'?dockingAcquireDuration(e,radius):phase==='docked'?40:dockingCloseDuration(e,radius);
- m.viewSeconds=phase==='transit'?dockingTransitScreenSeconds(plan):secondsOnScreen[phase];m.plan=plan;
+ m.viewSeconds=phase==='transit'?dockingTransitScreenSeconds(plan):secondsOnScreen[phase];
+ if(ferry&&phase!=='transit'){
+  const times={approach:5,undock:5,acquire:5,depart:5,docked:1.3,orbit:2.8,departOrbit:2.8};
+  m.viewSeconds=times[phase];
+  if(phase==='orbit'||phase==='departOrbit')m.duration=dockingOrbitDuration(e)*.42;
+  if(phase==='orbit'){
+   const q=r.flightSequences[m.craftId];
+   const index=q?.nodes.findIndex(n=>n.targetId===m.stationId);
+   const dest=index>=0?q.nodes[(index+1)%q.nodes.length]:null;
+   if(dest?.kind==='dock'&&dest.targetId!==m.stationId){
+    // Divide the local arc on either side of the hub visit. This avoids a
+    // redundant full revolution when the release is just past the tangent.
+    const visit=2*(dockingCloseDuration(e,radius)+dockingAcquireDuration(e,radius))+40;
+    const local=endpoint(r,m.stationId,m.side,visit),other=endpoint(r,dest.targetId,m.side,visit);
+    if(other)m.duration=Math.max(dockingOrbitDuration(e)*.06,.5*ferryTangentWait(local,sub(other.position,local.position)));
+   }
+  }
+ }else if(phase==='acquire'||phase==='depart')m.viewSeconds+=dockingAcquisitionScreenTime(e,radius);
+ m.plan=plan;
  return true;
 }
 function writePose(r,m,s){
@@ -97,7 +123,7 @@ function endMission(r,m){
  if(o?.flight){r.navigationModes[o.id]='manual';o.flight.thrust=0;o.flight.angularVelocity=0;o.flight.visualJet=0;o.flight.orbitHold=false;}
 }
 function planTo(r,start,id,side,departure){
- return createDockingTransit(start,dt=>endpoint(r,id,side,dt),{departureStation:departure});
+ return createDockingTransit(start,dt=>endpoint(r,id,side,dt),{departureStation:departure,ferry:r.dockingMission?.ferry});
 }
 function fail(r,msg){r.lastDockingError=msg;return false;}
 export function startDock(r,craftId,stationId,port,{fromSequence=false}={}){
@@ -122,7 +148,9 @@ export function startFerry(r,preset){
  const m={craftId:o.id,stationId:first.targetId,side,playlist:true,loop:false,route:[],index:0};
  // Begin already inserted in the first station's orbit. Subsequent visits,
  // including the return to Earth, perform the complete transfer from release.
- claim(r,o,m);stage(r,m,dockingOrbitDuration(endpoint(r,m.stationId,side))>0?'orbit':'approach');sample(r,m);
+ claim(r,o,m);stage(r,m,dockingOrbitDuration(endpoint(r,m.stationId,side))>0?'orbit':'approach');
+ if(m.phase==='orbit')m.viewSeconds=5; // First insertion starts on the circle, without an incoming tangent.
+ sample(r,m);
  r.startFlightSequence(o.id);r.fillObjects();
 }
 export function releaseDock(r,id){
@@ -172,6 +200,12 @@ function next(r,m){
   if(m.phase==='undock'&&(node.kind!=='dock'||node.targetId!==m.stationId)&&dockingOrbitDuration(endpoint(r,m.stationId,m.side))>0){
    stage(r,m,'depart');sample(r,m);return true;
   }
+  if(m.phase==='depart'&&node.kind==='dock'&&node.targetId!==m.stationId&&m.ferry){
+   stage(r,m,'departOrbit');
+   const local=endpoint(r,m.stationId,m.side),nextStation=endpoint(r,node.targetId,node.port==='south'?-1:1);
+   m.duration=Math.max(dockingOrbitDuration(local)*.07,ferryTangentWait(local,sub(nextStation.position,local.position)));
+   sample(r,m);return true;
+  }
   if(m.phase==='depart'&&node.kind!=='dock'&&!clearDeparture(r,m,node)){
    // The ordinary route brakes along the live velocity before rejoining its
    // plane. Wait on the real circular orbit for a clear tangent, up to one lap.
@@ -191,6 +225,13 @@ function next(r,m){
  }
  sample(r,m);return true;
 }
+// Brief easing at either end keeps the orbital pan nearly uniform while
+// matching a gentle start and finish at a tangential departure or capture.
+function orbitProgress(u){
+ const edge=.04;
+ const x=Math.min(u,1-u),v=x<edge?x*x/(2*edge):x-edge/2;
+ return u<.5?v/(1-edge):1-v/(1-edge);
+}
 export function advanceDock(r,viewSeconds){
  let remaining=viewSeconds;
  for(let join=0;remaining>1e-12&&join<16&&r.dockingMission;join++){
@@ -202,7 +243,7 @@ export function advanceDock(r,viewSeconds){
   const step=hold?remaining:Math.min(remaining,Math.max(0,m.viewSeconds-wall));
   if(step>0){
    m.wallElapsed=wall+step;const progress=Math.min(1,m.wallElapsed/m.viewSeconds);
-   const elapsed=hold?m.elapsed+step*m.duration/m.viewSeconds:m.phase==='transit'&&m.plan?.profile==='flip1g'?dockingTransitElapsed(m.plan,progress):m.paced?dockingStageElapsed(m.duration,m.viewSeconds,progress):progress*m.duration;
+   const elapsed=hold?m.elapsed+step*m.duration/m.viewSeconds:m.phase==='transit'&&m.plan?.profile==='flip1g'?dockingTransitElapsed(m.plan,progress):m.paced&&(m.phase==='acquire'||m.phase==='depart')?dockingAttitudeElapsed(m.duration,m.ferry?1.5:secondsOnScreen[m.phase],m.viewSeconds,progress):m.ferry&&(m.phase==='orbit'||m.phase==='departOrbit')?m.duration*orbitProgress(progress):m.paced?dockingStageElapsed(m.duration,m.viewSeconds,progress):progress*m.duration;
    const dt=Math.max(0,elapsed-m.elapsed);m.elapsed=elapsed;r.time=m.startSceneTime+m.elapsed/T;
    r.fillHoles();r.fillObjects();sample(r,m);r.fillObjects();const sources=r.clockSources();
    for(const actor of r.clockActors){
@@ -214,7 +255,7 @@ export function advanceDock(r,viewSeconds){
    remaining-=step;
   }
   if(m.phase==='departOrbit'&&m.wallElapsed<m.viewSeconds-1e-9&&Math.floor(m.wallElapsed*2)>Math.floor(wall*2)){
-   const n=q?.nodes?.[following(q,m)];if(n&&clearDeparture(r,m,n)){if(!next(r,m))break;continue;}
+   const n=q?.nodes?.[following(q,m)];if(n&&n.kind!=='dock'&&clearDeparture(r,m,n)){if(!next(r,m))break;continue;}
   }
   if(hold||m.wallElapsed<m.viewSeconds-1e-9)break;
   if(!next(r,m))break;

@@ -2,10 +2,27 @@ import assert from 'node:assert/strict';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {restoreRenderer} from '../dist/render-state.js';
 import {parseScene,serializeScene} from '../dist/scene-file.js';
+import {transferCurveDerivative,transferCurvePoint} from '../dist/travel-math.js';
+import {REFERENCE_RG_METERS} from '../dist/objects.js';
 import {fixture} from './render-fixture.mjs';
 
 const f=fixture();
 const r=new BlackHoleRenderer(f.canvas,{autoStart:false,bindControls:false,deferProgram:true});
+const dot=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0);
+const delta=(a,b)=>a.map((v,i)=>v-b[i]);
+const unit=v=>v.map(x=>x/Math.hypot(...v));
+function checkTangentFlight(t,b,departureFar){
+ const [first,last]=t.parts;
+ const heading=(part,u)=>unit(transferCurveDerivative(part.points,u));
+ assert(dot(heading(first,0),t.startPose.basis[2])>.999999,'departure velocity tangent to circle');
+ assert(dot(heading(last,1),t.endPose.basis[2])>.999999,'arrival velocity tangent to circle');
+ assert(dot(heading(first,1),heading(last,0))>.999999,'continuous heading across inversion boundary');
+ for(const [index,part] of t.parts.entries()){
+  const local=u=>{const p=transferCurvePoint(part.points,u);return (index===0?departureFar:!departureFar)?p.map(x=>x*b*b/(4*dot(p,p))):p;};
+  const begin=local(0),line=delta(local(1),begin),direction=unit(line);
+  for(let i=1;i<90;i++){const d=delta(local(i/90),begin),crossTrack=d.map((v,j)=>v-dot(d,direction)*direction[j]);assert(Math.hypot(...crossTrack)/Math.hypot(...line)<.00003,'burn stays on a straight line in the local exterior');}
+ }
+}
 try{
  r.loadScene('earth-proxima-gates');
  r.sceneLoad=null;
@@ -36,7 +53,8 @@ try{
  // Advance the shared production clock, so the test exercises route scheduling,
  // metric-side changes, the traveler and the camera in the same frames.
  const parked=[],crossedTo=[],flips=[],measuredOrbits=[];
- let far=false,partialOpen=false,turn=null,now=1000;
+ let previousTransfer=null,far=false,partialOpen=false,turn=null,now=1000;
+ const gateRamps=[];let previousPhase='Gate on standby',phaseStart=now,openedAt=0;
  r.state.paused=false;r.lastTime=now;r.now=()=>now;
  for(let i=0;i<6000;i++){
   now+=50;r.advanceSimulation(now);r.fillObjects();r.updateCameraFrame();
@@ -45,7 +63,7 @@ try{
   assert(r.cameraFrame.observer.every(Number.isFinite)&&r.cameraFrame.forward.every(Number.isFinite));
   if(wait&&parked.at(-1)!==wait.targetId){
    parked.push(wait.targetId);
-   assert(Math.abs(wait.sweepRadians-2*Math.PI)<1e-6,'Exactly one complete orbit at '+wait.targetId);
+   assert(Math.abs(wait.sweepRadians-wait.baseSweepRadians-2*Math.PI)<1e-6,'One full lap plus the arc to the external tangent at '+wait.targetId);
    assert.equal(stage.open,0,'Gate closes outside the crossing');
    if(parked.length===2){
     const copy=new BlackHoleRenderer(fixture().canvas,{autoStart:false,bindControls:false,deferProgram:true});
@@ -67,15 +85,22 @@ try{
     const cos=direction.reduce((sum,x,j)=>sum+x*lap.last[j],0);
     lap.angle+=Math.acos(Math.min(1,Math.max(-1,cos)));
     lap.last=direction;
-   }else measuredOrbits.push({id:wait.targetId,last:direction,angle:0});
+   }else measuredOrbits.push({id:wait.targetId,last:direction,angle:0,expected:wait.sweepRadians});
+  }
+  if(stage.phase!==previousPhase){
+   if(['Opening gate','Closing gate'].includes(previousPhase))gateRamps.push((now-phaseStart)/1000);
+   if(stage.phase==='Gate open')openedAt=now;
+   phaseStart=now;previousPhase=stage.phase;
   }
   if(stage.open>0&&stage.open<1)partialOpen=true;
   if(stage.far!==far){
    assert(partialOpen,'A partially open aperture precedes the crossing');
    assert.equal(stage.open,1,'Ship crosses a fully open throat');
+   assert(now-openedAt>1400,'A clear view through the open gate precedes transit');
    assert(ship.flight.speed>0,'Transit proceeds through the mouth without a stop');
    far=stage.far;crossedTo.push(far);partialOpen=false;
   }
+  if(r.transfer&&r.transfer!==previousTransfer){checkTangentFlight(r.transfer,r.configCache.bridgeRadius*REFERENCE_RG_METERS,far);previousTransfer=r.transfer;}
   if(r.transfer?.phaseName==='Flip and burn'){
    const flight=ship.flight;
    assert.equal(flight.thrust,0,'Coast through the half-turn');
@@ -88,7 +113,9 @@ try{
  }
  assert.deepEqual(parked,[itinerary[0].id,itinerary[2].id,itinerary[0].id]);
  assert.equal(measuredOrbits.length,2);
- assert(measuredOrbits.every(lap=>Math.abs(lap.angle-2*Math.PI)<.05),'Rendered ship completes each revolution');
+ assert.equal(gateRamps.length,4);
+ assert(gateRamps.every(seconds=>Math.abs(seconds-3.5)<.11),'Both opening and closing get 3.5 seconds in each direction');
+ assert(measuredOrbits.every(lap=>Math.abs(lap.angle-lap.expected)<.05),'Rendered ship completes each revolution');
  assert.deepEqual(crossedTo,[true,false],'Travel through both mouths on the return itinerary');
  assert.deepEqual(flips.map(p=>p.far),[false,true,true,false],
   'A local flip between each gate and its world in both directions');
@@ -99,7 +126,8 @@ try{
  for(const target of [itinerary[1],itinerary[2],itinerary[3]]){
   const trip=r.startTravel(target.id,{craftId:ship.id});
   assert(trip&&!trip.error,trip?.error);
-  r.advanceTravel(r.transfer.wallSeconds);
+  for(let i=0;i<1000&&!r.transfer;i++)r.advanceChartStages(.1);
+  assert(r.transfer);r.advanceTravel(r.transfer.wallSeconds);
   restoreRenderer(r,parseScene(serializeScene(r)));
   assert.equal(r.bridgeParking[ship.id].targetId,target.id);
   r.sceneLoad=null;r.state.paused=false;

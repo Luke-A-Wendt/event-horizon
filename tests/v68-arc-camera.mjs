@@ -7,7 +7,7 @@ const r=new BlackHoleRenderer(fixture({width:420,height:760}).canvas,{autoStart:
 r.loadScene('shuttle-earth-moon-loop');r.state.paused=false;r.sceneLoad=null;
 const craft=r.objects.find(o=>o.type==='shuttle'),up=r.configCache.primaryBasis[1];
 let straightSamples=0,arrivals=0,arcSamples=0,previous=null,wasFlying=false;
-for(let i=0;i<1840;i++){
+for(let i=0;i<24000&&arrivals<2;i++){
  const now=1000+1000*i/60;r.now=()=>now;r.advanceSimulation(now);r.fillHoles();r.fillObjects();r.updateCameraFrame();
  const view=r.cameraFrame,c=r.getFocusFrame(craft.id),eye=unit(sub(view.observer,c.position));
  assert(Math.abs(dot(view.right,up))<1e-5,'Screen horizontal is level to origin plane');assert(dot(eye,up)>.035,'Eye stays above the hull');

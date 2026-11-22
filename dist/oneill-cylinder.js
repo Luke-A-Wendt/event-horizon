@@ -19,19 +19,19 @@ function noise(x,y,z){
 }
 // Small bounded Canvas fallback. All surfaces and openings occupy the same
 // positions as the GPU geometry, including the two sides of the closed wall.
-export function cylinderPixel(ro,rd,phase){
+export function cylinderPixel(ro,rd,phase,cut=0){
  let t=Infinity,mat=0,p,side=0,glass=Infinity,k=0;
  const hit=(d,m,s=0)=>{if(d>1e-6&&d<t){t=d;mat=m;side=s;}};
- const straight=(r,half,inside,outside)=>{
+ const straight=(r,half,inside,outside,slice=0)=>{
   const a=rd[0]*rd[0]+rd[1]*rd[1],b=rd[0]*ro[0]+rd[1]*ro[1],disc=b*b-a*(ro[0]*ro[0]+ro[1]*ro[1]-r*r);
   if(a<1e-12||disc<0)return;
-  const q=Math.sqrt(disc);for(const [d,m]of [[(-b-q)/a,outside],[(-b+q)/a,inside]])if(Math.abs(ro[2]+rd[2]*d)<=half)hit(d,m);
+  const q=Math.sqrt(disc);for(const [d,m]of [[(-b-q)/a,outside],[(-b+q)/a,inside]])if(Math.abs(ro[2]+rd[2]*d)<=half&&(!slice||ro[0]+rd[0]*d>=0))hit(d,m);
  };
- straight(R,H,1,0); straight(R*1.035,H*1.01,2,2);straight(.012,H,3,3);
+ straight(R,H,1,2,cut); straight(R*1.035,H*1.01,2,2,cut);straight(.012,H,3,3);
  if(Math.abs(rd[2])>.000001){for(let j=0;j<=N;j++){
   const d=(-H+2*H*j/N-ro[2])/rd[2];if(d<=1e-6||d>=t)continue;
   const x=ro[0]+rd[0]*d,y=ro[1]+rd[1]*d,r=Math.hypot(x,y)/R,a=Math.atan2(y,x)-phase;
-  if(j===0||j===N){if(r<1.035)hit(d,5,j);continue;}
+  if(j===0||j===N){if(r<1.035&&(!cut||x>=0))hit(d,5,j);continue;}
   if(r>1)continue;const f=Math.abs(Math.sin((a-.13*j)*6))*r;
   if(r>.953||r<.094||Math.abs(r-.59)<.004||f<.027||Math.abs(Math.sin((a-.13*j)*12))*r<.008){hit(d,4,j);}
   else glass=Math.min(glass,d);

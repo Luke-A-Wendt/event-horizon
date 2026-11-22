@@ -231,8 +231,7 @@ export const HABITAT_FINISH = `
   albedo=r>R-.0007?vec3(.11,.16,.19):r>seat*1.34?vec3(.71,.76,.77):r>seat?vec3(.14,.19,.22):vec3(.72,.78,.79);
   if(r<seat*.72)albedo=vec3(.23,.30,.32);
   float fastener=(1.-smoothstep(.00018,.00033,abs(r-.0075)))*smoothstep(.92,.99,cos(rot*8.));
-  float key=step(.0021,r)*step(r,.0064)*smoothstep(.974,.997,cos(rot));
-  albedo=mix(albedo,vec3(.17,.34,.38),max(key,fastener));
+  albedo=mix(albedo,vec3(.17,.34,.38),fastener);
   spec*=1.6;
  }
  if(material>52.5&&material<53.5){

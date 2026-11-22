@@ -1,3 +1,4 @@
+import {rainbowDiscColor} from './disc-rainbow.js';
 import {bridgeWorldLayout,PROXIMA_GATE_MOON,PROXIMA_GATE_SCENE_ID} from './proxima-gate-layout.js';
 import {janusInterior} from './janus-mesh.js';
 import {TOROID_ID,toroidLayers} from './toroid-swarm.js';
@@ -474,7 +475,7 @@ export class CpuRenderer extends BlackHoleRenderer {
  }
  hole(k){for(const _ of this.holeStages(k)){} }
  *holeStages(k){
-  const source=this.displayState(),s=k?{...source,whiteHole:!!source.secondaryWhiteHole,disk:source.secondaryDisk??source.disk,diskStyle:source.secondaryDiskStyle??source.diskStyle,diskColor:source.secondaryDiskColor??source.diskColor,diskThickness:source.secondaryDiskThickness??source.diskThickness,diskDensity:source.secondaryDiskDensity??source.diskDensity,jets:source.secondaryJets??source.jets,jetColor:source.secondaryJetColor??source.jetColor,jetSpread:source.secondaryJetSpread??source.jetSpread,jetLength:source.secondaryJetLength??source.jetLength,jetIntensity:source.secondaryJetIntensity??source.jetIntensity}:source,ctx=this.context2d,m=this.holeData[k*4+3],center=Array.from(this.holeData.slice(k*4,k*4+3)),distance=Math.hypot(...center.map((v,i)=>v-this.cameraFrame.observer[i])),nearCapture=this.sceneId==='radiant-descent'&&k===0&&distance<16*m&&!s.interiorView,q=cpuProject(center,this.cameraFrame,this.canvas.width,this.canvas.height)||(nearCapture?{pixels:this.canvas.height/(.83*Math.max(1,1.35/(this.canvas.width/this.canvas.height))*Math.max(distance,1e-20)),x:this.canvas.width*.5,y:this.canvas.height*.5}:null);if(!q)return;
+  const source=this.displayState(),s=k?{...source,whiteHole:!!source.secondaryWhiteHole,disk:source.secondaryDisk??source.disk,diskStyle:source.secondaryDiskStyle??source.diskStyle,diskPalette:source.secondaryDiskPalette??source.diskPalette,diskColor:source.secondaryDiskColor??source.diskColor,diskThickness:source.secondaryDiskThickness??source.diskThickness,diskDensity:source.secondaryDiskDensity??source.diskDensity,jets:source.secondaryJets??source.jets,jetColor:source.secondaryJetColor??source.jetColor,jetSpread:source.secondaryJetSpread??source.jetSpread,jetLength:source.secondaryJetLength??source.jetLength,jetIntensity:source.secondaryJetIntensity??source.jetIntensity}:source,ctx=this.context2d,m=this.holeData[k*4+3],center=Array.from(this.holeData.slice(k*4,k*4+3)),distance=Math.hypot(...center.map((v,i)=>v-this.cameraFrame.observer[i])),nearCapture=this.sceneId==='radiant-descent'&&k===0&&distance<16*m&&!s.interiorView,q=cpuProject(center,this.cameraFrame,this.canvas.width,this.canvas.height)||(nearCapture?{pixels:this.canvas.height/(.83*Math.max(1,1.35/(this.canvas.width/this.canvas.height))*Math.max(distance,1e-20)),x:this.canvas.width*.5,y:this.canvas.height*.5}:null);if(!q)return;
   if(!(m>0))return;
   const horizon=this.configCache.horizon[k],imageRadius=cpuCompactImageRadius(horizon,m,s.lensing,s.interiorView&&s.spectrum==='geometry'),r=horizon*q.pixels,axis=k?this.configCache.secondaryAxis:this.configCache.primaryAxis,bx=unit(cross(axis,Math.abs(axis[2])>.9?[1,0,0]:[0,0,1])),bz=cross(bx,axis);
   if(s.spectrum==='geometry'){
@@ -495,11 +496,11 @@ export class CpuRenderer extends BlackHoleRenderer {
     if(s.diskStyle==='aurora'){
      const level=ring/Math.max(1,rings-1),points=[],curtainRadius=inner+(outer-inner)*.48;
      for(let j=0;j<=72;j+=this.cpuProfile.circleStep){const a=j/72*TAU-this.time*.025,fold=.85*Math.sin(a*3+.55*Math.sin(a*7))+.22*Math.sin(a*11),radial=curtainRadius+fold*m*2,altitude=level*m*s.diskThickness*.6*(.8+.2*Math.sin(a*5));points.push(plus(center,plus(scale(bx,Math.cos(a)*radial),plus(scale(bz,Math.sin(a)*radial),scale(axis,altitude)))));}
-     const tint=level<.3?'#49f784':level<.65?'#31deed':'#ad52f2';
+     const tint=s.diskPalette==='artistic'?s.diskColor:s.diskPalette==='rainbow'?rainbowDiscColor(curtainRadius,inner,outer):level<.3?'#49f784':level<.65?'#31deed':'#ad52f2';
      this.drawLine(points,cpuColor(tint,s.spectrum,'hot',(.5-level*.3)*s.diskDensity,1-level*.4),Math.min(7,Math.max(.8,m*s.diskThickness*q.pixels/rings*.55)));yield;continue;
     }
     const radius=inner+(outer-inner)*(ring+.5)/rings,points=[];for(let j=0;j<=72;j+=this.cpuProfile.circleStep){const c=circle[j];points.push([center[0]+(bx[0]*c[0]+bz[0]*c[1])*radius,center[1]+(bx[1]*c[0]+bz[1]*c[1])*radius,center[2]+(bx[2]*c[0]+bz[2]*c[1])*radius]);}
-    this.drawLine(points,cpuColor(s.diskPalette==='rainbow'?['#f34b57','#ff9b35','#e9e743','#4ed279','#3daeea','#8161ed','#d952dc'][ring%7]:s.diskColor,s.spectrum,'hot',Math.min(.9,(1-ring/(rings+4))*.65*s.diskDensity)*bandWeight,1-ring/rings),Math.min(12,Math.max(.8,(outer-inner)*q.pixels/(rings+1))));yield;
+    this.drawLine(points,cpuColor(s.diskPalette==='rainbow'?rainbowDiscColor(radius,inner,outer):s.diskColor,s.spectrum,'hot',Math.min(.9,(1-ring/(rings+4))*.65*s.diskDensity)*bandWeight,1-ring/rings),Math.min(12,Math.max(.8,(outer-inner)*q.pixels/(rings+1))));yield;
    }
   }
   if(s.jets)for(const sign of [-1,1]){
@@ -520,7 +521,8 @@ export class CpuRenderer extends BlackHoleRenderer {
  *annulusStages(body){
   const ctx=this.context2d,s=this.state,frame=this.cameraFrame,parent=this.objectFrames.find(x=>x.id===body.parentId),basis=cpuBodyBasis({...body,axialTilt:body.axialTilt??parent?.axialTilt??0},this.configCache.primaryBasis,this.time),inner=clamp(body.innerRadiusRatio??.55,.1,.97),bandCount=this.cpuProfile.ringBands,segments=this.cpuProfile.ringSegments,material=body.material==='icy'?'#d4dfeb':body.material==='metallic'?'#9b9ea8':'#ad9476',q=cpuProject(body.position,frame,this.canvas.width,this.canvas.height);if(!q)return;
   const r=body.radius*q.pixels;
-  ctx.strokeStyle=cpuColor(body.color||material,s.spectrum,body.type==='disk'?'hot':'surface',clamp(body.opacity??(body.type==='belt'?.16:.88),0,body.type==='belt'?.2:1));ctx.lineWidth=Math.min(body.type==='belt'?1.25:14,Math.max(.55,r*(1-inner)/bandCount*1.12));
+  ctx.strokeStyle=cpuColor(body.color||material,s.spectrum,body.type==='disk'?'hot':'surface',clamp(body.opacity??(body.type==='belt'?.16:.88),0,body.type==='belt'?.2:1));const edge=body.type==='ring'?r*(body.thicknessRatio??.015)*Math.sqrt(Math.max(0,1-dot(basis[1],frame.forward)**2)):0;
+  ctx.lineWidth=Math.min(body.type==='belt'?1.25:Math.max(14,edge),Math.max(.55,edge,r*(1-inner)/bandCount*1.12));
   for(let k=0;k<bandCount;k++){
    const radius=body.radius*(inner+(1-inner)*(k+.5)/bandCount);ctx.beginPath();let drawing=false;
    for(let j=0;j<=segments;j++){
@@ -590,7 +592,7 @@ export class CpuRenderer extends BlackHoleRenderer {
   const origin=frame.observer.map((v,i)=>(v-body.position[i])/body.radius),ctx=this.context2d;
   const cell=Math.max(3,Math.ceil(.46*Math.sqrt(width*height/this.cpuProfile.dysonCells)));
   const band=this.state.spectrum,geometry=band==='geometry',opacity=geometry?1:body.opacity??1;
-  const phase=body.bodyParams?.[2]??0,light=body.bodyParams?.[1]??1,cut=this.focusId===body.id&&this.focusMode==='onboard'?0:body.dysonCutaway??0;
+  const phase=body.bodyParams?.[2]??0,light=body.bodyParams?.[1]??1,cut=body.bodyParams?.[0]??0;
   const engine=body.catalogId==='shkadov-mirror',ring=body.catalogId==='ringworld',underGlass=!engine&&dysonObserverUnderGlass(origin,cut),palette=new Map();
   if(opacity<=0)return;ctx.save();ctx.globalAlpha=opacity;
   const style=(hex,alpha=1)=>{
@@ -602,12 +604,12 @@ export class CpuRenderer extends BlackHoleRenderer {
    const flush=x=>{if(runStyle){ctx.fillStyle=runStyle;ctx.fillRect(runStart,y,x-runStart,Math.min(cell,height-y));}};
    for(let x=0;x<width;x+=cell){
     const dx=((x+cell*.5)/width-.5)*aspect*fov,dy=(.5-(y+cell*.5)/height)*fov;
-    const ray=unit(frame.forward.map((v,i)=>v+frame.right[i]*dx+frame.up[i]*dy)),hit=engine?shkadovHit(origin,ray):dysonShellHit(origin,ray,cut,Infinity,ring);
+    const ray=unit(frame.forward.map((v,i)=>v+frame.right[i]*dx+frame.up[i]*dy)),hit=engine?shkadovHit(origin,ray):dysonShellHit(origin,ray,cut,Infinity,ring,phase);
     let paint=null;
-    if(hit&&hit.inside===insidePass)paint=style(geometry?(hit.inside?'#727c80':'#606c77'):engine?shkadovPreview(hit,ray,cell/height):dysonPreviewMaterial(hit.point,hit.inside,light,phase,ring));
+    if(hit&&hit.inside===insidePass)paint=style(geometry?(hit.inside?'#727c80':'#606c77'):engine?shkadovPreview(hit,ray,cell/height):cut&&!ring&&!hit.inside?'#809fad':dysonPreviewMaterial(hit.point,hit.inside,light,phase,ring));
     // From the garden, the roof must be in front of the star and other bodies.
     // In the cutaway overview it belongs to the interior (behind near objects).
-    if(!engine&&insidePass!==underGlass&&(!hit||hit.inside)){
+    if(!engine&&(!cut||ring)&&insidePass!==underGlass&&(!hit||hit.inside)){
      const roof=dysonCanopyHit(origin,ray,cut,hit?.t??Infinity);
      if(roof){
       const glass=dysonCanopyMaterial(roof,ray,phase,light);
@@ -628,7 +630,7 @@ export class CpuRenderer extends BlackHoleRenderer {
    for(let x=0;x<w;x+=cell){
     const dx=(x+.5*cell-.5*w)/h*fov,dy=(.5*h-y-.5*cell)/h*fov;
     const ray=unit(f.forward.map((v,i)=>v+f.right[i]*dx+f.up[i]*dy));
-    const paint=cylinderPixel(origin,ray,body.bodyParams[0]);if(paint){ctx.fillStyle=paint;ctx.fillRect(x,y,cell,cell);}
+    const paint=cylinderPixel(origin,ray,body.bodyParams[0],body.bodyParams[1]);if(paint){ctx.fillStyle=paint;ctx.fillRect(x,y,cell,cell);}
    }
    if(y%(cell*3)===0)yield;
   }
@@ -672,7 +674,7 @@ export class CpuRenderer extends BlackHoleRenderer {
   }
   if(body.bridgeWorld!==undefined){this.paintBridgeWorld(q.x,q.y,r,body.bridgeWorld);yield;return;}
   const opacity=clamp(body.opacity??1,0,1);
-  if(body.brainStar&&body.bodyParams?.[0]===12&&s.spectrum==='visible'){paintBrainStar(ctx,q.x,q.y,r,body,opacity);return;}
+  if((body.brainStar||body.catalogId==='toroid-sun')&&body.bodyParams?.[0]===12&&s.spectrum==='visible'){paintBrainStar(ctx,q.x,q.y,r,body,opacity);return;}
   if(body.starStyle==='tzo'&&opacity<.999){yield* this.tzoCutawayStages(body,q,r,opacity);return;}
   if(opacity<=0)return;
   if(['planet','moon','planetoid','asteroid'].includes(type))this.planetAtmosphere(body,q,r,opacity);
@@ -1023,7 +1025,7 @@ export class CpuRenderer extends BlackHoleRenderer {
   const bodyLimit=this.sceneId==='horizon-hierarchy'?Math.max(this.cpuProfile.bodies,Math.min(38,sceneBodies.length)):this.cpuProfile.bodies;
   const bodies=cpuVisibleBodies(sceneBodies,this.cameraFrame,this.canvas.width,this.canvas.height,this.focusId,bodyLimit,{lensing:this.state.lensing,interior:this.state.interiorView&&geometry});
   for(const body of bodies)if(body.type==='dyson'){yield* this.dysonStages(body,true);yield;}
-  const layers=[...bodies.flatMap(body=>body.catalogId===K2_GRID?solarNetworkLayers(body,this.cameraFrame.observer):body.catalogId==='earth-elevator-network'?earthNetworkLayers(body,this.cameraFrame.observer):body.catalogId===TOROID_ID?toroidLayers(body,this.cameraFrame.observer):body.catalogId==='dyson-collectors'?swarmLayers(body,this.cameraFrame.observer):body.catalogId==='swarm-aster'?[]:brainTier(body.catalogId)?brainLayers(body,this.cameraFrame.observer):[body]),...this.nebulaClouds()];
+  const layers=[...bodies.flatMap(body=>body.catalogId===K2_GRID?solarNetworkLayers(body,this.cameraFrame.observer):body.catalogId==='earth-elevator-network'?earthNetworkLayers(body,this.cameraFrame.observer):body.catalogId===TOROID_ID?toroidLayers(body,this.cameraFrame.observer,this.canvas.height):body.catalogId==='dyson-collectors'?swarmLayers(body,this.cameraFrame.observer):body.catalogId==='swarm-aster'?[]:brainTier(body.catalogId)?brainLayers(body,this.cameraFrame.observer):[body]),...this.nebulaClouds()];
   // Keep primary horizons/discs in the same depth ordering as nearby clouds.
   if(display.blackHole&&!geometry)for(let k=0;k<(this.state.binary&&this.holeData[7]>0?2:1);k++)layers.push({type:'hole',holeIndex:k,position:Array.from(this.holeData.slice(k*4,k*4+3))});
   if(gate)layers.push(...gate.layers,{type:'gate-aperture',gateDepth:gate.portalDepth});

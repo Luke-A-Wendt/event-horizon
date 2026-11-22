@@ -12,7 +12,7 @@ import {parkedOrbitGeometry,parkedCameraFraming,limbForward,AUTO_EYE_ELEVATION} 
 // Physical trip clocks advance through an analytic profile independently of the display clock used to resolve orbital contact.
 import {hullType,REFERENCE_RG_METERS,OBJECT_CLASS} from './objects.js';
 import {clockRate,compactExteriorRadius,PROTECTED_CLOCK_RATE,tickAtClockRate} from './object-clocks.js';
-import {circularRadiusPlan,sampleCircularRadius,estimateTransfer,minimumTransferDistance,sampleTransfer,sampleTransferAtDistance,transferPlayback,TRANSFER_WALL_SECONDS,transferEase,transferCurvePoint,transferCurveDerivative,transferCurveFraction} from './travel-math.js';
+import {circularRadiusPlan,radiusSlewPlan,sampleCircularRadius,estimateTransfer,minimumTransferDistance,sampleTransfer,sampleTransferAtDistance,transferPlayback,TRANSFER_WALL_SECONDS,transferEase,transferCurvePoint,transferCurveDerivative,transferCurveFraction} from './travel-math.js';
 import {orthonormalFrame,warpVelocity,warpForSpeed} from './flight-dynamics.js';
 const add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,s)=>a.map(v=>v*s),dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0),cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],unit=a=>mul(a,1/(Math.hypot(...a)||1));
 const smooth=x=>{const t=Math.max(0,Math.min(1,x));return t*t*(3-2*t);};
@@ -114,7 +114,11 @@ function circularRadiusObstacle(leg,o){
  return hit(sample(0),sample(1),0,1,0);
 }
 function circularRadiusLeg(center,ra,rb,mu,normal,radial,height,metric){
- const plan=metric?kerrRadiusPlan(ra,rb,metric):circularRadiusPlan(ra,rb,mu,height);if(plan.error)return plan;
+ let plan=metric?kerrRadiusPlan(ra,rb,metric):circularRadiusPlan(ra,rb,mu,height);if(plan.error)return plan;
+ if(!metric){
+  if(!plan.nominallyFeasible)return {error:'This parking plane requires more than 1g of continuous support. Choose a larger parking radius.'};
+  plan=radiusSlewPlan(plan);if(plan.error)return plan;
+ }
  const departureTangent=unit(cross(normal,radial)),leg={radiusTransfer:true,radiusChange:true,concentric:true,normal,radial,departureTangent,orbitCenter:center,radiusPlan:plan};
  const last=circularRadiusPose(leg,sampleCircularRadius(plan,1));
  return {...leg,start:add(center,mul(radial,ra)),end:last.p,arrivalRadial:last.radial,tangent:departureTangent,arrivalTangent:last.forward,length:plan.distanceMeters};
@@ -273,15 +277,22 @@ function guidedSample(t,progress,up,edgeShuttle){
   const {ra,rb,logRatio}=t.plan;
   const physicalProgress=transferEase;
   const radialFraction=u=>ra*Math.expm1(logRatio*transferEase(physicalProgress(u)))/(rb-ra);
+  // Allocate visible time to the engine-off turns even when four physical
+  // seconds are a negligible fraction of a long transfer.
+  const contact=.12,screen=progress,staged=t.plan.spiral;
+  if(staged)progress=Math.max(0,Math.min(1,(screen-contact)/(1-2*contact)));
   progress=physicalProgress(contactPlaybackProgress(t.endpointClock,progress,radialFraction));
+  if(staged){
+   const coast=t.plan.coastSeconds/t.plan.coordinateSeconds;
+   progress=screen<contact?coast*screen/contact:screen>1-contact?1-coast*(1-screen)/contact:coast+(1-2*coast)*progress;
+  }
   const sample=sampleCircularRadius(t.plan,progress),pose=circularRadiusPose(t.tangentLeg,radiusChartSample(t.plan,progress,sample));
   t.orbitRadial=pose.radial;t.orbitRadius=sample.radius;
   const drive=add(add(mul(pose.radial,sample.radialThrust),mul(pose.tangent,sample.tangentialThrust)),mul(up,sample.normalThrust));
-  // Blend the parking attitude into the finite-vector burn for viewing. Drive
-  // handoff always inherits the path velocity, independent of nose direction.
-  const acquire=transferEase(Math.min(progress,1-progress)/.07);
-  const facing=Math.hypot(...drive)>1e-12?directionMix(pose.tangent,unit(drive),acquire):pose.tangent;
-  if(edgeShuttle){
+  const endpointSign=(sample.burnFraction===1?-1:1)*Math.sign(rb-ra);
+  const nozzle=Math.hypot(...drive)>1e-14?unit(drive):mul(pose.radial,endpointSign);
+  const facing=sample.slew===undefined?nozzle:directionMix(pose.tangent,nozzle,transferEase(sample.slew));
+  if(edgeShuttle&&!staged){
    const yaw=edgeBurnYaw(t.plan,progress,sample);
    return {sample,playback:sample,...pose,facing:add(mul(pose.tangent,Math.cos(yaw)),mul(pose.radial,Math.sin(yaw))),fraction:progress};
   }
@@ -368,7 +379,7 @@ function planRoute(r,id,options={}){
   }
   return {error:'The straight tangent would intersect '+obstacle.name+'. Choose another stop or parking radius.'};
  }
- const plan=leg.radiusPlan?{...leg.radiusPlan}:estimateTransfer(length,craft.type,options.warpFactor??sceneCruiseWarp(r.sceneId)??1,{cruiseWarpLimit:sceneCruiseWarp(r.sceneId),initialSpeed,finalSpeed,flipCoast:craft.type==='shuttle',rejoin:!!options.rejoin,transferProperSeconds:options.transferProperSeconds});if(plan.error)return plan;
+ const plan=leg.radiusPlan?{...leg.radiusPlan}:estimateTransfer(length,craft.type,options.warpFactor??sceneCruiseWarp(r.sceneId)??1,{cruiseWarpLimit:sceneCruiseWarp(r.sceneId),initialSpeed,finalSpeed,flipCoast:craft.type==='shuttle',parkingArrival:craft.type==='shuttle'&&!leg.waypoint,rejoin:!!options.rejoin,transferProperSeconds:options.transferProperSeconds});if(plan.error)return plan;
  let gravityLag=0;
  if(craft.type==='shuttle'&&!plan.kerr){
   const sources=r.clockSources(),gravity=positionMeters=>Math.max(0,clockRate({id:craft.id,positionMeters,bodyRadiusMeters:shipRadius,sources}).gravityExcess||0);
@@ -409,7 +420,7 @@ function planRoute(r,id,options={}){
  const prepSeconds=!leg.radiusTransfer&&!capture?turnDuration(attitudeAngle(initialBasis,departureBasis)):0;
  // Spend screen time on the last few planetary radii, wherever this leg is
  // flown. Use radial travel for a spiral rather than counting its many laps.
- const endpointClock=contactPlaybackClock(leg.radiusTransfer?Math.abs(plan.rb-plan.ra):length,leg.departureRadius,leg.arrivalRadius,TRANSFER_WALL_SECONDS);
+ const endpointClock=contactPlaybackClock(leg.radiusTransfer?Math.abs(plan.rb-plan.ra):length,leg.departureRadius,leg.arrivalRadius,TRANSFER_WALL_SECONDS+(plan.parkingCoast?.viewSeconds||0));
  const headingClock=leg.radiusTransfer?radiusHeadingClock(plan,endpointClock,leg,r.configCache.primaryBasis[1],r.sceneId==='nasa-shuttle'&&craft.type==='shuttle'):null;
  return {headingClock,endpointClock,radiusTransfer:!!leg.radiusTransfer,radiusChange:!!leg.radiusTransfer,straight:!leg.radiusTransfer,straightLeg:!leg.radiusTransfer,rejoinOptions:leg.rejoinStage?{usedClearanceStage:!!leg.clearanceStage||!!options.usedClearanceStage,craftId:craft.id,rejoin:true,fromSequence:true,sequenceManaged:true,orbitRadii:options.orbitRadii,warpFactor:options.warpFactor}:null,departureBasis,prepSeconds,capture,waypoint:leg.waypoint,tangentLeg:leg,departureOrbitRadius:leg.departureRadius,initialBasis,initialVelocity,initialSpeed:capture?.speed??initialSpeed,finalSpeed,craftId:craft.id,craftType:craft.type,type:craft.type,warpFactor:plan.warpFactor,wallSeconds:(headingClock?.seconds??endpointClock.wallSeconds)+prepSeconds+(capture?.viewSeconds||0),targetId:id,targetName:item.name,targetMassSolar:r.getFocusFrame(id).massSolar||0,mode:craft.type==='shuttle'?'1g':'Warp '+Number(plan.warpFactor.toFixed(2)),coordinateSeconds:plan.coordinateSeconds+gravityLag+(capture?.coordinateSeconds||0),properSeconds:plan.properSeconds+(capture?.properSeconds||0),distanceMeters:length+(capture?.length||0),orbitRadiusMeters:leg.arrivalRadius,dilationSeconds:plan.dilationSeconds+gravityLag+(capture?.dilationSeconds||0),estimatedDilationSeconds:plan.dilationSeconds+gravityLag+(capture?.dilationSeconds||0),pathPoints:capture?[capture.start,...pathBasePoints]:pathBasePoints,pathParameters,pathBasePoints,pathFractions,plan,points,arc,center,offset:sub(end,center),phase:leg.arrivalPhase,tangent};
 }
@@ -560,7 +571,8 @@ export function guideRouteCamera(r,t,craft,position,pathBasis){
   // Stay slightly above the hull while the optical axis aims along the
  // forward path. The ship sits just below center, away from the vanishing point.
   const duration=t.wallSeconds||10,blend=transferEase(Math.min(1,t.elapsed/(duration*.14))),endBlend=transferEase(Math.max(0,(t.elapsed/duration-.86)/.14));
-  const raised=toWorld(path,[0,-Math.sin(AUTO_EYE_ELEVATION),Math.cos(AUTO_EYE_ELEVATION)]);
+  const elevation=craft.type==='shuttle'?.23:AUTO_EYE_ELEVATION;
+  const raised=toWorld(path,[0,-Math.sin(elevation),Math.cos(elevation)]);
   let aim=directionMix(toWorld(path,t.cameraDepartureDirection),raised,blend),weight=blend;
   // Keep the departure and approach looking along the trajectory. Across
   // interstellar space the side view reveals the field and the passing stars.
@@ -587,7 +599,12 @@ export function guideRouteCamera(r,t,craft,position,pathBasis){
    if(t.cameraArrivalDirection){aim=directionMix(aim,t.cameraArrivalDirection,endBlend);weight*=1-endBlend;}
   }
   const body=r.getFocusFrame?.(craft.id);
-  if(body)t.cameraAimOffset=mul(path[1],Math.sin(AUTO_EYE_ELEVATION-.045)*weight*(r.camera?.focusDistance||0)*body.radius);
+  if(craft.type==='shuttle'&&t.cameraAngles){
+   // Pull back enough to clear both the destination sightline and the full
+   // hull on a landscape viewport. Manual zoom continues to scale the shot.
+   t.cruiseZoom=1+weight*Math.max(0,6.5/t.cameraAngles[4]-1);
+  }
+  if(body)t.cameraAimOffset=mul(path[1],Math.sin(elevation-.035)*weight*(r.camera?.focusDistance||0)*(craft.type==='shuttle'?t.cruiseZoom||1:1)*body.radius);
   if(t.cameraAngles&&r.target&&[r.target.yaw,r.target.pitch,r.target.lookYaw,r.target.lookPitch,r.target.focusDistance].some((v,i)=>Math.abs(v-t.cameraAngles[i])>1e-6))t.cameraAdjusted=true;
   const relative=level(aim,path[0]);
   r.focusReferenceFrame.basis=t.cameraPathReference.map(v=>toWorld(relative,v));
@@ -660,7 +677,14 @@ export function advanceRoute(r,dt){
   const required=r.advanceCrewExposure?.(craft,proper,sample);
   // Use the same locally corrected force demand for the engine and the HUD.
   // On an infeasible diagnostic track the installed engine still saturates.
-  if(t.radiusTransfer&&Number.isFinite(required))t.commandedThrustG=f.thrust=sample.commandedThrustG=Math.min(1,required);
+  if(t.radiusTransfer&&Number.isFinite(required)){
+   const slew=sample.slew!==undefined;
+   t.commandedThrustG=f.thrust=sample.commandedThrustG=slew?0:Math.min(1,required);
+   if(slew){
+    const support=add(mul(t.orbitRadial,sample.steadySupportRadial),mul(normal,sample.steadySupportNormal));
+    sample.trimJets=attitude.map(axis=>dot(axis,support)/.012);
+   }
+  }
  }
  t.sample=sample;t.coordinateElapsedSeconds=sample.coordinateSeconds+t.gravityLag;t.properElapsedSeconds=sample.properSeconds;
  if(progress>=1){

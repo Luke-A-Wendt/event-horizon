@@ -5,11 +5,11 @@ const float cylR=720.0/2300.0,cylH=2160.0/2300.0;
 void cylKeep(inout vec3 h,float t,float kind,float face){
  if(t>1.e-6&&t<h.x)h=vec3(t,kind,face);
 }
-void cylSide(inout vec3 h,vec3 ro,vec3 rd,float r,float halfZ,float inK,float outK){
+void cylSide(inout vec3 h,vec3 ro,vec3 rd,float r,float halfZ,float inK,float outK,float cut){
  float a=dot(rd.xy,rd.xy),b=dot(rd.xy,ro.xy),v=b*b-a*(dot(ro.xy,ro.xy)-r*r);
  if(v<0.||a<1.e-12)return;
- float d=sqrt(v),t=(-b-d)/a;if(abs(ro.z+t*rd.z)<=halfZ)cylKeep(h,t,outK,0.);
- t=(-b+d)/a;if(abs(ro.z+t*rd.z)<=halfZ)cylKeep(h,t,inK,0.);
+ float d=sqrt(v),t=(-b-d)/a;if(abs(ro.z+t*rd.z)<=halfZ&&(cut<=0.||ro.x+t*rd.x>=0.))cylKeep(h,t,outK,0.);
+ t=(-b+d)/a;if(abs(ro.z+t*rd.z)<=halfZ&&(cut<=0.||ro.x+t*rd.x>=0.))cylKeep(h,t,inK,0.);
 }
 float cylLine(float x,float w,float f){return 1.-smoothstep(w,w+f,abs(fract(x+.5)-.5));}
 vec3 cylGround(float a,float z,float t,vec3 rd){
@@ -57,22 +57,22 @@ vec3 cylGround(float a,float z,float t,vec3 rd){
  }
  return c;
 }
-vec4 cylinderHit(vec3 ro,vec3 rd,float limit,float phase){
+vec4 cylinderHit(vec3 ro,vec3 rd,float limit,float phase,float cut){
  vec3 h=vec3(min(limit,1.e15),0.,0.);
- cylSide(h,ro,rd,cylR,cylH,1.,2.);
- cylSide(h,ro,rd,cylR*1.035,cylH*1.01,2.,2.);
+ cylSide(h,ro,rd,cylR,cylH,1.,2.,cut);
+ cylSide(h,ro,rd,cylR*1.035,cylH*1.01,2.,2.,cut);
  // Segmented reactor jackets enclose the axial corridor, with a separate
  // thin walkable service gallery running along the side of its diffusers.
- cylSide(h,ro,rd,.0105,cylH,3.,3.);
+ cylSide(h,ro,rd,.0105,cylH,3.,3.,0.);
  vec2 rail=.014*vec2(cos(phase+.82),sin(phase+.82));
- cylSide(h,ro-vec3(rail,0.),rd,.0028,cylH,6.,6.);
+ cylSide(h,ro-vec3(rail,0.),rd,.0028,cylH,6.,6.,0.);
  float glass=1.e18,net=0.,rays=0.;
  if(abs(rd.z)>.0000001){
   for(int k=0;k<7;k++){
    float fk=float(k),z=-cylH+2.*cylH*fk/6.,d=(z-ro.z)/rd.z;
    if(d<=1.e-6||d>=h.x)continue;
    vec2 p=ro.xy+rd.xy*d;float r=length(p)/cylR,a=atan(p.y,p.x)-phase;
-   if(k==0||k==6){if(r<=1.035)cylKeep(h,d,5.,fk);continue;}
+   if(k==0||k==6){if(r<=1.035&&(cut<=0.||p.x>=0.))cylKeep(h,d,5.,fk);continue;}
    if(r>1.)continue;
    float localA=a-.13*fk;
    float primary=abs(sin(localA*6.))*r;

@@ -10,7 +10,8 @@ export function installAttachmentControls(api){
  function patch(values){if(!selected)return;const renderer=api.renderer();pending={...(pending?.id===selected&&pending.renderer===renderer&&pending.sceneId===renderer?.sceneId?pending:{}),id:selected,renderer,sceneId:renderer?.sceneId,...values};if(raf)return;raf=requestAnimationFrame(()=>{raf=0;const edit=pending;pending=null;if(!edit||edit.id!==selected||edit.renderer!==api.renderer()||edit.sceneId!==api.renderer()?.sceneId)return;const {id,renderer,sceneId,...properties}=edit;renderer.updateObject?.(id,properties);api.changed();update(id);});}
  for(const key of Object.keys(choices))$(key).addEventListener('change',()=>patch({[key]:$(key).value}));
  for(const key of ['diskThickness','diskDensity','jetSpread','jetIntensity'])$(key).addEventListener('input',()=>patch({[key]:Number($(key).value)}));
- $('color').addEventListener('input',()=>patch({color:$('color').value}));$('color').addEventListener('change',()=>patch({color:$('color').value}));
+ const chooseColor=()=>patch({color:$('color').value,...(api.renderer()?.objects.find(o=>o.id===selected)?.type==='disk'?{diskPalette:'artistic'}:{})});
+ $('color').addEventListener('input',chooseColor);$('color').addEventListener('change',chooseColor);
  $('size').addEventListener('input',()=>patch({radiusMeters:10**Number($('size').value),scale:1}));$('radiusMeters').addEventListener('change',()=>{const value=Number($('radiusMeters').value);if(Number.isFinite(value)&&value>0)patch({radiusMeters:Math.max(.01,Math.min(1e15,value)),scale:1});else{const object=api.renderer()?.objects?.find(o=>o.id===selected);$('radiusMeters').value=object?.radiusMeters||1;}});
  function update(id){
   const r=api.renderer(),object=r?.objects?.find(o=>o.id===id),attached=['disk','jets'].includes(object?.type);selected=attached?id:null;mount.hidden=!attached;

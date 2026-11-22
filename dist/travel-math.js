@@ -58,6 +58,21 @@ export function estimateTransfer(distanceMeters,type='shuttle',requestedWarp=1,o
  // For a straight leg the body rotates with the engine off. A short
  // coasting distance is included in the clocks, symmetrically about the
  // speed-matching flip point. Near the stopping limit that distance shrinks.
+ // Reach the circular speed before contact, with enough proper time for the
+ // attitude jets to turn the braking hull prograde on the incoming tangent.
+ // If a very short hop needs all its distance to brake, turn after capture.
+ if(options.parkingArrival&&finalSpeed>0&&finalSpeed<c){
+  const gamma=Math.cosh(rapidityFor(finalSpeed)),turnSeconds=8;
+  const duration=turnSeconds*gamma,coastMeters=duration*finalSpeed;
+  if(requested-coastMeters>minimumTransferDistance(initialSpeed,finalSpeed)){
+   const approach=estimateTransfer(requested-coastMeters,type,requestedWarp,{...options,parkingArrival:false});
+   if(approach.downRapidity>1e-12&&approach.coast){
+    const lag=turnSeconds*gammaExcess(approach.finalRapidity);
+    return {...approach,parkingApproach:approach,parkingCoast:{meters:coastMeters,seconds:duration,properSeconds:turnSeconds,viewSeconds:4.5,lag},
+     distanceMeters:requested,properSeconds:approach.properSeconds+turnSeconds,coordinateSeconds:approach.coordinateSeconds+duration,dilationSeconds:approach.dilationSeconds+lag};
+   }
+  }
+ }
  if(options.flipCoast&&requested>0){
   const minimum=minimumTransferDistance(initialSpeed,finalSpeed);
   if(requested<minimum-Math.max(1e-8,16*Number.EPSILON*minimum))return {error:'Insufficient distance to match parking speed at 1g.',minimumDistanceMeters:minimum};
@@ -135,7 +150,39 @@ export function circularRadiusPlan(ra,rb,mu,height=0){
  for(let i=0;i<SPIRAL_BINS;i++){const d=spiralIntegral(p,i/SPIRAL_BINS,(i+1)/SPIRAL_BINS),last=rows[i];rows.push(d.map((v,j)=>last[j]+v));}
  const end=rows.at(-1);p.distanceMeters=end[1];p.dilationSeconds=end[2];p.properSeconds=p.coordinateSeconds-end[2];return p;
 }
+// Reserve a short real circular coast on each side of a conventional radius
+// change. The attitude jets can turn the hull as the ship continues orbiting.
+export function radiusSlewPlan(spiral){
+ const seconds=4,entry=sampleCircularRadius(spiral,0),exit=sampleCircularRadius(spiral,1);
+ // Holding a displaced plane during engine-off alignment requires side jets.
+ // The close-approach controller rates those jets at 0.012 m/s² per axis.
+ if(Math.max(entry.requiredSupportG,exit.requiredSupportG)*a>.012)return {error:'This elevated circle requires more station-keeping thrust than the attitude jets can supply during alignment. Choose a larger radius or a lower flight plane.'};
+ const coast=(s)=>({angle:seconds*s.tangentialVelocity/s.radius,distance:seconds*s.tangentialVelocity,lag:seconds*lagRate(s.tangentialVelocity)});
+ const first=coast(entry),last=coast(exit);
+ return {...spiral,spiral,coastSeconds:seconds,first,last,coordinateSeconds:spiral.coordinateSeconds+2*seconds,
+  properSeconds:spiral.properSeconds+2*seconds-first.lag-last.lag,dilationSeconds:spiral.dilationSeconds+first.lag+last.lag,
+  distanceMeters:spiral.distanceMeters+first.distance+last.distance};
+}
+function sampleRadiusSlew(p,u){
+ const seconds=u*p.coordinateSeconds,T=p.spiral.coordinateSeconds,dt=p.coastSeconds;
+ const inner=clamp01((seconds-dt)/T),entry=clamp01(seconds/dt),exit=clamp01((seconds-dt-T)/dt);
+ const s=sampleCircularRadius(p.spiral,inner);
+ s.angle+=entry*p.first.angle+exit*p.last.angle;
+ s.distanceMeters+=entry*p.first.distance+exit*p.last.distance;
+ s.dilationSeconds+=entry*p.first.lag+exit*p.last.lag;
+ s.coordinateSeconds=seconds;s.properSeconds=seconds-s.dilationSeconds;
+ s.distanceFraction=clamp01(s.distanceMeters/p.distanceMeters);s.fraction=clamp01(s.properSeconds/p.properSeconds);
+ // During each coast only the steady support of an elevated parking plane
+ // is needed. On an ordinary central orbit the main engine is off.
+ s.burnFraction=inner;
+ if(seconds<=dt||seconds>=T+dt){
+  s.slew=seconds<=dt?entry:1-exit;
+  s.phase=seconds<=dt?'Orienting for radius change':'Aligning with parking orbit';
+ }
+ return s;
+}
 export function sampleCircularRadius(p,fraction){
+ if(p.spiral)return sampleRadiusSlew(p,clamp01(fraction));
  if(p.kerr)return sampleKerrRadius(p,fraction);
  const u=clamp01(fraction),m=spiralKinematics(p,u),i=Math.min(SPIRAL_BINS,Math.floor(u*SPIRAL_BINS)),u0=i/SPIRAL_BINS,base=p.spiralTable[i];
  const d=u===u0?base:spiralIntegral(p,u0,u).map((v,j)=>v+base[j]);
@@ -153,10 +200,24 @@ function circularSampleAt(p,fraction,key,total){
  let lo=0,hi=1;for(let i=0;i<45;i++){const u=(lo+hi)/2;if(sampleCircularRadius(p,u)[key]<fraction*total)lo=u;else hi=u;}
  return sampleCircularRadius(p,(lo+hi)/2);
 }
+function parkingCoastSample(plan,progress){
+ const u=clamp01(progress),burn=plan.parkingApproach,coast=plan.parkingCoast;
+ const properSeconds=burn.properSeconds+coast.properSeconds*u,remainingFraction=(1-u)*coast.meters/plan.distanceMeters;
+ return {fraction:properSeconds/plan.properSeconds,distanceFraction:1-remainingFraction,remainingFraction,
+  distanceMeters:plan.distanceMeters-(1-u)*coast.meters,speedMetersPerSecond:plan.finalSpeed,
+  properSeconds,coordinateSeconds:burn.coordinateSeconds+coast.seconds*u,dilationSeconds:burn.dilationSeconds+coast.lag*u,
+  rapidity:plan.finalRapidity,lorentzFactor:Math.cosh(plan.finalRapidity),accelerationSign:0};
+}
 export function sampleTransfer(plan,fraction){
  const u=clamp01(fraction),distance=plan?.distanceMeters||0;
  if(plan?.radiusTransfer)return circularSampleAt(plan,u,'properSeconds',plan.properSeconds);
  if(!(distance>0))return {fraction:u,distanceFraction:u,distanceMeters:0,speedMetersPerSecond:u===0?plan?.initialSpeed||0:plan?.finalSpeed||0,properSeconds:0,coordinateSeconds:0,dilationSeconds:0,rapidity:0,lorentzFactor:1,accelerationSign:0};
+ if(plan.parkingApproach){
+  const burn=plan.parkingApproach,elapsed=u*plan.properSeconds;
+  if(elapsed>=burn.properSeconds)return parkingCoastSample(plan,u===1?1:(elapsed-burn.properSeconds)/plan.parkingCoast.properSeconds);
+  const sample=sampleTransfer(burn,elapsed/burn.properSeconds);
+  return {...sample,fraction:u,distanceFraction:sample.distanceMeters/distance};
+ }
  if(plan.burnPlan){
   const proper=u*plan.properSeconds,peak=plan.peak,coastElapsed=proper-peak.properSeconds,after=coastElapsed>=plan.coastTau;
   if(coastElapsed>0&&!after){const f=coastElapsed/plan.coastTau,x=peak.distanceMeters+plan.coast*f;return {...peak,fraction:u,distanceFraction:x/distance,distanceMeters:x,properSeconds:proper,coordinateSeconds:peak.coordinateSeconds+plan.coastT*f,dilationSeconds:peak.dilationSeconds+plan.coastLag*f,accelerationSign:0};}
@@ -236,6 +297,16 @@ function straightPlayback(route,progress){
   return {sample,phaseIndex:sign>0?1:sign<0?3:2,phaseProgress:u,phase:sign>0?'Warp acceleration':sign<0?'Slowing down':'Warp cruise',distanceFraction:sample.distanceFraction,remainingFraction:sample.remainingFraction,commandedThrustG:0,turnAngle:0};
  }
  if(warp)return {phaseIndex:u<.5?1:3,phaseProgress:u,phase:u<.5?'Warp acceleration':'Slowing down',distanceFraction:transferEase(u),remainingFraction:transferEase(1-u),commandedThrustG:0,turnAngle:0};
+ if(p.parkingApproach){
+  const burn=p.parkingApproach,coast=p.parkingCoast,join=TRANSFER_WALL_SECONDS/(TRANSFER_WALL_SECONDS+coast.viewSeconds);
+  if(u>=join){
+   const phaseProgress=(u-join)/(1-join),elapsed=phaseProgress*phaseProgress*(3-2*phaseProgress),sample=parkingCoastSample(p,elapsed);
+   return {sample,phase:'Aligning for orbit',phaseIndex:4,phaseProgress,distanceFraction:sample.distanceFraction,
+    remainingFraction:sample.remainingFraction,commandedThrustG:0,turnAngle:Math.PI*(1-transferEase(elapsed))};
+  }
+  const shot=straightPlayback({plan:burn},u/join),remaining=(coast.meters+shot.remainingFraction*burn.distanceMeters)/p.distanceMeters;
+  return {...shot,distanceFraction:shot.distanceFraction*burn.distanceMeters/p.distanceMeters,remainingFraction:remaining};
+ }
  if(!p.coast&&(p.upRapidity<1e-13||p.downRapidity<1e-13)){
   const braking=p.upRapidity<p.downRapidity;
   return {phaseIndex:braking?3:1,phaseProgress:u,phase:braking?'Decelerating':'Accelerating',distanceFraction:transferEase(u),remainingFraction:transferEase(1-u),commandedThrustG:u>=1?0:1,turnAngle:braking?Math.PI:0};
@@ -273,6 +344,12 @@ function baseTransferPlayback(route,progress){
 // not change the total estimated onboard/reference duration or SR difference.
 export function sampleTransferAtDistance(plan,fraction,remainingFraction=1-fraction){
  const d=clamp01(fraction);if(plan?.radiusTransfer)return circularSampleAt(plan,d,'distanceMeters',plan.distanceMeters);if(d===0||remainingFraction<=0||!plan?.distanceMeters)return sampleTransfer(plan,d);
+ if(plan.parkingApproach){
+  const remaining=remainingFraction*plan.distanceMeters,coast=plan.parkingCoast,burn=plan.parkingApproach;
+  if(remaining<=coast.meters)return parkingCoastSample(plan,1-remaining/coast.meters);
+  const sample=sampleTransferAtDistance(burn,d*plan.distanceMeters/burn.distanceMeters,(remaining-coast.meters)/burn.distanceMeters);
+  return {...sample,fraction:sample.properSeconds/plan.properSeconds,distanceFraction:d,remainingFraction};
+ }
  if(plan.burnPlan){
   const x=d*plan.distanceMeters,start=plan.peak.distanceMeters,after=x>=start+plan.coast;
   if(after){

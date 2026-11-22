@@ -19,7 +19,17 @@ export function orbitClearance(r,craft,parentId){
  // The tilted luminous disc is an emitter, not a supporting surface.
  if(edgeKerrMetric(r,craft,parentId))return 0;
  let height=0;const hull=r.objectRadius(craft);
- if(r.state.blackHole&&r.state.disk&&['primary','secondary'].includes(parentId)){height=diskParkingHeight(r.state.diskThickness,r.massScale,hull);}
+ if(r.state.blackHole&&r.state.disk&&['primary','secondary'].includes(parentId)){
+  // Both Sagittarius A* parking circles are far outside the emitting disc.
+  // Use a central free orbit there rather than hovering above the disc plane.
+  // A user-added stop inside the disc still needs the elevated route.
+  const galactic=r.sceneId==='shuttle-sgra-direct'&&parentId==='primary';
+  const extent=(r.configCache?.diskOuter?.[0]||0)+hull;
+  const visits=galactic?r.flightSequences?.[craft.id]?.nodes:[];
+  const clearsRim=galactic&&!(craft.parentId===parentId&&craft.orbitMeters/RG<=extent)&&
+   !visits?.some(n=>n.targetId===parentId&&n.radiusMeters/RG<=extent);
+  if(!clearsRim)height=diskParkingHeight(r.state.diskThickness,r.massScale,hull);
+ }
  for(const ring of r.objects||[]){if(ring.parentId!==parentId||!['ring','disk'].includes(ring.type))continue;
  if(craft.hullModel==='janusPod'&&craft.orbitMeters>1.05*r.objectRadius(ring)*RG)continue; // circular orbit entirely beyond this ring
  const parent=r.objects.find(o=>o.id===parentId),tilt=(ring.axialTilt??parent?.axialTilt??0)*Math.PI/180;

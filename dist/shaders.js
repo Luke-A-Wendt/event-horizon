@@ -1,3 +1,4 @@
+import {DISC_RAINBOW_GLSL} from './disc-rainbow.js';
 import {TOROID_GLSL} from './toroid-swarm.js';
 import {installJanusAperture} from './janus-aperture-glsl.js';
 import {BRAIN_GLSL} from './matrioshka.js';
@@ -165,6 +166,7 @@ vec3 localPoint(vec3 p,vec3 axis){
 }
 
 // Bands are source-class false-color responses, not a global RGB filter.
+${DISC_RAINBOW_GLSL}
 vec3 thermalPalette(float temperature){
  float t=clamp(temperature,0.0,1.0);
  vec3 cold=mix(vec3(.06,.015,.19),vec3(.65,.06,.23),smoothstep(.05,.45,t));
@@ -571,14 +573,14 @@ vec4 discAt(vec3 p,vec3 previous,vec3 tangent,float dt){
   else if(diskParams.x>3.5&&diskParams.x<4.5)hue=mix(diskColor*.45,mix(diskColor,vec3(1),.65),hot);
   else if(diskParams.x>5.5)hue=mix(diskColor*vec3(.12,.30,1.15),mix(diskColor,vec3(.25,.70,1),.4),clamp(ribbon*.65+ribbonFine+hot*.2,0.0,1.0));
   else if(diskParams.x>4.5)hue=mix(diskColor*vec3(.45,.9,1.25),vec3(.92,.98,1),smoothstep(.08,.75,hot)*.75+.2);
-  if((k==0?uSceneOptions.z:uSceneOptions.w)>.5)hue=diskColor*(.35+1.1*hot)+vec3(.07)*pow(hot,8.0);
-  if((k==0?uSceneOptions.z:uSceneOptions.w)>1.5)hue=(.52+.48*cos(6.28318530718*(vec3(0,.333,.667)+r*.11-sin(angle)*.12-orbit*.025)))*(.55+hot);
   if(diskParams.x>6.5){
    float altitude=clamp(abs(q.y)/max(thick*2.0,.001),0.0,1.0);
    hue=mix(vec3(.20,1.15,.36),vec3(.12,.88,1.10),smoothstep(.12,.55,altitude));
    hue=mix(hue,vec3(.77,.20,1.04),smoothstep(.48,.95,altitude));
    hue*=mix(vec3(1),diskColor/vec3(.275,.898,.792),.22);
   }
+  if((k==0?uSceneOptions.z:uSceneOptions.w)>.5)hue=diskColor*(.35+1.1*hot)+vec3(.07)*pow(hot,8.0);
+  if((k==0?uSceneOptions.z:uSceneOptions.w)>1.5)hue=radialRainbow(r,inner,outer)*(.95+hot);
   vec3 localV=localPoint(tangent,axis),orbital=unit(vec3(q.z,0,-q.x));
   float beta=min(.65,sqrt(1.0/max(r,2.0)));
   float doppler=1.0/(1.0+beta*dot(orbital,unit(localV)));
@@ -800,7 +802,7 @@ vec3 bodySurface(vec3 normal,vec3 rd,vec3 tint,float type,vec4 properties,vec3 l
  vec3 n=normal;n.xz=rot(uTime*.07*properties.w)*n.xz;
  float grain=fbm(n*9.0+vec3(0,(type>1.5&&type<2.5?uStellarTime:uTime)*.015,0)),light=max(dot(normal,lightDirection),0.0);
  if(type>1.5&&type<2.5){
-  ${brain?`if(properties.x>11.5&&properties.x<12.5&&uSpectrum==0){
+  ${brain||toroid?`if(properties.x>11.5&&properties.x<12.5&&uSpectrum==0){
    // Convection mottling and bright magnetic lanes on the magnified Helios.
    float broad=fbm(n*4.8+vec3(1.7,.8,2.9));
    float field=fbm(n*15.+vec3(broad*2.,1.7,3.5));
@@ -858,12 +860,33 @@ ${brain?BRAIN_GLSL:''}
 ${kardashev&1?EARTH_NETWORK_GLSL:''}
 ${kardashev&2?SOLAR_NETWORK_GLSL:''}
 ${rings?`
+// First positive intersection with a finite annulus in outer-radius units.
+float annulusWall(vec3 ro,vec3 rd,float r,float h,float nearest){
+ float d2=dot(rd.xz,rd.xz);if(d2<1e-12)return nearest;
+ float crossRay=ro.x*rd.z-ro.z*rd.x,disc=d2*r*r-crossRay*crossRay;
+ if(disc<0.0)return nearest;
+ vec2 roots=(-dot(ro.xz,rd.xz)+vec2(-1.,1.)*sqrt(disc))/d2;
+ for(int i=0;i<2;i++){float t=i==0?roots.x:roots.y;if(t>.0000001&&t<nearest&&abs(ro.y+t*rd.y)<=h)nearest=t;}
+ return nearest;
+}
 vec4 annulusHit(vec3 ro,vec3 rd,vec3 tint,float type,vec4 properties,float maximum){
- if(abs(rd.y)<1e-8)return vec4(0,0,0,-1);
- float t=-ro.y/rd.y;
- if(t<.0000001||t>maximum)return vec4(0,0,0,-1);
+ float h=type<7.5?.5*properties.z:0.,nearest=-1.;
+ vec3 impact=cross(ro,rd);if(dot(impact,impact)>1.+h*h)return vec4(0,0,0,-1);
+ if(abs(rd.y)>1e-8){
+  float top=rd.y<0.?h:-h;
+  float face=(top-ro.y)/rd.y;
+  if(face<=.0000001&&abs(ro.y)<=h)face=(-top-ro.y)/rd.y;
+  float r=length(ro.xz+face*rd.xz);
+  if(face>.0000001&&face<=maximum&&r>=properties.y&&r<=1.)nearest=face;
+ }
+ if(h>0.&&(nearest<0.||abs(ro.y)<=h)){
+  float limit=nearest>0.?nearest:maximum,tWall=annulusWall(ro,rd,1.,h,limit);
+  tWall=annulusWall(ro,rd,properties.y,h,tWall);
+  if(tWall<limit)nearest=tWall;
+ }
+ if(nearest<0.)return vec4(0,0,0,-1);
+ float t=nearest;
  vec3 hit=ro+rd*t;float radius=length(hit.xz);
- if(radius<properties.y||radius>1.0)return vec4(0,0,0,-1);
  float angle=atan(hit.z,hit.x)+uTime*.02;
  float particle=noise(vec3(hit.x*73.0,hit.z*73.0,properties.x*11.0));
  float grain=type>7.5?particle:.72+.28*particle;
@@ -882,7 +905,7 @@ vec3 coronaRay(vec3 ro,vec3 rd,float maximum,vec3 tint,vec4 properties){
  if(uSpectrum==5)return vec3(0);
  float t=clamp(-dot(ro,rd),0.0,maximum),r=length(ro+rd*t);
  if(r<.98||r>4.0||properties.z<=0.0)return vec3(0);
- ${brain?`if(properties.x>11.5&&properties.x<12.5&&uSpectrum==0){
+ ${brain||toroid?`if(properties.x>11.5&&properties.x<12.5&&uSpectrum==0){
   // Truncate the emitting column at the first solid hit, so a foreground
   // girder blocks both the photosphere and the corona behind it.
   float along=-dot(ro,rd),gate=smoothstep(-1.5,.25,maximum-along);
@@ -1075,7 +1098,7 @@ vec4 astronomicalInspector(vec3 worldRay,vec4 focus){
   vec3 origin=(focus.xyz-obj.xyz+relativeEye)/radius;
   vec3 localOrigin=planetFrame(origin,profile),localRay=planetFrame(worldRay,profile);
   ${rings?`if(type>6.5&&type<8.5){
-   vec4 ring=${toroid?'uBodyParams[j].x>7.5?toroidHit(origin,worldRay,uBodyParams[j].y,1e24):':''}${kardashev&2?'uBodyParams[j].x>6.5?solarNetworkHit(origin,worldRay,uBodyParams[j].y,1e24):':''}${kardashev&1?'uBodyParams[j].x>5.5?earthNetworkHit(origin,worldRay,uBodyParams[j].y,1e24):':''}${brain?'uBodyParams[j].x>4.5?brainHit(origin,worldRay,uBodyParams[j].y,uBodyParams[j].z,1e24):':''}${swarm?'uBodyParams[j].x>3.5?vec4(0,0,0,-1):uBodyParams[j].x>2.5?collectorHit(origin,worldRay,uBodyParams[j].y,1e24):':''}annulusHit(localOrigin,localRay,uColors[j].rgb,type,uBodyParams[j],1e24);
+   vec4 ring=${toroid?'uBodyParams[j].x>7.5?toroidHit(origin,worldRay,uBodyParams[j].y,1e24):':''}${kardashev&2?'uBodyParams[j].x>6.5?solarNetworkHit(origin,worldRay,uBodyParams[j].y,1e24):':''}${kardashev&1?'uBodyParams[j].x>5.5?earthNetworkHit(origin,worldRay,uBodyParams[j].y,1e24):':''}${brain?'uBodyParams[j].x>4.5?brainHit(origin,worldRay,uBodyParams[j].y,uBodyParams[j].z,1e24,origin):':''}${swarm?'uBodyParams[j].x>3.5?vec4(0,0,0,-1):uBodyParams[j].x>2.5?collectorHit(origin,worldRay,uBodyParams[j].y,1e24):':''}annulusHit(localOrigin,localRay,uColors[j].rgb,type,uBodyParams[j],1e24);
    float distance=ring.w*radius;
    if(ring.w>=0.0&&distance<ringNearest){ringNearest=distance;ringColor=${toroid||swarm||brain||kardashev?'uBodyParams[j].x>2.5?ring.rgb:':''}ringPlanetShadow(ring.rgb,uObserver+worldRay*distance,obj);ringFound=true;
     float density=.3+.7*noise(vec3(length((localOrigin+localRay*ring.w).xz)*137.0,4,1));
@@ -1181,11 +1204,12 @@ vec4 objectHit(vec3 p,vec3 previous,vec3 tangent,out float fraction,inout float 
    float along=max(b,-root-.01),advance=along-b;
    vec3 origin=cross(rd,offAxis)+rd*along;
    float limit=min(maximum-advance,root-along);
-   vec4 props=uBodyParams[j],hit=dysonSurfaceHit(origin,rd,maximum-advance,props.x,props.w>.5&&props.w<1.5);
+   vec4 props=uBodyParams[j],hit=dysonSurfaceHit(origin,rd,maximum-advance,props.x,props.w>.5&&props.w<1.5,props.z);
    float roof=-1.0;
    // The twelve high bits identify roof layers; the low bits still identify
    // ordinary bodies. A transparent canopy must NEVER hide its own garden floor.
-   if((hit.w<0.0||dot(hit.xyz,rd)>0.0)&&mod(floor(transparentMask/exp2(float(j+12))),2.0)<.5){
+   bool frameOnly=props.x>0.&&props.w<.5;
+   if(!frameOnly&&(hit.w<0.0||dot(hit.xyz,rd)>0.0)&&mod(floor(transparentMask/exp2(float(j+12))),2.0)<.5){
     roof=dysonRoofHit(origin,rd,hit.w<0.0?limit:min(limit,hit.w),props.x);
    }
    if(roof<0.0&&hit.w<0.0)continue;
@@ -1194,16 +1218,17 @@ vec4 objectHit(vec3 p,vec3 previous,vec3 tangent,out float fraction,inout float 
    float footprint=length((uObserver-obj.xyz)/obj.w-point)/max(uResolution.y,1.0);
    if(roof>=0.0){
     vec4 glass=dysonGlazing(point,rd,props,footprint);color=glass.rgb;alpha*=glass.a;transparencyLayer=j+12;
-   }else color=dysonShade(hit.xyz,rd,props,color,footprint);
+   }else if(frameOnly&&dot(hit.xyz,rd)<0.)color=vec3(.49,.64,.75)*(.55+.5*abs(dot(hit.xyz,normalize(vec3(-.4,.8,.45)))));
+   else color=dysonShade(hit.xyz,rd,props,color,footprint);
   }else `:''}${rings?`if(type>6.5&&type<8.5){
    vec3 localOrigin=planetFrame(ro,surfaceProfile(uBodyParams[j],uBodyShape[j],type)),localDirection=planetFrame(rd,surfaceProfile(uBodyParams[j],uBodyShape[j],type));
-   vec4 ring=${toroid?'uBodyParams[j].x>7.5?toroidHit(ro,rd,uBodyParams[j].y,maximum):':''}${kardashev&2?'uBodyParams[j].x>6.5?solarNetworkHit(ro,rd,uBodyParams[j].y,maximum):':''}${kardashev&1?'uBodyParams[j].x>5.5?earthNetworkHit(ro,rd,uBodyParams[j].y,maximum):':''}${brain?'uBodyParams[j].x>4.5?brainHit(ro,rd,uBodyParams[j].y,uBodyParams[j].z,maximum):':''}${swarm?'uBodyParams[j].x>3.5?vec4(0,0,0,-1):uBodyParams[j].x>2.5?collectorHit(ro,rd,uBodyParams[j].y,maximum):':''}annulusHit(localOrigin,localDirection,color,type,uBodyParams[j],maximum);
+   vec4 ring=${toroid?'uBodyParams[j].x>7.5?toroidHit(ro,rd,uBodyParams[j].y,maximum):':''}${kardashev&2?'uBodyParams[j].x>6.5?solarNetworkHit(ro,rd,uBodyParams[j].y,maximum):':''}${kardashev&1?'uBodyParams[j].x>5.5?earthNetworkHit(ro,rd,uBodyParams[j].y,maximum):':''}${brain?'uBodyParams[j].x>4.5?brainHit(ro,rd,uBodyParams[j].y,uBodyParams[j].z,maximum,(uObserver-obj.xyz)/obj.w):':''}${swarm?'uBodyParams[j].x>3.5?vec4(0,0,0,-1):uBodyParams[j].x>2.5?collectorHit(ro,rd,uBodyParams[j].y,maximum):':''}annulusHit(localOrigin,localDirection,color,type,uBodyParams[j],maximum);
    if(ring.w<0.0)continue;t=ring.w;color=${toroid||swarm||brain||kardashev?'uBodyParams[j].x>2.5?ring.rgb:':''}ringPlanetShadow(ring.rgb,previous+rd*t*obj.w,obj);
    float density=.3+.7*noise(vec3(length((localOrigin+localDirection*t).xz)*137.0,4,1));
    alpha=${toroid||swarm||brain||kardashev?'uBodyParams[j].x>2.5?uBodyParams[j].w:':''}type>7.5?clamp(uBodyParams[j].w*.2,.01,.12):clamp(1.0-exp(-max(0.0,uBodyParams[j].w)*(.55+density*1.8)/max(.12,abs(localDirection.y))),0.0,.985);
   }else `:''}${cylinder?`if(type>16.5&&type<17.5){
    float along=max(b,-root-.01),advance=along-b;
-   vec4 hit=cylinderHit(cross(rd,offAxis)+rd*along,rd,maximum-advance,uBodyParams[j].x);
+   vec4 hit=cylinderHit(cross(rd,offAxis)+rd*along,rd,maximum-advance,uBodyParams[j].x,uBodyParams[j].y);
    if(hit.w<0.)continue;t=advance+hit.w;color=uSpectrum==5?vec3(dot(hit.rgb,vec3(.22,.68,.10))):hit.rgb;
   }else `:''}if(type>2.5){
    vec2 heading=uHeadings[j];
@@ -1280,7 +1305,7 @@ vec4 attachmentEmissionSegment(vec3 a,vec3 b,float pixelAngle){
     float ribbon=.40+.60*pow(.5+.5*sin(r*47.0+sin(angle*4.0)*2.0),3.0);
     if(params.x>5.5)flow*=ribbon;
     opacity=clamp((1.0-exp(-max(.01,params.z)*flow*.8/max(.2,abs(unit(delta).y))))*smoothstep(inner,inner+.035,r)*(1.0-smoothstep(.94,1.0,r)),0.0,.95);
-    if(uBodyShape[j].z>1.5)tint=.52+.48*cos(6.28318530718*(vec3(0,.333,.667)+r*2.2-sin(angle)*.12));
+    if(uBodyShape[j].z>1.5)tint=radialRainbow(r,inner,1.0);
     emission=tint*(.45+hot*2.0)*opacity;
     if(uSpectrum==1)emission=thermalPalette(.2+.7*hot)*opacity;
     if(uSpectrum==2)emission=vec3(.2,.64,1.3)*pow(hot,5.0)*opacity;

@@ -17,7 +17,7 @@ try{
  let previousDrumAxis=null,previousWheelAxis=null,sawWheelTurnAtLatch=false;
  const appearances=new Map(),angle=x=>Math.acos(Math.min(1,Math.max(-1,x)))*180/Math.PI;
  let prevPose=null;
- let last='',observedRCS=false,observedMain=false,lastProper=-1;const stages=[],burns=new Set();
+ let last='',observedRCS=false,observedMain=false,lastProper=-1;const stages=[],events=[],burns=new Set();
  for(let i=0;i<=6000&&ports.length<3;i++){
   if(i)tick();
   const {phase,stationId,side,sample:s}=r.dockingMission,station=r.getFocusFrame(stationId),f=ship(),clock=r.getObjectClock(id);
@@ -48,7 +48,7 @@ try{
   assert.equal(r.driveId,id);
   if(s.docking){assert.equal(f.dockMainThrottle,0);assert.equal(r.getFlightState().throttle,0);if(norm(s.rcs)>0.02)observedRCS=true;}
   else if(s.mainThrustG>.1)observedMain=true;
-  if(phase!==last)stages.push(phase);if(phase==='transit')burns.add(s.phase);
+  if(phase!==last){stages.push(phase);events.push(i/10);}if(phase==='transit')burns.add(s.phase);
   if(phase==='transit')for(const p of r.objects.filter(o=>o.type==='planet')){const world=r.getFocusFrame(p.id);assert(norm(minus(world.position,f.position))>world.radius,'Transfer cannot cross a planetary surface');}
   if(phase==='docked'){
    if(last==='docked'){
@@ -68,7 +68,11 @@ try{
  }
  assert(sawWheelTurnAtLatch,'Wheel keeps rotating around the latched spherical hub');
  assert.deepEqual(ports,[[earthStop.targetId,-1],[neptuneStop.targetId,-1],[earthStop.targetId,-1]]);
- assert.deepEqual(stages.slice(0,11),['orbit','acquire','approach','docked','undock','depart','transit','orbit','acquire','approach','docked']);
+ assert.deepEqual(stages.slice(0,12),['orbit','acquire','approach','docked','undock','depart','departOrbit','transit','orbit','acquire','approach','docked']);
+ const event=i=>events[i];
+ assert(Math.abs(event(3)-event(1)-10)<.11,'Acquisition plus approach take ten seconds.');
+ assert(Math.abs(event(6)-event(4)-10)<.11,'Undocking plus jet clearance take ten seconds.');
+ assert(Math.abs(event(11)-event(3)-42.95)<.11,'Latch-to-latch travel includes a single working arc at each world.');
  assert([...burns].some(x=>/flip/i.test(x)),'Burn reversal must survive the presentation-time compression');
  assert.equal(r.getFlightSequence(id).legsCompleted,3);
  assert(observedRCS&&observedMain);

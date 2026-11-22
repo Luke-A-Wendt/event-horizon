@@ -133,6 +133,19 @@ export function parkedCameraFraming(r,orbit){
 }
 // Orbit controls remain centered on the vehicle; the default gaze points at
 // the instantaneous path tangent. User gestures release automatic placement.
+function parkingOrBurnFraming(r,orbit){
+ const fit=parkedCameraFraming(r,orbit),t=r.transfer;
+ if(!t?.radiusTransfer||orbit.craft.type!=='shuttle')return fit;
+ const velocity=r.objectById.get(t.craftId)?.flight?.velocity;
+ if(!velocity||Math.hypot(...velocity)<1e-8)return fit;
+ // Move smoothly from the limb to the flight path and back at circular insertion.
+ const edge=Math.min(t.elapsed,t.wallSeconds-t.elapsed),u=clamp(edge/Math.min(3,t.wallSeconds*.22),0,1),blend=u*u*(3-2*u);
+ const sight=unit(velocity),vertical=unit(sub(fit.up,mul(sight,dot(sight,fit.up))));
+ const eye=add(mul(sight,-Math.cos(.25)),mul(vertical,Math.sin(.25)));
+ const distance=fit.distance+(Math.max(fit.distance,5)-fit.distance)*blend;
+ const target=mul(vertical,distance*orbit.craft.radius*Math.sin(.215));
+ return {...fit,eye:directionMix(fit.eye,eye,blend),distance,targetOffset:mix(fit.targetOffset,target,blend)};
+}
 export function updateParkedCamera(r,focused){
  if(r.transfer?.active&&!(r.transfer.radiusTransfer&&r.transfer.craftId===focused?.id)||r.focusMode!=='track'){r.parkedCamera=null;return null;}
  const orbit=parkedOrbitGeometry(r,focused?.id);if(!orbit){r.parkedCamera=null;return null;}
@@ -153,7 +166,7 @@ export function updateParkedCamera(r,focused){
  if(Math.abs(sine)>1e-12||cosine<0){r.focusReferenceFrame.basis=r.focusReferenceFrame.basis.map(v=>rotate(v,axis,sine,cosine));guide.cameraAimOffset=rotate(guide.cameraAimOffset,axis,sine,cosine);if(guide.cameraTargetOffset)guide.cameraTargetOffset=rotate(guide.cameraTargetOffset,axis,sine,cosine);}
  const dt=clamp(now-guide.time,0,.1);guide.time=now;
  if(!guide.released&&dt>0){
-  const fit=parkedCameraFraming(r,orbit),blend=1-Math.exp(-dt*3),follow=(a,b)=>directionMix(a,b,Math.min(blend,dt*.8/Math.max(.000001,Math.acos(clamp(dot(a,b),-1,1)))));
+  const fit=parkingOrBurnFraming(r,orbit),blend=1-Math.exp(-dt*3),follow=(a,b)=>directionMix(a,b,Math.min(blend,dt*.8/Math.max(.000001,Math.acos(clamp(dot(a,b),-1,1)))));
   // Radius changes continuously on the spiral. Follow its changing limb
   // directly, without the angular lag used when acquiring a new camera pose.
   const eye=r.transfer?.radiusTransfer?fit.eye:follow(transform(r.focusReferenceFrame.basis,localEye),fit.eye),up=fit.up,world=viewBasis(eye,up);

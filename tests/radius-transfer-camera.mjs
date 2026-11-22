@@ -23,13 +23,13 @@ try{
   if(flying){
    assert(render.transfer.radiusTransfer);assert(render.transfer.wallSeconds>=10,'The radius change includes the time needed to turn between burns');
    assert(render.parkedCamera&&!render.parkedCamera.released,'Orbital guide remains in control');
-   const orbit=parkedOrbitGeometry(render,craft.id),desired=parkedCameraFraming(render,orbit).eye;
-   assert(dot(render.cameraFrame.forward,desired)<-.9999,'Sightline stays on the same orbital limb during both burns');
+   const orbit=parkedOrbitGeometry(render,craft.id),t=render.transfer,speed=Math.hypot(...craft.flight.velocity);
+   if(t.elapsed>=3&&t.wallSeconds-t.elapsed>=3)assert(dot(render.cameraFrame.forward,craft.flight.velocity)/speed>.98,'The transfer view follows velocity throughout either radius change');
    assert(Math.abs(dot(render.cameraFrame.right,orbit.normal))<1e-6,'Screen stays level through the retrograde nose flip');
    samples++;if(!wasFlying)departures++;
   }else if(wasFlying){arrivals++;assert(render.parkedCamera,'Camera stays on the next circle');}
   wasFlying=flying;
  }
  assert.equal(departures,2);assert.equal(arrivals,2);assert(samples>=395);
- console.log('PASS: exact full laps, paced bidirectional radius burns and continuous level limb camera');
+ console.log('PASS: exact full laps, paced bidirectional radius burns and level velocity-follow camera');
 }finally{render.dispose();}

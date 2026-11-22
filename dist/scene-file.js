@@ -24,8 +24,8 @@ const enumeration=(v,values,path)=>check(values.includes(v),`${path} is not a su
 const vector=(v,path)=>{check(Array.isArray(v)&&v.length===3,`${path} must have three numbers.`);v.forEach((x,i)=>number(x,`${path}[${i}]`));};
 const basis=(v,path)=>{check(Array.isArray(v)&&v.length===3,`${path} must have three axes.`);v.forEach((a,i)=>vector(a,`${path}[${i}]`));for(let i=0;i<3;i++){check(Math.abs(v[i].reduce((s,x)=>s+x*x,0)-1)<.01,`${path} axes must have unit length.`);for(let j=0;j<i;j++)check(Math.abs(v[i].reduce((s,x,k)=>s+x*v[j][k],0))<.01,`${path} axes must be perpendicular.`);}};
 const id=(v,path)=>{string(v,path,80);check(/^[A-Za-z][A-Za-z0-9_-]*$/.test(v),`${path} must be a simple object identifier.`);};
-const DISPLAY=['paused','speed','exposure','grid','lensing','horizonGuide','annotations','metrics','autoRotate','spectrum','viewMode','objectScaleMode','warpGrid','warpGridOnly','velocityArrows','sceneGridDensity','warpGridDensity'];
-const OPTIONAL_DISPLAY=new Set(['warpGridOnly','velocityArrows','sceneGridDensity','warpGridDensity']);
+const DISPLAY=['paused','speed','exposure','grid','lensing','horizonGuide','annotations','destinationOnlyLabels','metrics','autoRotate','spectrum','viewMode','objectScaleMode','warpGrid','warpGridOnly','velocityArrows','sceneGridDensity','warpGridDensity'];
+const OPTIONAL_DISPLAY=new Set(['destinationOnlyLabels','warpGridOnly','velocityArrows','sceneGridDensity','warpGridDensity']);
 const COMPONENTS={
  primary:['mass','spin','whiteHole','primaryName','primaryTilt','primaryAzimuth'],
  secondary:['secondaryWhiteHole','binaryRatio','binarySeparation','secondarySpin','secondaryName','secondaryTilt','secondaryAzimuth'],
@@ -157,7 +157,7 @@ export function parseScene(text){
  if(doc.scene==='bridge-earth-proxima')doc.scene='bridge';
  // Keep existing local files usable without exposing the retired solar atlas as a scene.
  const preset=SCENE_PRESETS.find(p=>p.id===doc.scene)||(doc.scene==='kardashev-2'?{patch:{}}:null);check(!!preset,'Unknown scene preset.');fields(doc.display,['quality',...DISPLAY],'display');enumeration(doc.display.quality,['adaptive','low','medium','high','ultra'],'display.quality');
- const state={},objects=[],nodes=new Map(),orders=new Set();for(const key of DISPLAY){if(OPTIONAL_DISPLAY.has(key)&&!own(doc.display,key)){state[key]=key==='warpGridOnly'?false:(preset.patch[key]??DEFAULTS[key]);continue;}check(own(doc.display,key),`display.${key} is required.`);stateValue(key,doc.display[key],`display.${key}`);state[key]=doc.display[key];}
+ const state={},objects=[],nodes=new Map(),orders=new Set();for(const key of DISPLAY){if(OPTIONAL_DISPLAY.has(key)&&!own(doc.display,key)){state[key]=key==='warpGridOnly'||key==='destinationOnlyLabels'?false:(preset.patch[key]??DEFAULTS[key]);continue;}check(own(doc.display,key),`display.${key} is required.`);stateValue(key,doc.display[key],`display.${key}`);state[key]=doc.display[key];}
  const compactMass=node=>node?.id==='primary'?state.mass*1e6:node?.id==='secondary'?state.mass*1e6*state.binaryRatio:Number(node?.properties?.massSolar)||10;
  const smallCompact=(child,parent)=>compactSatellite(child?.type,compactMass(child),parent?.type,compactMass(parent));
  function visit(node,parent=null,depth=0){check(depth<=MAX_DEPTH&&nodes.size<MAX_OBJECTS+10,'The object tree is too large or too deep.');fields(node,['id','type','name','order','properties','children'],'object');id(node.id,'object.id');check(!nodes.has(node.id),`Duplicate object id ${node.id}.`);check(Array.isArray(node.children),`${node.id}.children must be a list.`);nodes.set(node.id,{...node,parentId:parent?.id||null});

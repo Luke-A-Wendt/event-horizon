@@ -13,7 +13,7 @@ import {SCENE_PRESETS} from '../dist/config.js';
 import {PLANET_TEXTURE_DATA} from '../dist/planet-texture-data.js';
 const out=process.argv[2];if(!out)throw Error('Usage: node scripts/thumbnail-snapshot.mjs /absolute/output-directory [scene] [command|latched (ferry) or hub (station)]');
 await mkdir(out,{recursive:true});
-const dependencies=['config','janus-solar-tour','janus-local','janus-scene','janus-charts','janus-maneuver','janus-exchange','janus-pod-glsl','janus-hull','janus-mesh','janus-aperture','janus-aperture-glsl','janus-lens','scene-catalog','warp-studies','solar-catalog','objects','renderer','shaders','bridge-glsl','proxima-gate-layout','paired-gate-flight','bridge-gate-glsl','bridge-gate-layout','craft-glsl','meridian-glsl','meridian-port','meridian-rcs','docking-flight','station-docking','contact-playback','flight-attitude','flight-sequence','travel-routes','travel-math','weak-field-glsl','meridian-radiation','heritage-shuttle-glsl','habitat-glsl','legacy-enterprise-glsl','habitat-spin','dyson-glsl','garden-waters','kardashev-earth','kardashev-solar','matrioshka','oneill-cylinder','oneill-cylinder-glsl','dyson','dyson-swarm','toroid-swarm','shkadov','grid-glsl','geometry-tracer','geometry-rain','annotations','velocity-arrows','planet-glsl','warp-glsl','warp-grid-profile','warp-plumes','warp-thrusters','flight-dynamics','stellar-physics','pelagia-tide','pelagia-glsl','pelagia-geography','tidal-shape','planet-texture-data'];
+const dependencies=['config','janus-solar-tour','janus-local','janus-scene','janus-charts','janus-maneuver','janus-exchange','janus-pod-glsl','janus-hull','janus-mesh','janus-aperture','janus-aperture-glsl','janus-lens','scene-catalog','warp-studies','solar-catalog','objects','renderer','disc-rainbow','shaders','bridge-glsl','proxima-gate-layout','paired-gate-flight','bridge-gate-glsl','bridge-gate-layout','craft-glsl','meridian-glsl','meridian-port','meridian-rcs','docking-flight','station-docking','contact-playback','flight-attitude','flight-sequence','travel-routes','travel-math','weak-field-glsl','meridian-radiation','heritage-shuttle-glsl','habitat-glsl','legacy-enterprise-glsl','habitat-spin','dyson-glsl','garden-waters','kardashev-earth','kardashev-solar','matrioshka','oneill-cylinder','oneill-cylinder-glsl','dyson','dyson-swarm','toroid-swarm','shkadov','grid-glsl','geometry-tracer','geometry-rain','annotations','velocity-arrows','planet-glsl','warp-glsl','warp-grid-profile','warp-plumes','warp-thrusters','flight-dynamics','stellar-physics','pelagia-tide','pelagia-glsl','pelagia-geography','tidal-shape','planet-texture-data'];
 const hash=createHash('sha256');for(const name of dependencies)hash.update(await readFile(new URL('../dist/'+name+'.js',import.meta.url)));const sourceHash=hash.digest('hex');
 await writeFile(out+'/textures.json',JSON.stringify(PLANET_TEXTURE_DATA));
 const textureHash=createHash('sha256').update(JSON.stringify(PLANET_TEXTURE_DATA)).digest('hex');
@@ -117,7 +117,16 @@ for(const scene of SCENE_PRESETS.filter(s=>!process.argv[3]||s.id===process.argv
    }
   }
   if(!arrival)throw Error('Disc-edge thumbnail did not reach its orbital stop.');
- }else if(scene.id==='oneill-cylinder'&&process.argv[4]==='exterior'){
+ }else if(scene.id==='matrioshka-brain'&&!process.argv[4]){
+  for(const tier of r.objects.filter(o=>o.catalogId?.startsWith('brain-')))r.updateObject(tier.id,{dysonCutaway:.60});
+  r.cameraGuide=null;
+  r.target.yaw=-2.62;r.target.pitch=.21;r.target.focusDistance*=1.10;
+ }else if(scene.id==='dyson-garden'&&!process.argv[4]){
+  const shell=r.objects.find(o=>o.type==='dyson');r.updateObject(shell.id,{dysonCutaway:.60});
+  r.cameraGuide=null;r.target.yaw=-2.55;r.target.pitch=.12;
+  r.target.focusDistance=3.0*shell.radiusMeters/r.objects.find(o=>o.type==='star').radiusMeters;
+ }else if(scene.id==='oneill-cylinder'&&(!process.argv[4]||process.argv[4]==='exterior')){
+  if(!process.argv[4])r.updateObject(r.objects[0].id,{dysonCutaway:.60});
   r.focusTarget(r.objects.find(o=>o.type==='cylinder').id,'track',false,true);
   r.target.yaw=-.98;r.target.pitch=.32;r.target.focusDistance=2.4;
  }else if(['ringworld','dyson-garden'].includes(scene.id)&&process.argv[4]==='garden'){

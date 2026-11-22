@@ -61,7 +61,8 @@ try{
  for(const expected of [false,true]){$('flightPlanLoop').click();assert.equal(q().loop,expected);}
  $('vehiclePlaylistDialog').close();
  assert.equal(engine.focusId,vessel.id);assert.match($('dockStage').textContent,/Lower port/);
- for(let i=0;i<480;i++){
+ // Allow the two extra velocity-matching burns and paced hub alignment.
+ for(let i=0;i<720;i++){
   advanceDock(engine,.5);flightUi.update();const status=engine.getDockingState(vessel.id);assert(status);
   phases.add(status.phase+':'+status.stationName);
   if(status.phase==='transit'){assert.equal($('dockRangeLabel').textContent,'Station range');assert.notEqual($('dockGap').textContent,'—');}

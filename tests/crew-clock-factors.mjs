@@ -76,6 +76,13 @@ try {
  const tiny=2.8e-16;r.getObjectClock=()=>({rateFactor:1+tiny,gravityFactor:1+tiny,gravityExcess:tiny,kinematicFactor:1,kinematicExcess:0,properSeconds:0,lagSeconds:0});
  ui.update();assert.equal($('pilotDilationRate').textContent,'280 as/s');assert.equal($('pilotGravityFactor').textContent,'Gravity 280 as/s');delete r.getObjectClock;
  for(const [sec,expected] of [[0,'00:00:00.0'],[1.2,'00:00:01.2'],[86399.99,'23:59:59.9'],[86400,'1 d 00:00:00'],[90061,'1 d 01:01:01'],[360*86400,'360 d 00:00:00'],[361*86400,'1y 1d 00:00:00'],[2119*86400+49291,'5y 319d 13:41:31']])assert.equal(formatProperClock(sec),expected);
+ for(const [seconds,calendar,face] of [[1,'','00:00:01.0'],[361*86400,'1y 1d ','00:00:00'],[1e14,formatProperClock(1e14),'']]){
+  r.getObjectClock=()=>({properSeconds:seconds,lagSeconds:0,rateFactor:1});ui.update();
+  assert.equal($('clockCalendar').hidden,!calendar);
+  assert.equal($('clockCalendar').textContent,calendar);
+  assert.equal($('clockFace').textContent,face);
+ }
+ delete r.getObjectClock;
  assert(!formatProperClock(1e50).includes('Infinity'));
 
 }finally{ui.dispose();r.dispose();}

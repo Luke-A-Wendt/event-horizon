@@ -28,10 +28,14 @@ assert(dysonHabitableRadius({type:'star',starStyle:'dwarf',...STELLAR_CLASSES.dw
 assert(dysonHabitableRadius({type:'star',starStyle:'supergiant',...STELLAR_CLASSES.supergiant})>100*ASTRONOMICAL_UNIT);
 const front=dysonShellHit([0,0,3],[0,0,-1],0);
 assert.equal(front.t,2);assert.equal(front.inside,false);
-const far=dysonShellHit([0,0,3],[0,0,-1],.38);
-assert.equal(far.t,4);assert.equal(far.inside,true);
-assert.equal(dysonShellHit([0,0,0],[0,0,1],.38),null,'Cutaway opens to the sky from inside');
-assert.equal(dysonShellHit([0,0,0],[0,0,-1],.38).inside,true);
+assert.equal(dysonShellHit([0,0,3],[0,0,-1],.38).t,2,'Near equatorial support hoop remains');
+for(const side of [-1,1]){
+ const lon=.25*Math.PI/6,lat=3.4*Math.PI/8;
+ const dir=[Math.sin(lat)*Math.cos(lon),Math.cos(lat),side*Math.sin(lat)*Math.sin(lon)];
+ assert(dysonShellHit([0,0,0],dir,.38).inside,'Rear interior panels are visible');
+ assert(dysonShellHit(dir.map(x=>3*x),dir.map(x=>-x),.38).inside,'Near open bay reveals the rear interior');
+ assert(dysonShellHit([0,0,0],dir,0),'Turning cutaway off restores the plating');
+}
 assert.equal(dysonShellHit([0,0,3],[0,1,0]),null);
 assert.equal(dysonShellHit([0,0,3],[0,0,-1],0,1),null,'Foreground segment cannot intersect distant shell');
 

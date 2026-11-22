@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {fixture} from './render-fixture.mjs';
+import {makePreset} from '../dist/config.js';
 import {BlackHoleRenderer} from '../dist/renderer.js';
 import {CpuRenderer,cpuVisibleBodies} from '../dist/cpu-renderer.js';
 import {CpuCommandCanvas} from '../dist/cpu-commands.js';
@@ -23,6 +24,10 @@ for(const Renderer of [BlackHoleRenderer,CpuRenderer]){
  if(Renderer===CpuRenderer)canvas.getBoundingClientRect=f.canvas.getBoundingClientRect;
  const r=new Renderer(canvas,{autoStart:false,bindControls:false});r.loadScene('gravity-anomaly');r.fillHoles();r.fillObjects();r.updateCameraFrame();
  const anomaly=r.objects.find(o=>o.type==='anomaly'),ship=r.objects.find(o=>o.type==='enterprise');assert(anomaly&&ship&&r.state.warp&&r.state.grid);
+ assert.equal(ship.hullModel,'classicEnterprise');
+ const clouds=makePreset('warp-cruise');
+ for(const key of Object.keys(clouds).filter(k=>k.startsWith('nebula')))assert.equal(r.state[key],clouds[key],key);
+
  assert.equal(r.anomalyFrames.length,1);assert.equal(r.anomalyFrames[0].massSolar,0);assert(!r.renderObjects.some(o=>o.type==='anomaly'));
  assert(!cpuVisibleBodies(r.objectFrames,r.cameraFrame,480,320).some(o=>o.type==='anomaly'),'An anomaly has no opaque surface');
  r.focusTarget(anomaly.id,'track');r.zoom(.01);assert(r.target.focusDistance<1,'A region is not a solid camera barrier');r.focusTarget(ship.id,'track');

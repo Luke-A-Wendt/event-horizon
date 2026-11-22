@@ -7,16 +7,17 @@ export function savedDockingMission(m){
  if(!m)return null;
  const p=m.plan;
  const plan=!p?null:p.local?{local:true,...(p.localTurnSeconds?{localTurnSeconds:p.localTurnSeconds}:{}),station:{...pose(p.station),side:p.station.side},start:pose(p.start),nodes:p.nodes,spans:p.spans,relativeVelocity:p.relativeVelocity,craftRadius:p.craftRadius}:
- {...(p.profile?{profile:p.profile}:{}),...(p.playback?{playback:p.playback}:{}),legs:p.legs.map(q=>({T:q.T,a:pose(q.a),b:pose(q.b)})),craftRadius:p.craftRadius};
- return {...(m.paced?{paced:true}:{}),...(m.playlist!==undefined?{playlist:m.playlist}:{loop:m.loop,index:m.index,route:m.route}),...(m.wallElapsed!==undefined?{wallElapsed:m.wallElapsed}:{}),craftId:m.craftId,stationId:m.stationId,phase:m.phase,elapsed:m.elapsed,side:m.side,startSceneTime:m.startSceneTime,duration:m.duration,viewSeconds:m.viewSeconds,sample:m.sample,plan};
+ {...(p.profile?{profile:p.profile}:{}),...(p.playback?{playback:p.playback}:{}),legs:p.legs.map(q=>({T:q.T,a:pose(q.a),b:pose(q.b),...(q.coastOnly?{coastOnly:q.coastOnly}:{})})),craftRadius:p.craftRadius};
+ return {...(m.ferry?{ferry:true}:{}),...(m.paced?{paced:true}:{}),...(m.playlist!==undefined?{playlist:m.playlist}:{loop:m.loop,index:m.index,route:m.route}),...(m.wallElapsed!==undefined?{wallElapsed:m.wallElapsed}:{}),craftId:m.craftId,stationId:m.stationId,phase:m.phase,elapsed:m.elapsed,side:m.side,startSceneTime:m.startSceneTime,duration:m.duration,viewSeconds:m.viewSeconds,sample:m.sample,plan};
 }
 export function readDockingMission(m,byId,driven,v){
  if(m===null)return null;
  const {check,fields,number,vector,basis,enumeration,string}=v;
  const time=(t,path,lo=0)=>number(t,path,lo,1e20),station=s=>check(byId.get(s)?.type==='habitat','Docking needs an existing Garden Station.'),side=s=>enumeration(s,[-1,1],'docking side');
  const validatePose=(o,at,port=false)=>{fields(o,['position','velocity','basis','radiusMeters',...(port?['side']:[])],at);vector(o.position,at+'.position');vector(o.velocity,at+'.velocity');basis(o.basis,at+'.basis');if(port)side(o.side);if(port||Object.hasOwn(o,'radiusMeters'))number(o.radiusMeters,at+'.radiusMeters',1e-5,1e18);};
- fields(m,['wallElapsed','paced','playlist','craftId','stationId','side','loop','route','index','phase','elapsed','startSceneTime','duration','viewSeconds','plan','sample'],'dockingMission');
+ fields(m,['wallElapsed','ferry','paced','playlist','craftId','stationId','side','loop','route','index','phase','elapsed','startSceneTime','duration','viewSeconds','plan','sample'],'dockingMission');
  check(hullType(byId.get(m.craftId))==='shuttle'&&driven===m.craftId,'Docking guidance must belong to the controlled Meridian.');
+ if(m.ferry!==undefined)check(m.ferry===true,'Invalid ferry cadence.');
  if(m.paced!==undefined)check(m.paced===true,'Invalid docking presentation clock.');
  if(Object.hasOwn(m,'wallElapsed'))time(m.wallElapsed,'docking playback time');if(Object.hasOwn(m,'playlist'))check(typeof m.playlist==='boolean','Invalid playlist docking owner.');
  station(m.stationId);side(m.side);enumeration(m.phase,['approach','docked','undock','transit','orbit','acquire','depart','departOrbit'],'docking phase');
@@ -48,10 +49,22 @@ export function readDockingMission(m,byId,driven,v){
   for(const point of p.nodes)vector(point,'rendezvous gate');for(const dt of p.spans)time(dt,'gate duration',1e-6);
   p={...p,duration:p.spans.reduce((a,b)=>a+b,0)};
  }else{
-  fields(p,['legs','craftRadius','profile','playback'],'station transfer');if(p.profile!==undefined)enumeration(p.profile,['flip1g'],'station transfer profile');check(Array.isArray(p.legs)&&p.legs.length>=1&&p.legs.length<=3,'Invalid station transfer legs.');
-  if(p.playback){check(p.profile==='flip1g','Only a powered rendezvous can carry a transfer playback clock.');const keys=['departureRadius','arrivalRadius','departureStationRadius','arrivalStationRadius'];fields(p.playback,keys,'docking presentation');for(const key of keys)number(p.playback[key],key,0,1e18);}
+  fields(p,['legs','craftRadius','profile','playback'],'station transfer');if(p.profile!==undefined)enumeration(p.profile,['flip1g'],'station transfer profile');check(Array.isArray(p.legs)&&p.legs.length>=1&&p.legs.length<=5,'Invalid station transfer legs.');
+  if(p.playback){check(p.profile==='flip1g','Only a powered rendezvous can carry a transfer playback clock.');const keys=['departureRadius','arrivalRadius','departureStationRadius','arrivalStationRadius'];fields(p.playback,[...keys,'departureWorld','arrivalWorld','ferry'],'docking presentation');
+   if(p.playback.ferry!==undefined){
+    check(p.playback.ferry===true&&p.playback.departureWorld&&p.playback.arrivalWorld,'Invalid ferry timing.');
+    check(p.legs.length===5&&p.legs.every((leg,i)=>leg?.coastOnly=== (i===0?'departure':i===4?'arrival':undefined)),'Invalid ferry leg order.');
+   }
+   for(const world of [p.playback.departureWorld,p.playback.arrivalWorld])if(world){
+    fields(world,['position','velocity','epoch','radius'],'docking encounter');vector(world.position,'encounter origin');vector(world.velocity,'encounter velocity');number(world.epoch,'encounter epoch',0,1e20);number(world.radius,'encounter radius',1e-6,1e18);
+   }
+   for(const key of keys)number(p.playback[key],key,0,1e18);}
   const rebuild=p.profile==='flip1g'?makeDockingLeg:makeLegacyDockingLeg;
-  const legs=p.legs.map(q=>{fields(q,['a','b','T'],'station transfer leg');validatePose(q.a,'transfer start');validatePose(q.b,'transfer end');time(q.T,'leg duration',1e-4);return rebuild(q.a,q.b,q.T);});
+  const legs=p.legs.map(q=>{fields(q,['a','b','T','coastOnly'],'station transfer leg');if(q.coastOnly!==undefined)check(['arrival','departure'].includes(q.coastOnly)&&p.playback?.ferry,'Invalid tangent coast.');validatePose(q.a,'transfer start');validatePose(q.b,'transfer end');time(q.T,'leg duration',1e-4);if(q.coastOnly){
+    const drift=q.a.position.map((x,i)=>x+q.a.velocity[i]*q.T-q.b.position[i]);
+    check(Math.hypot(...drift)<.05&&q.a.velocity.every((x,i)=>Math.abs(x-q.b.velocity[i])<1e-6),'Invalid inertial coast.');
+   }
+   return rebuild(q.a,q.b,q.T,q.coastOnly);});
   p={...p,legs,duration:legs.reduce((n,q)=>n+q.T,0),target:legs[legs.length-1].b};
  }
  check(Math.abs(p.duration-m.duration)<=1e-8*Math.max(1,m.duration),'Rendezvous duration disagrees with its route.');return {...m,plan:p};
